@@ -1,0 +1,117 @@
+rules:
+  # Bronze
+  action-setup: done
+  appropriate-polling:
+    status: exempt
+    comment: Integration uses local storage with calculated iot_class; no external polling.
+  brands:
+    status: exempt
+    comment: Custom HACS integration, not in HA brands registry.
+  common-modules: done
+  config-flow-test-coverage: done
+  config-flow: done
+  dependency-transparency: done
+  docs-actions:
+    status: exempt
+    comment: Custom integration; service docs in README.
+  docs-high-level-description:
+    status: exempt
+    comment: Custom integration; described in README.
+  docs-installation-instructions:
+    status: exempt
+    comment: Custom integration; install instructions in README.
+  docs-removal-instructions:
+    status: exempt
+    comment: Standard HA integration removal applies.
+  entity-event-setup: done
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure:
+    status: exempt
+    comment: No external service to test; config flow only collects a list name.
+  test-before-setup:
+    status: exempt
+    comment: Local storage only; no external connection that could fail.
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions: done
+  config-entry-unloading: done
+  docs-configuration-parameters:
+    status: exempt
+    comment: No options flow; chores managed via service actions.
+  docs-installation-parameters:
+    status: exempt
+    comment: Custom integration; only parameter is the list name.
+  entity-unavailable:
+    status: exempt
+    comment: Entities use local storage; always available when integration is loaded.
+  integration-owner: done
+  log-when-unavailable:
+    status: exempt
+    comment: No external dependency that could become unavailable.
+  parallel-updates: done
+  reauthentication-flow:
+    status: exempt
+    comment: No credentials; integration uses local storage only.
+  test-coverage: done
+
+  # Gold
+  devices: done
+  diagnostics: done
+  discovery-update-info:
+    status: exempt
+    comment: No discoverable devices or services.
+  discovery:
+    status: exempt
+    comment: No discoverable devices or services.
+  docs-data-update:
+    status: exempt
+    comment: Custom integration; coordinator details in CLAUDE.md.
+  docs-examples:
+    status: exempt
+    comment: Custom integration; examples in README.
+  docs-known-limitations:
+    status: exempt
+    comment: Custom integration; no known limitations to document.
+  docs-supported-devices:
+    status: exempt
+    comment: No external devices; integration manages local data.
+  docs-supported-functions:
+    status: exempt
+    comment: Custom integration; service reference in README.
+  docs-troubleshooting:
+    status: exempt
+    comment: Custom integration; troubleshooting in README.
+  docs-use-cases:
+    status: exempt
+    comment: Custom integration; use cases described in README.
+  dynamic-devices:
+    status: exempt
+    comment: Single service device per config entry; no dynamic device discovery.
+  entity-category:
+    status: exempt
+    comment: All entities are primary; no diagnostic or config entities.
+  entity-device-class:
+    status: exempt
+    comment: Sensor entities use enum state class; no standard device class applies.
+  entity-disabled-by-default:
+    status: exempt
+    comment: All entities are user-created via services; none should be disabled by default.
+  entity-translations:
+    status: todo
+    comment: Sensor entity state translations not yet implemented.
+  exception-translations:
+    status: todo
+    comment: Service exception messages not yet translated.
+  icon-translations:
+    status: todo
+    comment: No icons.json with translation keys yet.
+  reconfiguration-flow: done
+  repair-issues:
+    status: exempt
+    comment: No repairable issues identified.
+  stale-devices:
+    status: exempt
+    comment: Single service device per config entry; removed with entry.

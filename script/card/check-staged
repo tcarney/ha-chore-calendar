@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# script/card/check-staged: Pre-commit hook to verify card build is fresh
+#
+# If card/src/ files are staged, checks that the built JS in www/ is also
+# staged. Prevents committing source changes without rebuilding.
+#
+# Usage (called by pre-commit):
+#   ./script/card/check-staged
+
+set -euo pipefail
+
+# Only check if card source files are being committed.
+if ! git diff --cached --name-only | grep -q "^card/src/"; then
+    exit 0
+fi
+
+WWW="custom_components/chore_calendar/www/chore-calendar-card.js"
+
+if ! git diff --cached --name-only | grep -q "^${WWW}$"; then
+    echo "card/src/ changed but www/chore-calendar-card.js is not staged."
+    echo "Run: ./script/card/build && git add ${WWW}"
+    exit 1
+fi

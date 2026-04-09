@@ -1,0 +1,387 @@
+"""Service action handlers for Chore Calendar."""
+
+from __future__ import annotations
+
+from typing import Any, cast
+
+import voluptuous as vol
+
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.util import dt as dt_util, slugify as slugify_util
+
+from .const import (
+    ATTR_ASSIGNED_TO,
+    ATTR_CHORE_ID,
+    ATTR_TRIGGER_ENTITY,
+    DOMAIN,
+    LOGGER,
+    SERVICE_COMPLETE_ITEM,
+    SERVICE_CREATE_ITEM,
+    SERVICE_DELETE_ITEM,
+    SERVICE_GET_ITEMS,
+    SERVICE_UPDATE_ITEM,
+    ChoreStatus,
+    ChoreType,
+)
+from .models import BaseChore, IntervalChore, ScheduledChore
+from .store import ChoreStore
+
+# Service-specific field keys (not shared with sensor attributes).
+ATTR_CHORE_NAME = "chore_name"
+ATTR_COMPLETED_AT = "completed_at"
+ATTR_COMPLETED_BY = "completed_by"
+ATTR_ENTITY_ID = "entity_id"
+ATTR_STATUS = "status"
+
+# Service field keys for schedule configuration.
+ATTR_SCHEDULED = "scheduled"
+ATTR_INTERVAL = "interval"
+ATTR_GRACE_PERIOD = "grace_period"
+
+SERVICE_CREATE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Optional(ATTR_CHORE_ID): cv.string,
+        vol.Required(ATTR_CHORE_NAME): cv.string,
+        vol.Optional(ATTR_TRIGGER_ENTITY): cv.entity_id,
+        vol.Optional(ATTR_ASSIGNED_TO, default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
+        vol.Optional(ATTR_SCHEDULED): dict,
+        vol.Optional(ATTR_INTERVAL): dict,
+        vol.Optional(ATTR_GRACE_PERIOD): dict,
+    }
+)
+
+SERVICE_UPDATE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Optional(ATTR_CHORE_ID): cv.string,
+        vol.Optional(ATTR_CHORE_NAME): cv.string,
+        vol.Optional(ATTR_TRIGGER_ENTITY): cv.entity_id,
+        vol.Optional(ATTR_ASSIGNED_TO): vol.All(cv.ensure_list, [cv.entity_id]),
+        vol.Optional(ATTR_SCHEDULED): dict,
+        vol.Optional(ATTR_INTERVAL): dict,
+        vol.Optional(ATTR_GRACE_PERIOD): dict,
+    }
+)
+
+SERVICE_DELETE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Optional(ATTR_CHORE_ID): cv.string,
+    }
+)
+
+SERVICE_COMPLETE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Optional(ATTR_CHORE_ID): cv.string,
+        vol.Optional(ATTR_COMPLETED_BY): cv.entity_id,
+        vol.Optional(ATTR_COMPLETED_AT): cv.string,
+    }
+)
+
+SERVICE_GET_ITEMS_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Optional(ATTR_STATUS): vol.In([s.value for s in ChoreStatus]),
+    }
+)
+
+
+def _resolve_entry_data(hass: HomeAssistant, entity_id: str) -> tuple[ChoreStore, Any]:
+    """Resolve an entity_id to the config entry's runtime_data.
+
+    Returns (store, coordinator) tuple.
+    """
+    registry = er.async_get(hass)
+    entry = registry.async_get(entity_id)
+    if entry is None:
+        msg = f"Entity {entity_id} not found"
+        raise ServiceValidationError(msg)
+
+    config_entry_id = entry.config_entry_id
+    if config_entry_id is None:
+        msg = f"Entity {entity_id} has no config entry"
+        raise ServiceValidationError(msg)
+
+    config_entry = hass.config_entries.async_get_entry(config_entry_id)
+    if config_entry is None or config_entry.domain != DOMAIN:
+        msg = f"Entity {entity_id} does not belong to {DOMAIN}"
+        raise ServiceValidationError(msg)
+
+    runtime_data = config_entry.runtime_data
+    return runtime_data.store, runtime_data.coordinator
+
+
+def _resolve_chore_id(hass: HomeAssistant, entity_id: str, explicit_chore_id: str | None) -> str:
+    """Resolve the chore_id from a service call.
+
+    If *explicit_chore_id* is provided it is returned as-is.  Otherwise the
+    chore_id is extracted from the sensor entity's unique_id (format:
+    ``{entry_id}_{chore_id}``).
+    """
+    if explicit_chore_id:
+        return explicit_chore_id
+
+    registry = er.async_get(hass)
+    entry = registry.async_get(entity_id)
+    if entry is None or entry.domain != "sensor":
+        msg = "chore_id is required when targeting a calendar entity"
+        raise ServiceValidationError(msg)
+
+    # unique_id format: {entry_id}_{chore_id}
+    unique_id = entry.unique_id
+    config_entry_id = entry.config_entry_id or ""
+    if unique_id and unique_id.startswith(config_entry_id + "_"):
+        return unique_id[len(config_entry_id) + 1 :]
+
+    msg = f"Cannot determine chore_id from entity {entity_id}"
+    raise ServiceValidationError(msg)
+
+
+def _resolve_trigger_tag_id(hass: HomeAssistant, trigger_entity: str | None) -> str | None:
+    """Resolve a tag entity to its tag UUID for fast event matching.
+
+    Returns the tag_id if *trigger_entity* is a ``tag.*`` entity, else None.
+    """
+    if not trigger_entity or not trigger_entity.startswith("tag."):
+        return None
+    state = hass.states.get(trigger_entity)
+    if state is None:
+        LOGGER.warning("Trigger entity %s not found; tag_id not resolved", trigger_entity)
+        return None
+    # The tag entity's unique_id (accessible via entity registry) is the tag UUID.
+    registry = er.async_get(hass)
+    entry = registry.async_get(trigger_entity)
+    if entry and entry.unique_id:
+        return entry.unique_id
+    LOGGER.warning("Could not resolve tag_id for %s", trigger_entity)
+    return None
+
+
+def _resolve_tag_entity_id(hass: HomeAssistant, trigger_tag_id: str | None) -> str | None:
+    """Resolve a tag UUID back to its entity_id for display.
+
+    Returns the entity_id (e.g. ``tag.morning_medicine``) or None.
+    """
+    if not trigger_tag_id:
+        return None
+    registry = er.async_get(hass)
+    return registry.async_get_entity_id("tag", "tag", trigger_tag_id)
+
+
+def _duration_to_mins(dur: dict[str, Any]) -> int:
+    """Convert an HA duration dict to total minutes."""
+    return int(dur.get("days", 0)) * 1440 + int(dur.get("hours", 0)) * 60 + int(dur.get("minutes", 0))
+
+
+def _infer_chore_type(data: dict[str, Any]) -> ChoreType:
+    """Infer chore type from the presence of ``scheduled`` vs ``interval``.
+
+    Raises ServiceValidationError if both or neither are provided.
+    """
+    has_scheduled = ATTR_SCHEDULED in data
+    has_interval = ATTR_INTERVAL in data
+    if has_scheduled and has_interval:
+        msg = "Cannot specify both 'scheduled' and 'interval'"
+        raise ServiceValidationError(msg)
+    if not has_scheduled and not has_interval:
+        msg = "Either 'scheduled' or 'interval' must be provided"
+        raise ServiceValidationError(msg)
+    return ChoreType.SCHEDULED if has_scheduled else ChoreType.INTERVAL
+
+
+def _build_schedule_dict(data: dict[str, Any], chore_type: ChoreType) -> dict[str, Any]:
+    """Build an internal schedule dict from service call data."""
+    if chore_type == ChoreType.SCHEDULED:
+        obj = data[ATTR_SCHEDULED]
+        schedule: dict[str, Any] = {"time": obj["time"]}
+        if "active_days" in obj:
+            schedule["active_days"] = obj["active_days"]
+        if "early_window" in obj:
+            schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
+    else:
+        schedule = {"interval_mins": _duration_to_mins(data[ATTR_INTERVAL])}
+
+    # grace_period is a top-level field shared by both types.
+    if ATTR_GRACE_PERIOD in data:
+        schedule["grace_period_mins"] = _duration_to_mins(data[ATTR_GRACE_PERIOD])
+    return schedule
+
+
+def _build_chore_from_data(data: dict[str, Any]) -> BaseChore:
+    """Build a chore model from service call data."""
+    chore_type = _infer_chore_type(data)
+    schedule = _build_schedule_dict(data, chore_type)
+    base_kwargs: dict[str, Any] = {
+        "chore_id": data[ATTR_CHORE_ID],
+        "chore_name": data[ATTR_CHORE_NAME],
+        "chore_type": chore_type,
+        "assigned_to": list(data.get(ATTR_ASSIGNED_TO, [])),
+    }
+
+    if chore_type == ChoreType.SCHEDULED:
+        return ScheduledChore.from_schedule(base_kwargs, schedule)
+    return IntervalChore.from_schedule(base_kwargs, schedule)
+
+
+async def _async_handle_create(call: ServiceCall) -> None:
+    """Handle create_item service call."""
+    store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
+
+    chore_id = call.data.get(ATTR_CHORE_ID) or slugify_util(call.data[ATTR_CHORE_NAME])
+    if store.get_chore(chore_id) is not None:
+        msg = f"Chore {chore_id} already exists"
+        raise ServiceValidationError(msg)
+
+    # Resolve tag UUID if trigger_entity is a tag.
+    trigger_tag_id = _resolve_trigger_tag_id(call.hass, call.data.get(ATTR_TRIGGER_ENTITY))
+
+    # Ensure the resolved chore_id is in the data for _build_chore_from_data.
+    data = {**call.data, ATTR_CHORE_ID: chore_id}
+    chore = _build_chore_from_data(data)
+    chore.trigger_tag_id = trigger_tag_id
+    chore.created_at = dt_util.now()
+    await store.async_create_chore(chore)
+    await coordinator.async_refresh()
+    LOGGER.debug("Created chore %s", chore_id)
+
+
+async def _async_handle_update(call: ServiceCall) -> None:
+    """Handle update_item service call."""
+    store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
+
+    chore_id = _resolve_chore_id(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_CHORE_ID))
+    existing = store.get_chore(chore_id)
+    if existing is None:
+        msg = f"Chore {chore_id} not found"
+        raise ServiceValidationError(msg)
+
+    # Build updated dict from existing chore, overlaying provided fields.
+    updated = existing.to_dict()
+    if ATTR_CHORE_NAME in call.data:
+        updated["chore_name"] = call.data[ATTR_CHORE_NAME]
+    if ATTR_TRIGGER_ENTITY in call.data:
+        updated["trigger_tag_id"] = _resolve_trigger_tag_id(call.hass, call.data[ATTR_TRIGGER_ENTITY])
+    if ATTR_ASSIGNED_TO in call.data:
+        updated["assigned_to"] = list(call.data[ATTR_ASSIGNED_TO])
+
+    # Overlay schedule fields if any were provided.
+    has_schedule_fields = any(k in call.data for k in (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_GRACE_PERIOD))
+    if has_schedule_fields:
+        schedule = dict(updated["schedule"])
+        if ATTR_SCHEDULED in call.data:
+            obj = call.data[ATTR_SCHEDULED]
+            if "time" in obj:
+                schedule["time"] = obj["time"]
+            if "active_days" in obj:
+                schedule["active_days"] = obj["active_days"]
+            if "early_window" in obj:
+                schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
+        if ATTR_INTERVAL in call.data:
+            schedule["interval_mins"] = _duration_to_mins(call.data[ATTR_INTERVAL])
+        if ATTR_GRACE_PERIOD in call.data:
+            schedule["grace_period_mins"] = _duration_to_mins(call.data[ATTR_GRACE_PERIOD])
+        updated["schedule"] = schedule
+
+    chore = BaseChore.from_dict(updated)
+    await store.async_update_chore(chore)
+    await coordinator.async_refresh()
+    LOGGER.debug("Updated chore %s", chore_id)
+
+
+async def _async_handle_delete(call: ServiceCall) -> None:
+    """Handle delete_item service call."""
+    store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
+
+    chore_id = _resolve_chore_id(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_CHORE_ID))
+    if store.get_chore(chore_id) is None:
+        msg = f"Chore {chore_id} not found"
+        raise ServiceValidationError(msg)
+
+    await store.async_delete_chore(chore_id)
+    await coordinator.async_refresh()
+    LOGGER.debug("Deleted chore %s", chore_id)
+
+
+async def _async_handle_complete(call: ServiceCall) -> None:
+    """Handle complete_item service call."""
+    store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
+
+    chore_id = _resolve_chore_id(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_CHORE_ID))
+    existing = store.get_chore(chore_id)
+    if existing is None:
+        msg = f"Chore {chore_id} not found"
+        raise ServiceValidationError(msg)
+
+    # Parse completion timestamp.
+    completed_at_raw = call.data.get(ATTR_COMPLETED_AT)
+    if completed_at_raw:
+        completed_at = dt_util.parse_datetime(completed_at_raw)
+        if completed_at is None:
+            msg = f"Invalid datetime: {completed_at_raw}"
+            raise ServiceValidationError(msg)
+    else:
+        completed_at = dt_util.now()
+
+    # Update the chore's completion fields.
+    updated = existing.to_dict()
+    updated["last_completed"] = completed_at.isoformat()
+    updated["last_completed_by"] = call.data.get(ATTR_COMPLETED_BY)
+
+    chore = BaseChore.from_dict(updated)
+    await store.async_update_chore(chore)
+    await coordinator.async_refresh()
+    LOGGER.debug("Completed chore %s at %s", chore_id, completed_at.isoformat())
+
+
+async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
+    """Handle get_items service call — returns chore data."""
+    store, _ = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
+
+    chores = store.get_all_chores()
+    now = dt_util.now()
+    status_filter = call.data.get(ATTR_STATUS)
+
+    items: list[dict[str, Any]] = []
+    for chore in chores.values():
+        current_status = str(chore.compute_status(now))
+        if status_filter and current_status != status_filter:
+            continue
+        next_due = chore.compute_next_due(now)
+        items.append(
+            {
+                "chore_id": chore.chore_id,
+                "chore_name": chore.chore_name,
+                "chore_type": str(chore.chore_type),
+                "status": current_status,
+                "next_due": next_due.isoformat() if next_due else None,
+                "last_completed": chore.last_completed.isoformat() if chore.last_completed else None,
+                "last_completed_by": chore.last_completed_by,
+                "assigned_to": list(chore.assigned_to),
+                "trigger_entity": _resolve_tag_entity_id(call.hass, chore.trigger_tag_id),
+                "schedule": chore.schedule_description(),
+            }
+        )
+
+    return cast(ServiceResponse, {"items": items})
+
+
+async def async_register_services(hass: HomeAssistant) -> None:
+    """Register all chore_calendar service actions."""
+    if hass.services.has_service(DOMAIN, SERVICE_CREATE_ITEM):
+        return
+
+    hass.services.async_register(DOMAIN, SERVICE_CREATE_ITEM, _async_handle_create, schema=SERVICE_CREATE_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_UPDATE_ITEM, _async_handle_update, schema=SERVICE_UPDATE_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_DELETE_ITEM, _async_handle_delete, schema=SERVICE_DELETE_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_COMPLETE_ITEM, _async_handle_complete, schema=SERVICE_COMPLETE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_GET_ITEMS,
+        _async_handle_get_items,
+        schema=SERVICE_GET_ITEMS_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )

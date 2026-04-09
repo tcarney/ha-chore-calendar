@@ -15,8 +15,9 @@ uv.lock
 .bashrc
 .zshrc
 
-# AI agent temporary scratch files and planning notes
-.ai-scratch/
+# Card build artifacts and dependencies
+card/node_modules/
+card/dist/
 
 # Created by https://www.toptal.com/developers/gitignore/api/linux,macos,windows,virtualenv,pythonvanilla,visualstudiocode,homeassistant
 # Edit at https://www.toptal.com/developers/gitignore?templates=linux,macos,windows,virtualenv,pythonvanilla,visualstudiocode,homeassistant

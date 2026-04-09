@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# script/card/dev: Start card development with watch mode
+#
+# Runs Rollup in watch mode so the card is rebuilt automatically on every
+# file change. After each rebuild, copies the output to www/ so a browser
+# refresh picks up the changes.
+#
+# Usage:
+#   ./script/card/dev
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CARD_DIR="$SCRIPT_DIR/../../card"
+WWW_DIR="$SCRIPT_DIR/../../custom_components/chore_calendar/www"
+
+cd "$CARD_DIR"
+
+# Ensure dependencies are installed.
+if [ ! -d "node_modules" ]; then
+    echo "==> Dependencies missing, running bootstrap"
+    "$SCRIPT_DIR/bootstrap"
+fi
+
+echo "==> Starting card watch mode (Ctrl+C to stop)"
+echo "    Rebuilds on file changes → www/chore-calendar-card.js"
+
+# Run rollup in watch mode. After each rebuild, copy to www/.
+npx rollup -c --watch --watch.onBundleEnd "cp dist/chore-calendar-card.js $WWW_DIR/"

@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# script/card/bootstrap: Install card dependencies
+#
+# Installs npm packages required to build the Lovelace card.
+#
+# Usage:
+#   ./script/card/bootstrap
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CARD_DIR="$SCRIPT_DIR/../../card"
+
+cd "$CARD_DIR"
+
+echo "==> Installing card dependencies"
+npm install
+echo "✓ Card dependencies installed"

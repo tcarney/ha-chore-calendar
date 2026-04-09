@@ -45,7 +45,7 @@ applyTo: "**/*.md"
 
 **Links:**
 
-- Relative links for internal docs: `[Getting Started](../../docs/user/GETTING_STARTED.md)`
+- Relative links for internal docs: `[README](../../README.md)`
 - Absolute URLs for external: `https://developers.home-assistant.io/`
 - Reference-style for repeated URLs
 
@@ -53,10 +53,7 @@ applyTo: "**/*.md"
 
 **Documentation organization:**
 
-- `docs/development/` - Developer documentation (architecture, decisions)
-- `docs/user/` - End-user guides (installation, configuration)
-- `.ai-scratch/` - Temporary AI notes (not committed)
-- Root `*.md` files - Project metadata (README, CONTRIBUTING, etc.)
+- Root `*.md` files - Project metadata (README, etc.)
 
 **Long documents (>500 lines):**
 

@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# script/card/clean: Remove card build artifacts and dependencies
+#
+# Removes node_modules/ and dist/ from the card directory.
+#
+# Usage:
+#   ./script/card/clean
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CARD_DIR="$SCRIPT_DIR/../../card"
+
+cd "$CARD_DIR"
+
+echo "==> Cleaning card build artifacts"
+rm -rf node_modules dist
+echo "✓ Card cleaned"

@@ -1,30 +1,187 @@
-# yaml-language-server: $schema=../../schemas/yaml/services_schema.yaml
-# Describes the format for available services for chore_calendar
-
-example_action:
-  name: Example Action
-  description: Execute an example action (dummy service for demonstration)
+create_item:
   fields:
-    action_type:
-      name: Action Type
-      description: The type of action to perform
-      required: false
-      default: default
-      example: "update"
+    entity_id:
+      required: true
       selector:
-        select:
-          options:
-            - "default"
-            - "update"
-            - "reset"
-    target_value:
-      name: Target Value
-      description: The target value for the action
-      required: false
-      example: "new_value"
+        entity:
+          filter:
+            - domain: calendar
+              integration: chore_calendar
+    chore_id:
+      example: "morning_medicine"
+      selector:
+        text:
+    chore_name:
+      required: true
+      example: "Morning Medicine"
+      selector:
+        text:
+    trigger_entity:
+      selector:
+        entity:
+          filter:
+            - domain: tag
+    assigned_to:
+      selector:
+        entity:
+          filter:
+            - domain: person
+          multiple: true
+    scheduled:
+      selector:
+        object:
+          translation_key: scheduled
+          fields:
+            time:
+              required: true
+              selector:
+                time:
+            active_days:
+              selector:
+                select:
+                  multiple: true
+                  options:
+                    - label: Monday
+                      value: mon
+                    - label: Tuesday
+                      value: tue
+                    - label: Wednesday
+                      value: wed
+                    - label: Thursday
+                      value: thu
+                    - label: Friday
+                      value: fri
+                    - label: Saturday
+                      value: sat
+                    - label: Sunday
+                      value: sun
+            early_window:
+              selector:
+                duration:
+    interval:
+      selector:
+        duration:
+    grace_period:
+      selector:
+        duration:
+
+update_item:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+              integration: chore_calendar
+            - domain: sensor
+              integration: chore_calendar
+    chore_id:
+      selector:
+        text:
+    chore_name:
+      selector:
+        text:
+    trigger_entity:
+      selector:
+        entity:
+          filter:
+            - domain: tag
+    assigned_to:
+      selector:
+        entity:
+          filter:
+            - domain: person
+          multiple: true
+    scheduled:
+      selector:
+        object:
+          translation_key: scheduled
+          fields:
+            time:
+              selector:
+                time:
+            active_days:
+              selector:
+                select:
+                  multiple: true
+                  options:
+                    - label: Monday
+                      value: mon
+                    - label: Tuesday
+                      value: tue
+                    - label: Wednesday
+                      value: wed
+                    - label: Thursday
+                      value: thu
+                    - label: Friday
+                      value: fri
+                    - label: Saturday
+                      value: sat
+                    - label: Sunday
+                      value: sun
+            early_window:
+              selector:
+                duration:
+    interval:
+      selector:
+        duration:
+    grace_period:
+      selector:
+        duration:
+
+delete_item:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+              integration: chore_calendar
+            - domain: sensor
+              integration: chore_calendar
+    chore_id:
       selector:
         text:
 
-reload_data:
-  name: Reload Data
-  description: Force a refresh of the integration data from the API
+complete_item:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+              integration: chore_calendar
+            - domain: sensor
+              integration: chore_calendar
+    chore_id:
+      selector:
+        text:
+    completed_by:
+      selector:
+        entity:
+          filter:
+            - domain: person
+    completed_at:
+      selector:
+        text:
+
+get_items:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+              integration: chore_calendar
+    status:
+      selector:
+        select:
+          options:
+            - completed
+            - pending
+            - due
+            - overdue

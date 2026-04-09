@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# script/card/build: Build the Lovelace card for production
+#
+# Compiles TypeScript, bundles with Rollup, minifies, and copies the output
+# to custom_components/chore_calendar/www/ for serving by the integration.
+#
+# Usage:
+#   ./script/card/build
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CARD_DIR="$SCRIPT_DIR/../../card"
+
+cd "$CARD_DIR"
+
+# Ensure dependencies are installed.
+if [ ! -d "node_modules" ]; then
+    echo "==> Dependencies missing, running bootstrap"
+    "$SCRIPT_DIR/bootstrap"
+fi
+
+echo "==> Building card"
+npm run build
+echo "✓ Card built → custom_components/chore_calendar/www/chore-calendar-card.js"
