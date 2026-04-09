@@ -1,5 +1,7 @@
 {
   "name": "Chore Calendar",
   "homeassistant": "2026.3.1",
-  "hacs": "2.0.5"
+  "hacs": "2.0.5",
+  "render_readme": true,
+  "iot_class": "calculated"
 }

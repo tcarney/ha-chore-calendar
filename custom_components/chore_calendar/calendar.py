@@ -74,6 +74,7 @@ class ChoreCalendarListEntity(CoordinatorEntity[ChoreCalendarCoordinator], Calen
     """
 
     _attr_has_entity_name = True
+    _attr_icon = "mdi:calendar-check"
 
     def __init__(
         self,

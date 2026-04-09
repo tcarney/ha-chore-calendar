@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Home Assistant custom integration called **Chore Calendar** (domain: `chore_calendar`) that manages recurring household chores. Each chore list is added through Settings > Integrations (like `local_calendar` or `local_todo`), with chores managed via services. Replaces existing template blueprints with native sensor/calendar entities, service-based CRUD, and built-in trigger handling. Intended for HACS distribution.
+Home Assistant custom integration called **Chore Calendar** (domain: `chore_calendar`) that manages recurring household chores. Each chore list is added through Settings > Integrations (like `local_calendar` or `local_todo`), with chores managed via services. Provides native sensor/calendar entities, service-based CRUD, and built-in trigger handling. Intended for HACS distribution.
 
-**Current state:** Phase 2 (Calendar + Tag Triggers) is complete, plus a custom Lovelace card (Phase A). Implemented: config flow with reconfigure (no options flow), models with state machine logic (including `compute_due_range`, `trigger_tag_id`, `created_at`, overdue period pinning), persistent storage, coordinator with 60s polling, sensor entities (per chore), calendar entity (per list, full event generation), five service actions (create, update, delete, complete, get_items), status change events, tag scan auto-completion (with last-scanned seeding on creation), and a custom Lovelace card (Lit 3.x, auto-registered via `add_extra_js_url`). Services that operate on a single chore (complete, update, delete) accept either a sensor entity_id (chore_id inferred) or calendar entity_id + explicit chore_id. The manifest declares `dependencies: ["frontend", "http"]` for card serving. All 99 tests pass. Remaining phases: polish (Phase 3), skip action and oneshot chores (Phase 4).
+**Current state:** Core integration and card complete. See `README.md` for features and usage.
 
 **Key files:**
 
-- `.claude/specs.md` — Full design specification (architecture, models, service schemas, implementation phases, storage schema, state machines)
-- `.claude/card-design.md` — Custom Lovelace card design spec
+- `README.md` — User-facing documentation (features, install, service examples, card config)
+- `SPECS.md` — Design specification (architecture, state machines, storage schema, card design)
 
 ## Development Commands
 
@@ -41,6 +41,7 @@ Logs: live in terminal running `./script/develop`, or `config/home-assistant.log
 
 ## Code Style
 
+- Target the HA [Integration Quality Scale](https://developers.home-assistant.io/docs/core/integration-quality-scale/) platinum tier
 - Python 3.14+, 4 spaces, 120 char lines, double quotes, full type hints, async for all I/O
 - YAML: 2 spaces, modern HA syntax (no legacy `platform:` style). JSON: 2 spaces, no trailing commas
 - Ruff for linting (matches HA core config), Pyright basic mode for type checking
@@ -55,73 +56,18 @@ Logs: live in terminal running `./script/develop`, or `config/home-assistant.log
 
 ## Architecture
 
-### Data Flow
-
-```text
-Services (CRUD, complete, skip)  -->  Store (.storage)  -->  Coordinator (60s eval)
-                                                                     |
-Tag Scan Listener [Phase 2]  ------------------------------------------>|
-                                                                     |
-                                                           Sensor    Calendar    Events
-                                                           Entities  Entity      (status
-                                                           (per chore)(per list)  changed)
-```
-
-### Entity Model
-
-- `calendar.daily_chores` — one calendar entity per list (config entry)
-- `sensor.daily_chores_morning_medicine` — one sensor per chore, prefixed with list name (state = status enum)
-- unique_id: `{entry_id}_{chore_id}`
+See `SPECS.md` for full architecture details (data flow, state machines, storage schema).
 
 ### Key Conventions
 
 - **Public API**: "item" (`create_item`, `complete_item`) — matches HA `todo` pattern
 - **Internal models**: "chore" (`BaseChore`, `ScheduledChore`) — domain-specific
 - **Domain**: `chore_calendar`, **Class prefix**: `ChoreCalendar`
-- **Integration model**: one config entry per chore list (via Settings > Integrations), each with own storage/coordinator/entities. All entities grouped under a `DeviceEntryType.SERVICE` device per list.
-- **Services over entities** for all mutations (no button entities, no CRUD via config UI). Single-chore services (complete, update, delete) accept either a sensor entity_id (chore_id inferred from unique_id) or calendar entity_id + explicit chore_id. List-level services (create, get_items) require the calendar entity.
-- **Calendar is read-only** — events generated dynamically, no stored calendar events
-- **Status events**: fires `chore_calendar_status_changed` on state transitions
+- **Entities**: `calendar.daily_chores` (one per list), `sensor.daily_chores_morning_medicine` (one per chore). Unique ID: `{entry_id}_{chore_id}`.
+- **Services over entities** for all mutations. Single-chore services accept either a sensor entity_id (chore_id inferred) or calendar entity_id + explicit chore_id. List-level services require the calendar entity.
+- Flat modules (no sub-packages). Services registered in `async_setup()`, not `async_setup_entry()`. Card source in `card/`, built JS copied to `custom_components/chore_calendar/www/`.
 
-### State Machine
-
-- **Scheduled**: `completed -> pending -> due -> overdue -> completed` (4 states, active days filter)
-  - Newly created chores start in pending/due but never go overdue — past the grace period they show as `completed` (no `last_completed`) with `next_due` on the next period
-  - Overdue chores stay pinned to the uncompleted period — `next_due` does not advance until completed
-- **Interval**: `completed -> due -> overdue -> completed` (3 states)
-  - Never-completed chores are always `due`
-- **Oneshot** (Phase 4): `pending -> due -> overdue -> completed [terminal]`
-
-### Target Module Layout
-
-This integration uses **flat modules** rather than the template's sub-package structure, because there is no external API client — all data is local `.storage/` files.
-
-```text
-custom_components/chore_calendar/
-    __init__.py       # Integration setup; register services in async_setup() (not async_setup_entry)
-    config_flow.py    # Config flow + reconfigure flow — list name only (no credentials)
-    const.py          # Constants, enums, defaults
-    models.py         # BaseChore, ScheduledChore, IntervalChore dataclasses
-    store.py          # Persistent storage (.storage/chore_calendar.{entry_id})
-    coordinator.py    # DataUpdateCoordinator — 60s state computation
-    sensor.py         # ChoreSensorEntity platform
-    calendar.py       # ChoreCalendarListEntity platform (read-only event generation)
-    services.py       # Service handlers (CRUD, complete, skip)
-    services.yaml     # Service descriptions for HA UI
-    triggers.py       # Internal trigger listener (Phase 2)
-    manifest.json
-    translations/en.json
-    www/              # Built Lovelace card JS (copied from card/ build)
-card/                 # Lovelace card source (Lit 3.x, TypeScript, Rollup)
-    src/              # Card source files
-    package.json      # npm dependencies and build script
-    rollup.config.mjs # Rollup bundler config
-    tsconfig.json     # TypeScript config
-```
-
-The template generated sub-packages (`api/`, `config_flow_handler/`, `coordinator/`, `entity/`, `service_actions/`) — those do **not** apply here.
-
-### Key HA Patterns to Follow
+### Key HA Patterns
 
 - **Services registration:** `async_setup()`, NOT `async_setup_entry()` (Quality Scale requirement)
 - **Config entry data access:** `entry.runtime_data` (typed `ChoreCalendarData`)
@@ -130,7 +76,7 @@ The template generated sub-packages (`api/`, `config_flow_handler/`, `coordinato
 
 ## Workflow Rules
 
-- **Tests:** Do NOT write tests unless explicitly requested.
+- **Tests:** Write tests for new features and bug fixes. Follow existing test patterns in the `tests/` directory.
 - **Docs:** Do NOT create markdown files without explicit permission. Extend existing docs rather than creating new files.
 - **Translations:** Business logic first; update `translations/en.json` only when asked or at feature completion. Never update other language files automatically — ask first.
 - **Scope:** Implement features completely (e.g., new sensor needs entity class + platform init + descriptions — all at once). For multiple independent features, do one at a time and suggest a commit between each.
