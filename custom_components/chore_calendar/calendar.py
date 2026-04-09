@@ -19,9 +19,6 @@ from .models import BaseChore
 if TYPE_CHECKING:
     from . import ChoreCalendarConfigEntry
 
-# Show completed events for this long after completion.
-_COMPLETED_EVENT_WINDOW = datetime.timedelta(hours=24)
-
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -39,14 +36,15 @@ def _make_due_event(chore: BaseChore, now: datetime.datetime) -> CalendarEvent |
     if due_range is None:
         return None
 
-    if chore.compute_status(now) != ChoreStatus.COMPLETED:
-        # Current period is active — show it.
-        due_at, overdue_at = due_range
+    due_at, overdue_at = due_range
+
+    if chore.compute_status(now) != ChoreStatus.COMPLETED or due_at > now:
+        # Current period is active, or the due window is still in the future
+        # (interval chores report the upcoming window even when completed).
         return CalendarEvent(summary=chore.chore_name, start=due_at, end=overdue_at)
 
     # Current period is completed — show the next one.
     # Ask for next_due from after the current period ends so we skip past it.
-    due_at, overdue_at = due_range
     next_due = chore.compute_next_due(overdue_at)
     if next_due is None or next_due <= due_at:
         return None
@@ -58,11 +56,9 @@ def _make_due_event(chore: BaseChore, now: datetime.datetime) -> CalendarEvent |
     )
 
 
-def _make_completed_event(chore: BaseChore, now: datetime.datetime) -> CalendarEvent | None:
-    """Create a zero-duration event at last_completed if within 24 hours."""
+def _make_completed_event(chore: BaseChore) -> CalendarEvent | None:
+    """Create a zero-duration event at last_completed."""
     if chore.last_completed is None:
-        return None
-    if now - chore.last_completed > _COMPLETED_EVENT_WINDOW:
         return None
     return CalendarEvent(
         summary=f"✓ {chore.chore_name}",
@@ -122,7 +118,7 @@ class ChoreCalendarListEntity(CoordinatorEntity[ChoreCalendarCoordinator], Calen
         events: list[CalendarEvent] = []
         for chore in self.coordinator.data.values():
             # Completed event (zero-duration at last_completed).
-            completed_evt = _make_completed_event(chore, now)
+            completed_evt = _make_completed_event(chore)
             if completed_evt is not None and _overlaps(completed_evt, start_date, end_date):
                 events.append(completed_evt)
             # Next due event.

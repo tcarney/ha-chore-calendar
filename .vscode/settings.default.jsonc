@@ -59,24 +59,4 @@
     "editor.defaultFormatter": "esbenp.prettier-vscode",
     "editor.formatOnSave": false
   },
-
-  "json.schemas": [
-    // These values differs between working with devcontainer and locally, therefore their values should NOT be in sync!
-    {
-      "fileMatch": ["custom_components/*/manifest.json"],
-      "url": "./schemas/json/manifest_schema.json"
-    },
-    {
-      "fileMatch": ["custom_components/*/translations/*.json"],
-      "url": "./schemas/json/translation_schema.json"
-    },
-    {
-      "fileMatch": ["hacs.json"],
-      "url": "./schemas/json/hacs_schema.json"
-    },
-    {
-      "fileMatch": ["custom_components/*/icons.json"],
-      "url": "./schemas/json/icons_schema.json"
-    }
-  ]
 }

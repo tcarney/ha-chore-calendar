@@ -1,14 +1,12 @@
-// Must be first — patches LitElement.createRenderRoot for Safari compatibility.
-import "./patch-adopt-styles";
 import { LitElement, html, css, nothing } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
+import { safeDefine } from "./define";
 import type {
   ChoreCalendarCardConfig,
   ChoreItem,
   ChoreStatus,
   EnrichedChoreItem,
   EntityConfig,
-  FilterValue,
   HomeAssistant,
   UnsubscribeFunc,
 } from "./types";
@@ -21,22 +19,31 @@ import {
 
 // Import sub-components so they register.
 import "./components/chore-row";
-import "./components/status-filter";
+import "./components/chore-detail-dialog";
 import "./chore-calendar-card-editor";
 
+import { version } from "../package.json";
+
 const DOMAIN = "chore_calendar";
+
+// eslint-disable-next-line no-console
+console.info(
+  `%c CHORE-CALENDAR-CARD %c v${version} `,
+  "color: white; background: #4CAF50; font-weight: 700;",
+  "color: #4CAF50; background: white; font-weight: 700;",
+);
 
 /** Section render order. */
 const SECTION_ORDER: ChoreStatus[] = ["overdue", "due", "pending", "completed"];
 
-@customElement("chore-calendar-card")
 export class ChoreCalendarCard extends LitElement {
   @property({ attribute: false }) hass!: HomeAssistant;
   @state() private _config!: ChoreCalendarCardConfig;
+  @state() private _configError?: string;
   @state() private _items: EnrichedChoreItem[] = [];
-  @state() private _filter: FilterValue = "active";
-  @state() private _showAllCompleted = false;
   @state() private _loading = true;
+  @state() private _dialogItem?: EnrichedChoreItem;
+  @state() private _dialogOpen = false;
 
   private _entityConfigs: (EntityConfig & { color: string })[] = [];
   private _refreshTimer?: ReturnType<typeof setInterval>;
@@ -55,16 +62,15 @@ export class ChoreCalendarCard extends LitElement {
 
   setConfig(config: ChoreCalendarCardConfig) {
     if (!config.entities || config.entities.length === 0) {
-      throw new Error("Please define at least one entity");
+      this._configError = "Please define at least one entity";
+      this._config = config;
+      return;
     }
+    this._configError = undefined;
     this._config = config;
     this._entityConfigs = config.entities.map((e, i) =>
       resolveEntityConfig(e, i),
     );
-    this._filter = config.default_filter ?? "active";
-    if (config.hide_filter && !config.default_filter) {
-      this._filter = "all";
-    }
     // Reflect no_card_background as a host attribute for CSS.
     if (config.no_card_background) {
       this.setAttribute("no-card-background", "");
@@ -122,7 +128,9 @@ export class ChoreCalendarCard extends LitElement {
         });
 
         const items = response.response?.items ?? [];
+        const exclude = cfg.exclude ?? [];
         for (const item of items) {
+          if (exclude.includes(item.status)) continue;
           allItems.push({
             ...item,
             source_entity: cfg.entity,
@@ -158,9 +166,16 @@ export class ChoreCalendarCard extends LitElement {
   private async _subscribeEvents() {
     if (!this.hass?.connection) return;
     try {
+      // Subscribe to state_changed (available to all users, including non-admin)
+      // and filter to our configured entities for instant updates.
+      const entityIds = new Set(this._entityConfigs.map((c) => c.entity));
       this._eventUnsub = await this.hass.connection.subscribeEvents(
-        () => this._refreshData(),
-        "chore_calendar_status_changed",
+        (ev: { data?: { entity_id?: string } }) => {
+          if (ev.data?.entity_id && entityIds.has(ev.data.entity_id)) {
+            this._refreshData();
+          }
+        },
+        "state_changed",
       );
     } catch {
       // Connection may not be ready yet; polling handles it.
@@ -170,21 +185,6 @@ export class ChoreCalendarCard extends LitElement {
   private _unsubscribeEvents() {
     this._eventUnsub?.();
     this._eventUnsub = undefined;
-  }
-
-  // -- Filtering ------------------------------------------------------------
-
-  private _getFilteredItems(): EnrichedChoreItem[] {
-    if (this._filter === "all") return this._items;
-    if (this._filter === "active") {
-      return this._items.filter((i) => i.status !== "completed");
-    }
-    return this._items.filter((i) => i.status === this._filter);
-  }
-
-  private _onFilterChanged(e: CustomEvent<{ value: FilterValue }>) {
-    this._filter = e.detail.value;
-    this._showAllCompleted = false;
   }
 
   // -- Rendering ------------------------------------------------------------
@@ -257,43 +257,31 @@ export class ChoreCalendarCard extends LitElement {
       font-size: 14px;
     }
 
-    .show-more {
-      padding: 4px 0 8px 27px;
-      font-size: 12px;
-      color: var(--primary-color);
-      cursor: pointer;
-      background: none;
-      border: none;
-      font-family: inherit;
-    }
-
-    .show-more:hover {
-      text-decoration: underline;
-    }
-
-  `;
+`;
 
   protected render() {
     if (!this._config) return nothing;
 
+    if (this._configError) {
+      return html`
+        <ha-card>
+          <div class="empty">${this._configError}</div>
+        </ha-card>
+      `;
+    }
+
     const showHeader = this._config.show_header !== false;
-    const hideFilter = this._config.hide_filter === true;
     return html`
-      <ha-card>
+      <ha-card
+        @chore-detail=${this._onChoreDetail}
+        @chore-completed=${this._onChoreCompleted}
+      >
         ${showHeader
           ? html`
               <div class="header">
                 <span class="title"
                   >${this._config.title ?? "Chores"}</span
                 >
-                ${!hideFilter
-                  ? html`
-                      <status-filter
-                        .value=${this._filter}
-                        @filter-changed=${this._onFilterChanged}
-                      ></status-filter>
-                    `
-                  : nothing}
               </div>
             `
           : nothing}
@@ -301,20 +289,25 @@ export class ChoreCalendarCard extends LitElement {
           ? html`<div class="loading">Loading...</div>`
           : this._renderSections()}
       </ha-card>
+      <chore-detail-dialog
+        .hass=${this.hass}
+        .item=${this._dialogItem}
+        .open=${this._dialogOpen}
+        @detail-dialog-closed=${this._onDialogClosed}
+        @chore-completed=${this._onChoreCompleted}
+      ></chore-detail-dialog>
     `;
   }
 
   private _renderSections() {
-    const filtered = this._getFilteredItems();
-
-    if (filtered.length === 0) {
+    if (this._items.length === 0) {
       return html`<div class="empty">No chores to show</div>`;
     }
 
-    const groups = groupByStatus(filtered);
+    const groups = groupByStatus(this._items);
     const showCompleted = this._config.show_completed !== false;
     const completedLimit = this._config.completed_limit ?? 3;
-    const hideSections = this._config.hide_sections === true;
+    const hideSections = this._config.show_sections === false;
 
     return html`
       ${SECTION_ORDER.map((status) => {
@@ -324,10 +317,9 @@ export class ChoreCalendarCard extends LitElement {
 
         const isCompleted = status === "completed";
         const visibleItems =
-          isCompleted && !this._showAllCompleted && items.length > completedLimit
+          isCompleted && completedLimit > 0 && items.length > completedLimit
             ? items.slice(0, completedLimit)
             : items;
-        const hiddenCount = items.length - visibleItems.length;
 
         return html`
           ${!hideSections
@@ -340,23 +332,29 @@ export class ChoreCalendarCard extends LitElement {
               <chore-row
                 .hass=${this.hass}
                 .item=${item}
+                .tapAction=${this._config.tap_action ?? { action: "details" }}
+                .holdAction=${this._config.hold_action ?? { action: "none" }}
+                .doubleTapAction=${this._config.double_tap_action ?? { action: "none" }}
               ></chore-row>
             `,
           )}
-          ${hiddenCount > 0
-            ? html`
-                <button class="show-more" @click=${this._showMore}>
-                  Show ${hiddenCount} more
-                </button>
-              `
-            : nothing}
         `;
       })}
     `;
   }
 
-  private _showMore() {
-    this._showAllCompleted = true;
+  private _onChoreDetail(e: CustomEvent<{ item: EnrichedChoreItem }>) {
+    this._dialogItem = e.detail.item;
+    this._dialogOpen = true;
+  }
+
+  private _onDialogClosed() {
+    this._dialogOpen = false;
+  }
+
+  private _onChoreCompleted() {
+    this._dialogOpen = false;
+    this._refreshData();
   }
 }
 
@@ -377,6 +375,8 @@ declare global {
     "chore-calendar-card": ChoreCalendarCard;
   }
 }
+
+safeDefine("chore-calendar-card", ChoreCalendarCard);
 
 window.customCards = window.customCards || [];
 window.customCards.push({

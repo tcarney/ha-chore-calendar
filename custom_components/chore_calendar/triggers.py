@@ -7,7 +7,7 @@ from datetime import datetime
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 
-from .const import LOGGER
+from .const import LOGGER, ChoreStatus
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore
 from .store import ChoreStore
@@ -37,7 +37,9 @@ def async_setup_tag_listener(
         matching = [
             chore
             for chore in store.get_all_chores().values()
-            if chore.trigger_tag_id == tag_id and chore.is_in_completion_window(now)
+            if chore.trigger_tag_id == tag_id
+            and chore.compute_status(now) != ChoreStatus.COMPLETED
+            and chore.is_in_completion_window(now)
         ]
 
         if not matching:

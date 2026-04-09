@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, cast
 
 import voluptuous as vol
@@ -161,6 +162,20 @@ def _resolve_trigger_tag_id(hass: HomeAssistant, trigger_entity: str | None) -> 
     return None
 
 
+def _resolve_tag_last_scanned(hass: HomeAssistant, trigger_entity: str | None) -> datetime | None:
+    """Read the last-scanned timestamp from a tag entity's state.
+
+    Tag entities in HA store their last scan time as the entity state value.
+    Returns the parsed datetime if available, else None.
+    """
+    if not trigger_entity:
+        return None
+    state = hass.states.get(trigger_entity)
+    if state is None or state.state in ("unknown", "unavailable", ""):
+        return None
+    return dt_util.parse_datetime(state.state)
+
+
 def _resolve_tag_entity_id(hass: HomeAssistant, trigger_tag_id: str | None) -> str | None:
     """Resolve a tag UUID back to its entity_id for display.
 
@@ -244,6 +259,14 @@ async def _async_handle_create(call: ServiceCall) -> None:
     chore = _build_chore_from_data(data)
     chore.trigger_tag_id = trigger_tag_id
     chore.created_at = dt_util.now()
+
+    # Seed last_completed from the tag's last-scanned time so existing tag
+    # systems transfer state into chore calendar on creation.
+    last_scanned = _resolve_tag_last_scanned(call.hass, call.data.get(ATTR_TRIGGER_ENTITY))
+    if last_scanned is not None:
+        chore.last_completed = last_scanned
+        LOGGER.debug("Seeded last_completed from tag last-scanned: %s", last_scanned.isoformat())
+
     await store.async_create_chore(chore)
     await coordinator.async_refresh()
     LOGGER.debug("Created chore %s", chore_id)

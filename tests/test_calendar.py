@@ -311,8 +311,8 @@ async def test_get_events_shows_next_due_for_completed_chore(hass, config_entry)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_get_events_excludes_old_completed(hass, config_entry):
-    """Completed events older than 24 hours are excluded."""
+async def test_get_events_includes_old_completed(hass, config_entry):
+    """Completed events are included regardless of age for history viewing."""
     entity_id = await _setup_entry(hass, config_entry)
     runtime = config_entry.runtime_data
 
@@ -338,9 +338,9 @@ async def test_get_events_excludes_old_completed(hass, config_entry):
         end = datetime(2026, 3, 31, 0, 0, tzinfo=TZ)
         events = await entity.async_get_events(hass, start, end)
 
-    # Only the due event — completed event is >24h old.
+    # Completed event is visible even though it's >24h old.
     completed_events = [e for e in events if "✓" in e.summary]
-    assert len(completed_events) == 0
+    assert len(completed_events) == 1
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

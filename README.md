@@ -8,7 +8,7 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 - **Service-driven management**: Create, update, delete, complete, and skip chores via service calls
 - **Sensor entities**: One sensor per chore tracking its current status (pending, due, overdue, completed)
 - **Calendar entity**: Read-only calendar per list showing upcoming and recently completed chores
-- **Custom Lovelace card**: Built-in timeline card with status filtering, per-entity colors, and expandable details — auto-registered, no manual resource setup needed
+- **Custom Lovelace card**: Built-in timeline card with per-entity filtering, colors, detail dialog, and configurable actions — auto-registered, no manual resource setup needed
 - **Tag scan auto-completion**: Assign NFC tags to chores for tap-to-complete; shared tags automatically resolve to the correct chore based on completion windows
 - **Flexible scheduling**: Scheduled (specific days/times), interval-based, and one-shot chore types
 - **Status events**: Fires `chore_calendar_status_changed` events for use in automations
@@ -98,17 +98,82 @@ data:
 
 ### Dashboard Card
 
-A custom Lovelace card is included and auto-registered — no manual resource setup needed. Add it to a dashboard:
+A custom Lovelace card is included and auto-registered — no manual resource setup needed. Add it to a dashboard via the UI card picker or YAML.
+
+#### Minimal Configuration
+
+```yaml
+type: custom:chore-calendar-card
+entities:
+  - calendar.daily_chores
+```
+
+#### Full Configuration
+
+```yaml
+type: custom:chore-calendar-card
+title: "Chores"
+entities:
+  - entity: calendar.daily_chores
+    color: "#4FC3F7"
+    exclude:                  # Per-entity status filter (default: [] — show all)
+      - completed
+  - entity: calendar.weekly_chores
+    color: "#81C784"
+show_header: true           # Show card title bar (default: true)
+show_completed: true        # Show completed section (default: true)
+completed_limit: 3          # Max completed rows shown; 0 = unlimited (default: 3)
+show_sections: true         # Show section headings (default: true)
+no_card_background: false   # Transparent card background (default: false)
+update_interval: 60         # Seconds between data refreshes (default: 60)
+tap_action:                 # Action on row tap (default: details)
+  action: details
+hold_action:                # Action on row hold (default: none)
+  action: none
+double_tap_action:          # Action on row double-tap (default: none)
+  action: none
+```
+
+#### Action Configuration
+
+Chore rows support configurable tap, hold, and double-tap actions:
+
+| Action | Behavior |
+| --- | --- |
+| `details` | Open the chore detail dialog (default for tap) |
+| `complete` | Complete the chore directly, no dialog |
+| `more-info` | Open HA's more-info panel for the calendar entity |
+| `navigate` | Navigate to a dashboard path |
+| `url` | Open an external URL |
+| `call-service` | Call an arbitrary HA service |
+| `none` | Do nothing (default for hold and double-tap) |
+
+Example — tap to complete, hold for details:
 
 ```yaml
 type: custom:chore-calendar-card
 entities:
   - entity: calendar.daily_chores
-    color: "#4FC3F7"
-  - entity: calendar.weekly_chores
-    color: "#81C784"
-default_filter: active
+tap_action:
+  action: complete
+hold_action:
+  action: details
 ```
+
+#### Detail Dialog
+
+Tapping a chore row (default behavior) opens a detail dialog showing:
+
+- List name (with entity icon)
+- Schedule description
+- Assigned people
+- Last completed time and by whom
+
+For non-completed chores, a "Complete" button appears in the dialog footer.
+
+#### Visual Editor
+
+All options are configurable through the visual editor — no YAML required. Each entity is shown as a collapsible panel (collapsed: entity name with color dot; expanded: entity picker, color picker, exclude statuses multi-select, and remove button). Card-level options include toggle switches, number inputs, and action type dropdowns.
 
 ## Troubleshooting
 
@@ -121,13 +186,7 @@ logger:
     custom_components.chore_calendar: debug
 ```
 
-## Contributing
-
-Contributions are welcome! Please open an issue or pull request.
-
-### Development Setup
-
-#### Local Development
+## Development Setup
 
 Requires Docker Desktop and VS Code with the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers).
 

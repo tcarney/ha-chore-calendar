@@ -1,16 +1,33 @@
-import type { ChoreStatus, EnrichedChoreItem, EntityConfig } from "./types";
+import { fireEvent } from "./fire-event";
+import type { ActionConfig, ChoreStatus, EnrichedChoreItem, EntityConfig, HomeAssistant } from "./types";
 
-/** Default color palette for multi-list color bars. */
+/** Default color palette for multi-list color bars (HA theme color names). */
 const DEFAULT_COLORS = [
-  "#4285F4",
-  "#EA4335",
-  "#FBBC04",
-  "#34A853",
-  "#FF6D01",
-  "#46BDC6",
-  "#7B1FA2",
-  "#C2185B",
+  "blue",
+  "red",
+  "amber",
+  "green",
+  "orange",
+  "cyan",
+  "purple",
+  "pink",
 ];
+
+/**
+ * HA theme color names that map to CSS custom properties (e.g. "red" → "--red-color").
+ * Used to distinguish theme names from raw CSS values like hex codes.
+ */
+const THEME_COLORS = new Set([
+  "primary", "accent", "red", "pink", "purple", "deep-purple", "indigo",
+  "blue", "light-blue", "cyan", "teal", "green", "light-green", "lime",
+  "yellow", "amber", "orange", "deep-orange", "brown", "light-grey",
+  "grey", "dark-grey", "blue-grey", "black", "white",
+]);
+
+/** Convert an HA theme color name to a CSS value; pass through raw CSS values. */
+export function themeColorToCss(color: string): string {
+  return THEME_COLORS.has(color) ? `var(--${color}-color)` : color;
+}
 
 /** Resolve a normalized EntityConfig with a color assigned. */
 export function resolveEntityConfig(
@@ -133,8 +150,13 @@ export function getTimeText(
   switch (item.status) {
     case "overdue":
       if (item.next_due) {
-        const diffMs = now.getTime() - new Date(item.next_due).getTime();
-        return `Overdue by ${formatDuration(diffMs)}`;
+        const graceMins =
+          typeof item.schedule === "object" && item.schedule !== null
+            ? Number(item.schedule.grace_period_mins ?? 0)
+            : 0;
+        const graceEndMs = new Date(item.next_due).getTime() + graceMins * MINUTE;
+        const diffMs = now.getTime() - graceEndMs;
+        return diffMs > 0 ? `Overdue by ${formatDuration(diffMs)}` : "Overdue";
       }
       return "Overdue";
     case "due":
@@ -190,3 +212,69 @@ export const SECTION_LABELS: Record<ChoreStatus, string> = {
   pending: "Upcoming",
   completed: "Completed",
 };
+
+/** Check whether an action config represents a real action (not none/undefined). */
+export function hasAction(config?: ActionConfig): boolean {
+  return config !== undefined && config.action !== "none";
+}
+
+const DOMAIN = "chore_calendar";
+
+/**
+ * Execute an action for a chore row.
+ * Custom actions (details, complete) are handled directly.
+ * Standard HA actions are delegated via hass-action event.
+ */
+export async function handleChoreAction(
+  element: HTMLElement,
+  hass: HomeAssistant,
+  actionConfig: ActionConfig | undefined,
+  item: EnrichedChoreItem,
+): Promise<void> {
+  if (!actionConfig || actionConfig.action === "none") return;
+
+  switch (actionConfig.action) {
+    case "details":
+      fireEvent(element, "chore-detail" as keyof HASSDomEvents, { item });
+      break;
+
+    case "complete":
+      try {
+        await hass.callWS({
+          type: "call_service",
+          domain: DOMAIN,
+          service: "complete_item",
+          service_data: {
+            entity_id: item.source_entity,
+            chore_id: item.chore_id,
+          },
+        });
+        fireEvent(element, "chore-completed" as keyof HASSDomEvents, { item });
+      } catch (err) {
+        console.error("chore-calendar-card: failed to complete chore", err);
+      }
+      break;
+
+    default:
+      // Delegate standard HA actions (more-info, navigate, url, call-service, etc.)
+      fireEvent(element, "hass-action" as keyof HASSDomEvents, {
+        config: {
+          entity: item.source_entity,
+          tap_action: actionConfig,
+          hold_action: actionConfig,
+          double_tap_action: actionConfig,
+        },
+        action: "tap",
+      });
+      break;
+  }
+}
+
+// Declare custom event types for fireEvent.
+declare global {
+  interface HASSDomEvents {
+    "chore-detail": { item: EnrichedChoreItem };
+    "chore-completed": { item: EnrichedChoreItem };
+    "hass-action": { config: Record<string, unknown>; action: string };
+  }
+}

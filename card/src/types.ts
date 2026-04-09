@@ -9,7 +9,7 @@ export interface ChoreItem {
   last_completed_by: string | null;
   assigned_to: string[];
   trigger_entity: string | null;
-  schedule: string;
+  schedule: string | Record<string, unknown>;
 }
 
 export type ChoreStatus = "completed" | "pending" | "due" | "overdue";
@@ -18,6 +18,30 @@ export type ChoreStatus = "completed" | "pending" | "due" | "overdue";
 export interface EntityConfig {
   entity: string;
   color?: string;
+  exclude?: ChoreStatus[];
+}
+
+/** Action configuration for tap/hold/double-tap gestures. */
+export interface ActionConfig {
+  action: string;
+  service?: string;
+  service_data?: Record<string, unknown>;
+  data?: Record<string, unknown>;
+  target?: Record<string, unknown>;
+  navigation_path?: string;
+  url_path?: string;
+}
+
+/** Options for the action handler directive. */
+export interface ActionHandlerOptions {
+  hasHold?: boolean;
+  hasDoubleClick?: boolean;
+  disabled?: boolean;
+}
+
+/** Detail payload for action handler events. */
+export interface ActionHandlerDetail {
+  action: "hold" | "tap" | "double_tap";
 }
 
 /** Card configuration. */
@@ -28,21 +52,14 @@ export interface ChoreCalendarCardConfig {
   show_header?: boolean;
   show_completed?: boolean;
   completed_limit?: number;
-  hide_filter?: boolean;
-  hide_sections?: boolean;
-  default_filter?: FilterValue;
+  show_sections?: boolean;
   update_interval?: number;
   compact?: boolean;
   no_card_background?: boolean;
+  tap_action?: ActionConfig;
+  hold_action?: ActionConfig;
+  double_tap_action?: ActionConfig;
 }
-
-export type FilterValue =
-  | "all"
-  | "active"
-  | "overdue"
-  | "due"
-  | "pending"
-  | "completed";
 
 /** Chore item enriched with source entity info for rendering. */
 export interface EnrichedChoreItem extends ChoreItem {

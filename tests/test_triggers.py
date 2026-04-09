@@ -121,6 +121,7 @@ async def test_tag_scan_completes_overdue_chore(hass):
         early_window=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         trigger_tag_id=TAG_UUID,
+        last_completed=datetime(2026, 3, 29, 8, 0, tzinfo=TZ),
     )
     await store.async_create_chore(chore)
     await coordinator.async_refresh()
@@ -134,7 +135,40 @@ async def test_tag_scan_completes_overdue_chore(hass):
         await hass.async_block_till_done()
 
     updated = store.get_chore("med")
-    assert updated.last_completed is not None
+    assert updated.last_completed == frozen
+
+    unsub()
+
+
+async def test_tag_scan_skips_completed_chore(hass):
+    """A completed chore is not auto-completed again by tag scan."""
+    store, coordinator = await _setup(hass)
+
+    completed_time = datetime(2026, 3, 30, 7, 0, tzinfo=TZ)
+    chore = ScheduledChore(
+        chore_id="med",
+        chore_name="Medicine",
+        chore_type=ChoreType.SCHEDULED,
+        time=time(8, 0),
+        early_window=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        trigger_tag_id=TAG_UUID,
+        last_completed=completed_time,
+    )
+    await store.async_create_chore(chore)
+    await coordinator.async_refresh()
+
+    unsub = async_setup_tag_listener(hass, store, coordinator)
+
+    # 08:30 — chore is already completed for this period.
+    frozen = datetime(2026, 3, 30, 8, 30, tzinfo=TZ)
+    with patch("homeassistant.util.dt.now", return_value=frozen):
+        hass.bus.async_fire(EVENT_TAG_SCANNED, {"tag_id": TAG_UUID})
+        await hass.async_block_till_done()
+
+    # last_completed should be unchanged.
+    updated = store.get_chore("med")
+    assert updated.last_completed == completed_time
 
     unsub()
 

@@ -6,21 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Home Assistant custom integration called **Chore Calendar** (domain: `chore_calendar`) that manages recurring household chores. Each chore list is added through Settings > Integrations (like `local_calendar` or `local_todo`), with chores managed via services. Replaces existing template blueprints with native sensor/calendar entities, service-based CRUD, and built-in trigger handling. Intended for HACS distribution.
 
-**Current state:** Phase 2 (Calendar + Tag Triggers) is complete, plus a custom Lovelace card (Phase A). Implemented: config flow with reconfigure (no options flow), models with state machine logic (including `compute_due_range`, `trigger_tag_id`, `created_at`, overdue period pinning), persistent storage, coordinator with 60s polling, sensor entities (per chore), calendar entity (per list, full event generation), five service actions (create, update, delete, complete, get_items), status change events, tag scan auto-completion, and a custom Lovelace card (Lit 3.x, auto-registered via `add_extra_js_url`). Services that operate on a single chore (complete, update, delete) accept either a sensor entity_id (chore_id inferred) or calendar entity_id + explicit chore_id. The manifest declares `dependencies: ["frontend", "http"]` for card serving. All 96 tests pass. Remaining phases: polish (Phase 3), skip action and oneshot chores (Phase 4).
+**Current state:** Phase 2 (Calendar + Tag Triggers) is complete, plus a custom Lovelace card (Phase A). Implemented: config flow with reconfigure (no options flow), models with state machine logic (including `compute_due_range`, `trigger_tag_id`, `created_at`, overdue period pinning), persistent storage, coordinator with 60s polling, sensor entities (per chore), calendar entity (per list, full event generation), five service actions (create, update, delete, complete, get_items), status change events, tag scan auto-completion (with last-scanned seeding on creation), and a custom Lovelace card (Lit 3.x, auto-registered via `add_extra_js_url`). Services that operate on a single chore (complete, update, delete) accept either a sensor entity_id (chore_id inferred) or calendar entity_id + explicit chore_id. The manifest declares `dependencies: ["frontend", "http"]` for card serving. All 99 tests pass. Remaining phases: polish (Phase 3), skip action and oneshot chores (Phase 4).
 
 **Key files:**
 
 - `.claude/specs.md` — Full design specification (architecture, models, service schemas, implementation phases, storage schema, state machines)
 - `.claude/card-design.md` — Custom Lovelace card design spec
-
-**Path-specific instructions** in `.github/instructions/*.instructions.md` provide guidance for specific file types:
-
-- `python.instructions.md` — Python style, async patterns, HA imports
-- `entities.instructions.md` — Entity platform patterns, inheritance
-- `config_flow.instructions.md` — Config flow, reauth, discovery
-- `coordinator.instructions.md` — DataUpdateCoordinator patterns
-- `services_yaml.instructions.md` — Service action definitions
-- `translations.instructions.md` — Translation file structure
 
 ## Development Commands
 
@@ -50,7 +41,7 @@ Logs: live in terminal running `./script/develop`, or `config/home-assistant.log
 
 ## Code Style
 
-- Python 3.13+, 4 spaces, 120 char lines, double quotes, full type hints, async for all I/O
+- Python 3.14+, 4 spaces, 120 char lines, double quotes, full type hints, async for all I/O
 - YAML: 2 spaces, modern HA syntax (no legacy `platform:` style). JSON: 2 spaces, no trailing commas
 - Ruff for linting (matches HA core config), Pyright basic mode for type checking
 - Google-style docstrings; comments as complete sentences with capitalization and ending period
@@ -95,7 +86,7 @@ Tag Scan Listener [Phase 2]  ------------------------------------------>|
 ### State Machine
 
 - **Scheduled**: `completed -> pending -> due -> overdue -> completed` (4 states, active days filter)
-  - Newly created chores start as `completed` until the first pending window opens
+  - Newly created chores start in pending/due but never go overdue — past the grace period they show as `completed` (no `last_completed`) with `next_due` on the next period
   - Overdue chores stay pinned to the uncompleted period — `next_due` does not advance until completed
 - **Interval**: `completed -> due -> overdue -> completed` (3 states)
   - Never-completed chores are always `due`

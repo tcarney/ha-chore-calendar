@@ -124,8 +124,10 @@ class ScheduledChore(BaseChore):
         if self.last_completed and self.last_completed >= pending_at:
             return ChoreStatus.COMPLETED
 
-        # Never completed: stay completed until the first pending window.
-        if self.last_completed is None and self.created_at and self.created_at >= pending_at:
+        # Never completed: allow pending/due but not overdue.  A brand-new
+        # chore should not immediately nag — treat it as completed (no
+        # last_completed) so next_due advances to the following period.
+        if self.last_completed is None and now >= overdue_at:
             return ChoreStatus.COMPLETED
 
         if now >= overdue_at:
@@ -145,9 +147,12 @@ class ScheduledChore(BaseChore):
         overdue_at = period_due + self.grace_period
         pending_at = period_due - self.early_window
 
-        is_completed = (self.last_completed and self.last_completed >= pending_at) or (
-            self.last_completed is None and self.created_at and self.created_at >= pending_at
-        )
+        is_completed = bool(self.last_completed and self.last_completed >= pending_at)
+
+        # Never completed and past the grace period — advance to next period
+        # instead of pinning (new chores should not stay stuck on a missed period).
+        if self.last_completed is None and now >= overdue_at:
+            return self._find_next_active_day(period_due)
 
         if not is_completed and now >= overdue_at:
             # Chore is overdue — return the overdue period's due time.

@@ -62,11 +62,22 @@ class TestScheduledChoreStatus:
         assert chore.compute_status(now) == ChoreStatus.DUE
 
     def test_overdue_after_grace_period(self):
-        """Status is OVERDUE after grace period expires."""
-        chore = _make_scheduled()
+        """Status is OVERDUE after grace period expires (previously completed chore)."""
+        chore = _make_scheduled(
+            last_completed=datetime(2026, 3, 29, 7, 0, tzinfo=TZ),
+        )
         # Grace period ends at 09:00. At 09:01 it's overdue.
         now = datetime(2026, 3, 30, 9, 1, tzinfo=TZ)
         assert chore.compute_status(now) == ChoreStatus.OVERDUE
+
+    def test_never_completed_past_overdue_is_completed(self):
+        """A never-completed chore past the grace period shows as completed, not overdue."""
+        chore = _make_scheduled()
+        # Grace period ends at 09:00. At 09:01 a never-completed chore
+        # should not nag — it shows as completed with next_due on the next day.
+        now = datetime(2026, 3, 30, 9, 1, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.COMPLETED
+        assert chore.last_completed is None
 
     def test_completed_after_completion(self):
         """Status is COMPLETED after completion in the current period."""
@@ -85,13 +96,21 @@ class TestScheduledChoreStatus:
         now = datetime(2026, 3, 30, 6, 0, tzinfo=TZ)
         assert chore.compute_status(now) == ChoreStatus.PENDING
 
-    def test_completed_before_early_window_is_pending(self):
-        """Status before the early window opens is COMPLETED (previous period) or PENDING."""
-        chore = _make_scheduled()
-        # 04:00 — before early window (05:00). Should look at previous day's period.
+    def test_before_early_window_previous_period_overdue(self):
+        """Before early window, a previously-completed chore looks at the prior period."""
+        chore = _make_scheduled(
+            last_completed=datetime(2026, 3, 28, 7, 0, tzinfo=TZ),
+        )
+        # 04:00 — before early window (05:00). Previous day's period is overdue.
         now = datetime(2026, 3, 30, 4, 0, tzinfo=TZ)
-        # No completion, so the previous day's period is overdue.
         assert chore.compute_status(now) == ChoreStatus.OVERDUE
+
+    def test_before_early_window_never_completed_is_completed(self):
+        """Before early window, a never-completed chore is completed (not overdue)."""
+        chore = _make_scheduled()
+        # 04:00 — before early window (05:00). Never-completed chore should not nag.
+        now = datetime(2026, 3, 30, 4, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.COMPLETED
 
 
 class TestScheduledChoreActiveDays:
@@ -105,10 +124,13 @@ class TestScheduledChoreActiveDays:
         assert chore.compute_status(now) == ChoreStatus.PENDING
 
     def test_weekday_only_chore_on_inactive_day(self):
-        """On an inactive day, chore refers back to the last active day."""
+        """On an inactive day, a previously-completed chore refers back to the last active day."""
         # 2026-03-31 is a Tuesday (not active).
-        chore = _make_scheduled(active_days=["mon", "wed", "fri"])
-        # At 6am Tuesday, the period refers back to Monday.
+        chore = _make_scheduled(
+            active_days=["mon", "wed", "fri"],
+            last_completed=datetime(2026, 3, 28, 7, 0, tzinfo=TZ),
+        )
+        # At 10am Tuesday, the period refers back to Monday.
         # Monday's period is overdue by now (past grace).
         now = datetime(2026, 3, 31, 10, 0, tzinfo=TZ)
         assert chore.compute_status(now) == ChoreStatus.OVERDUE
@@ -132,9 +154,18 @@ class TestScheduledChoreNextDue:
 
     def test_next_due_after_due_time_overdue(self):
         """After the due time, an uncompleted chore stays pinned to the overdue period."""
-        chore = _make_scheduled()
+        chore = _make_scheduled(
+            last_completed=datetime(2026, 3, 29, 7, 0, tzinfo=TZ),
+        )
         now = datetime(2026, 3, 30, 10, 0, tzinfo=TZ)
         expected = datetime(2026, 3, 30, 8, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == expected
+
+    def test_next_due_never_completed_past_overdue_advances(self):
+        """A never-completed chore past the grace period advances to the next day."""
+        chore = _make_scheduled()
+        now = datetime(2026, 3, 30, 10, 0, tzinfo=TZ)
+        expected = datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
         assert chore.compute_next_due(now) == expected
 
     def test_next_due_after_due_time_completed(self):

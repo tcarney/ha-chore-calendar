@@ -14,7 +14,7 @@ Chores from all configured lists are merged into a single timeline, sorted by ur
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Chores                                  [▼ Active] │
+│  Chores                                             │
 ├─────────────────────────────────────────────────────┤
 │                                                     │
 │  ── Overdue ────────────────────────────────────── │
@@ -67,7 +67,7 @@ Chores are grouped under status section headers:
 | **Upcoming**  | `pending` chores   | Default secondary text  | `next_due` ascending (soonest first)          |
 | **Completed** | `completed` chores | Muted                   | `last_completed` descending (most recent first) |
 
-Empty sections are hidden. The Completed section is capped at `completed_limit` rows (default 3) with a "Show N more" link to expand. When `show_completed` is `false`, the section is hidden entirely.
+Empty sections are hidden. The Completed section is capped at `completed_limit` rows (default 3); items beyond the limit are not shown. Set `completed_limit` to `0` to show all completed items. When `show_completed` is `false`, the entire section is hidden.
 
 ### Status Indicators (CSS-only)
 
@@ -122,7 +122,7 @@ interface ChoreItem {
 ### Refresh Strategy
 
 1. **Poll**: every `update_interval` seconds (default 60, matches coordinator cycle).
-2. **Event-driven**: subscribe to `chore_calendar_status_changed` for instant updates on state transitions.
+2. **Event-driven**: subscribe to `state_changed` events filtered to configured entity IDs for instant updates on state transitions.
 3. **Post-action**: force refresh after any service call from the card (Phase B+).
 
 ### Why `get_items` over entity states?
@@ -150,70 +150,115 @@ title: "Chores"
 entities:
   - entity: calendar.daily_chores
     color: "#4285F4"
+    exclude:                  # Per-entity status filter (default: [] — show all)
+      - completed
   - entity: calendar.weekly_chores
     color: "#EA4335"
 show_header: true           # Show card title bar (default: true)
 show_completed: true        # Show completed section (default: true)
-completed_limit: 3          # Max completed chores shown before "show more" (default: 3)
-hide_filter: false          # Hide the status filter dropdown (default: false)
+completed_limit: 3          # Max completed chores shown; 0 = unlimited (default: 3)
+show_sections: true         # Show section headings (default: true)
+no_card_background: false   # Transparent card background (default: false)
 update_interval: 60         # Seconds between data refreshes (default: 60)
 compact: false              # Compact row height for narrow columns (default: false)
+tap_action:                 # Action on row tap (default: details)
+  action: details
+hold_action:                # Action on row hold (default: none)
+  action: none
+double_tap_action:          # Action on row double-tap (default: none)
+  action: none
 ```
+
+### Action Configuration
+
+Standard HA-style action configuration for chore row interactions. Uses a gesture handler directive adapted from lovelace-mushroom for tap, hold (500ms), and double-tap detection.
+
+| Action         | Behavior                                               |
+|----------------|--------------------------------------------------------|
+| `details`      | Open the chore detail dialog (default for tap)         |
+| `complete`     | Call `complete_item` directly, no dialog               |
+| `more-info`    | Open HA more-info panel for the source calendar entity |
+| `call-service` | Call an arbitrary service with configured data         |
+| `navigate`     | Navigate to a dashboard path                           |
+| `url`          | Open an external URL                                   |
+| `none`         | Do nothing (default for hold and double-tap)           |
+
+Custom actions (`details`, `complete`) are handled by the card. Standard HA actions are delegated via `hass-action` events.
 
 ### Default Color Palette
 
-When `color` is omitted, auto-assigned from:
+When `color` is omitted, auto-assigned from HA theme color names:
 ```
-#4285F4, #EA4335, #FBBC04, #34A853, #FF6D01, #46BDC6, #7B1FA2, #C2185B
+blue, red, amber, green, orange, cyan, purple, pink
 ```
+
+Colors are HA theme names (e.g. `"red"` → `var(--red-color)`) which adapt to light/dark themes automatically. Raw CSS values (hex codes, `rgb()`, etc.) are also accepted for backwards compatibility. The `themeColorToCss()` utility in `utils.ts` handles the conversion.
 
 Only visible when 2+ entities are configured.
 
 ### Visual Editor
 
 A Lit-based `chore-calendar-card-editor` element:
-- Entity picker (multi-select, filtered to `calendar.chore_calendar` domain)
-- Color picker per entity
-- Toggle switches for show_header, show_completed, hide_filter, compact
+- **Entity section**: each entity is an expandable `ha-expansion-panel`. Collapsed view shows a color dot and the entity's friendly name. Expanded view reveals:
+  - Entity picker (filtered to `calendar.chore_calendar` domain)
+  - Color picker (HA `ui_color` selector via `ha-form` — dropdown with standard theme colors and custom entry)
+  - Exclude statuses multi-select (overdue, due, pending, completed)
+  - Remove button
+- Empty entity config (no entities) renders an inline error message instead of throwing, preventing dashboard editor crashes
+- Newly added entities auto-expand. The "+ Add entity" button appends a new expanded entry.
+- Toggle switches for show_header, show_completed, show_sections, no_card_background
 - Number input for completed_limit and update_interval
+- Action type dropdowns for tap_action, hold_action, double_tap_action (includes custom "Chore Details" and "Complete Chore" options)
 
 ---
 
 ## Filter Behavior
 
-Dropdown in the card header (right side):
+Filtering is configured per entity via the `exclude` option rather than a runtime dropdown. Each entity can exclude any combination of statuses (`overdue`, `due`, `pending`, `completed`). Items matching excluded statuses are filtered out at fetch time, before merging into the timeline. Default is no exclusions (all statuses shown).
 
-| Filter       | Shows                              | Implementation        |
-|-------------|------------------------------------|-----------------------|
-| **All**     | All chores                         | No filter             |
-| **Active**  | Overdue + Due + Pending            | Client-side filter    |
-| **Overdue** | Overdue only                       | `get_items(status=overdue)` |
-| **Due**     | Due only                           | `get_items(status=due)` |
-| **Pending** | Pending only                       | `get_items(status=pending)` |
-| **Completed**| Completed only                    | `get_items(status=completed)` |
-
-Default: **Active** (most useful day-to-day view — completed chores shown on demand).
-
-Filter state is per-card instance, not persisted across page reloads. Single-status filters use server-side filtering via the `get_items` `status` parameter. Multi-status filters ("All", "Active") fetch everything and filter client-side.
+The `show_completed` and `completed_limit` card-level options provide additional control over the completed section across all entities.
 
 ---
 
-## Expandable Row Details (Phase A)
+## Detail Dialog (Phase A)
 
-Tapping a chore row expands it inline to show additional details:
+Tapping a chore row opens a pop-up dialog using HA's `ha-dialog` component for native theme/styling consistency. The dialog shows chore details with MDI icons and will host action buttons (complete, etc.) in future phases.
 
 ```
-┌──┬───┬──────────────────────────┬──────────────┐
-│▌ │ ● │ Morning Medicine          │ 2 hours ago  │
-│  │   ├──────────────────────────┴──────────────┤
-│  │   │ Schedule: Daily at 08:00                │
-│  │   │ Trigger:  tag.morning_medicine          │
-│  │   │ Assigned: person.tom                    │
-│  │   │ Last:     Apr 3, 8:15 AM by Tom         │
-└──┴───┴─────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│  Morning Medicine                       [✕] │
+├─────────────────────────────────────────────┤
+│  📅  Daily Chores                           │
+│  🕐  Daily at 08:00                         │
+│  👤  Tom                                    │
+│  📱  Morning Medicine NFC                   │
+│  ✓   8:15 AM by Tom                         │
+└─────────────────────────────────────────────┘
 ```
 
-Only one row expanded at a time (accordion behavior). Tap again to collapse.
+### Detail rows
+
+Each detail row has an MDI icon and a value. No labels or dividers — icon conveys the meaning. Rows are only rendered when the item has data for that field.
+
+| Row            | Icon                                   | Shows                                                |
+|----------------|----------------------------------------|------------------------------------------------------|
+| **List**       | `<ha-state-icon>` from calendar entity | Calendar entity friendly name — always first         |
+| **Schedule**   | `mdi:calendar-clock`                   | Human-readable schedule from `formatSchedule()`      |
+| **Assigned**   | `mdi:account` / `mdi:account-multiple` | Resolved person names, comma-separated               |
+| **Trigger**    | `mdi:nfc-tap`                          | Resolved trigger entity name                         |
+| **Last done**  | `mdi:check-circle-outline`             | Formatted completion time + "by {person}" if present |
+
+### Implementation
+
+- Component: `chore-detail-dialog` (`card/src/components/chore-detail-dialog.ts`)
+- Uses `<ha-dialog>`, `<ha-icon>`, and `<ha-state-icon>` for native HA look and feel
+- **Minimum HA version: 2026.3.0** — uses the new `ha-dialog` slot-based API (`wa-dialog` / `ha-dialog-header`)
+- Title via `<span slot="headerTitle">`, close button via `<ha-icon-button slot="headerNavigationIcon" data-dialog="close">`
+- Row tap (or configured action) fires `chore-detail` CustomEvent — handled by the main card
+- Main card manages `_dialogItem` and `_dialogOpen` state
+- Dialog fires `detail-dialog-closed` on dismiss
+- Complete button in `footer` slot — `<ha-button variant="brand" appearance="accent" size="medium">`, hidden for already-completed chores, calls `complete_item` service. Footer has `16px` padding and a top border matching HA more-info dialog style.
+- Future phases may add edit/delete buttons to the dialog
 
 ---
 
@@ -221,24 +266,20 @@ Only one row expanded at a time (accordion behavior). Tap again to collapse.
 
 ### Phase A: Read-only (initial release)
 - Display chores in timeline view with status sections
-- Filter dropdown
-- Tap-to-expand row details
+- Per-entity status filtering via `exclude` config
+- Tap-to-open detail dialog
 - Color bars for multi-list
-- Visual editor for configuration
+- Visual editor with expandable per-entity configuration
 - `getCardSize()` returns approximate row count for dashboard grid
 
-### Phase B: Complete action
-- **Tap**: non-completed row → call `chore_calendar.complete_item`:
-  ```typescript
-  await hass.callService('chore_calendar', 'complete_item', {
-    entity_id: calendarEntityId,
-    chore_id: item.chore_id,
-  });
-  ```
-- **Optimistic UI**: immediately move row to completed section with fade animation.
-- **Undo toast**: brief "Completed — Undo" toast (undo = no backend support yet, just re-fetch to restore actual state). Future: add `uncomplete_item` service.
-- **Haptic**: `navigator.vibrate(50)` on mobile for tactile feedback.
-- **Confirmation option**: config flag `confirm_complete: true` to show "Complete {name}?" dialog before calling service.
+### Phase B: Complete action ✅
+- **Complete button** in the detail dialog — `<ha-button variant="brand" appearance="accent">` in `footer` slot, disabled when already completed or loading
+- Calls `chore_calendar.complete_item` via `hass.callWS` with `entity_id` + `chore_id`
+- `completed_by` omitted for now (no HA user context in card); `completed_at` defaults to `now()` server-side
+- On success: fires `chore-completed` event, main card closes dialog and force-refreshes data
+- On error: logs to console, button re-enables for retry
+- Auto-refresh also triggered by existing `chore_calendar_status_changed` event subscription
+- **Future enhancements**: `completed_by` via card config, optimistic UI, haptic feedback, confirmation option
 
 ### Phase C: Create / Update / Delete UI
 - **"+" button** in card header → opens a `ha-dialog` overlay with form fields:
@@ -263,7 +304,7 @@ Only one row expanded at a time (accordion behavior). Tap again to collapse.
 | Components    | **Lit 3.x**             | HA standard, tiny bundle, reactive properties |
 | Language      | **TypeScript**          | Type safety, better DX                       |
 | Date/time     | **Native `Intl`**       | `Intl.RelativeTimeFormat` + `Intl.DateTimeFormat` — zero dependency, < 15KB bundle |
-| Bundler       | **Rollup**              | Single-file output, tree-shaking             |
+| Bundler       | **Rollup**              | Single-file output, tree-shaking, `@rollup/plugin-json` for version import |
 | Package mgr   | **npm**                 | Standard                                     |
 
 ### Bundle Size Budget
@@ -283,11 +324,13 @@ card/
 │   ├── chore-calendar-card.ts       # Main card element (LitElement)
 │   ├── chore-calendar-card-editor.ts # Visual config editor
 │   ├── components/
-│   │   ├── chore-row.ts             # Single chore row component
-│   │   └── status-filter.ts         # Filter dropdown component
-│   ├── styles.ts                    # Shared CSS (tagged template literals)
+│   │   ├── chore-detail-dialog.ts   # Detail pop-up dialog (ha-dialog)
+│   │   └── chore-row.ts             # Single chore row component
+│   ├── action-handler.ts            # Gesture directive (tap/hold/double-tap)
+│   ├── define.ts                    # safeDefine() — guarded customElements.define
+│   ├── fire-event.ts                # Typed fireEvent utility
 │   ├── types.ts                     # TypeScript interfaces
-│   └── utils.ts                     # Relative time formatting, sorting, colors
+│   └── utils.ts                     # Time formatting, sorting, colors, action handling
 ├── rollup.config.mjs
 ├── tsconfig.json
 ├── package.json
@@ -298,26 +341,25 @@ Built output: `card/dist/chore-calendar-card.js` — loaded as a Lovelace resour
 
 ### HA Registration
 
+All custom elements use `safeDefine()` (from `define.ts`) instead of Lit's `@customElement` decorator. This guards against `DOMException` when the script loads twice (e.g. cached + cache-busted versions both execute). Version is logged on module load via `@rollup/plugin-json` importing `package.json`.
+
 ```typescript
 // card/src/chore-calendar-card.ts
 import { LitElement, html, css } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { property, state } from 'lit/decorators.js';
+import { safeDefine } from './define';
+import { version } from '../package.json';
 
-@customElement('chore-calendar-card')
+console.info(`%c CHORE-CALENDAR-CARD %c v${version} `, ...);
+
 export class ChoreCalendarCard extends LitElement {
   static getConfigElement() {
     return document.createElement('chore-calendar-card-editor');
   }
-
-  static getStubConfig() {
-    return { entities: [] };
-  }
-
-  getCardSize(): number {
-    return Math.max(3, this._items.length + 1);
-  }
   // ...
 }
+
+safeDefine('chore-calendar-card', ChoreCalendarCard);
 
 // Self-registration for HACS / card picker
 window.customCards = window.customCards || [];
@@ -371,24 +413,4 @@ disconnectedCallback() {
 
 ## HACS Distribution (Monorepo)
 
-Since the card lives alongside the integration, HACS needs to find both. Options:
-
-1. **Integration**: standard HACS custom integration (`hacs.json` in repo root with `"content_in_root": false`).
-2. **Card**: add `card/dist/chore-calendar-card.js` to the repo. Users manually add the resource URL, or we provide a `hacs.json` with a secondary content path.
-
-Alternatively, the integration's `async_setup` can auto-register the card resource from `custom_components/chore_calendar/www/chore-calendar-card.js` using HA's `frontend.async_register_built_in_panel` or by serving static files. This gives zero-config card loading for users who install the integration.
-
-**Recommended approach**: copy the built JS into `custom_components/chore_calendar/www/` during the build step, then register it in `__init__.py`:
-
-```python
-# In async_setup()
-hass.http.register_static_path(
-    "/chore_calendar/chore-calendar-card.js",
-    hass.config.path("custom_components/chore_calendar/www/chore-calendar-card.js"),
-    cache_headers=True,
-)
-# Auto-add as Lovelace resource
-await hass.components.frontend.async_register_built_in_panel(...)
-```
-
-This way installing the integration automatically makes the card available — no separate HACS card install or manual resource configuration.
+The card JS is auto-registered by the integration as a proper Lovelace resource via `ResourceStorageCollection` (see `_async_register_card_resource` in `__init__.py`). This ensures the card is loaded by HA's lovelace module before cards render, avoiding race conditions in the dashboard editor. A cache-busting `?v=` parameter ensures browsers pick up new versions. Falls back to `add_extra_js_url` when the Lovelace storage collection is unavailable (e.g. YAML-managed dashboards). No separate HACS card install or manual resource configuration needed.

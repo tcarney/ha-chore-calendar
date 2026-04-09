@@ -48,8 +48,7 @@ async def test_coordinator_fires_event_on_status_change(hass):
     store = ChoreStore(hass, "test")
     await store.async_load()
 
-    # Create a chore that is currently COMPLETED.
-    now_completed = datetime(2026, 3, 30, 7, 0, tzinfo=TZ)
+    # Create a chore that is currently COMPLETED (completed this morning).
     chore = ScheduledChore(
         chore_id="medicine",
         chore_name="Medicine",
@@ -57,30 +56,26 @@ async def test_coordinator_fires_event_on_status_change(hass):
         time=time(8, 0),
         early_window=timedelta(hours=3),
         grace_period=timedelta(hours=1),
-        last_completed=now_completed,
+        last_completed=datetime(2026, 3, 30, 7, 0, tzinfo=TZ),
     )
     await store.async_create_chore(chore)
 
-    # First refresh — establishes baseline, no event expected.
+    # First refresh at 07:30 — status is COMPLETED, establishes baseline.
     with patch("homeassistant.util.dt.now", return_value=datetime(2026, 3, 30, 7, 30, tzinfo=TZ)):
         coordinator = await _setup_coordinator(hass, store)
 
-    # Now simulate time advancing past grace period (overdue).
     events: list = []
-    hass.bus.async_listen(EVENT_STATUS_CHANGED, lambda e: events.append(e))
+    hass.bus.async_listen(EVENT_STATUS_CHANGED, events.append)
 
-    # Remove the completion so status changes from COMPLETED to something else.
-    chore.last_completed = None
-    await store.async_update_chore(chore)
-
-    with patch("homeassistant.util.dt.now", return_value=datetime(2026, 3, 30, 9, 30, tzinfo=TZ)):
+    # Time advances to next day's due window (08:30) — status transitions to DUE.
+    with patch("homeassistant.util.dt.now", return_value=datetime(2026, 3, 31, 8, 30, tzinfo=TZ)):
         await coordinator.async_refresh()
     await hass.async_block_till_done()
 
     assert len(events) == 1
     assert events[0].data["chore_id"] == "medicine"
     assert events[0].data["from_status"] == "completed"
-    assert events[0].data["to_status"] == "overdue"
+    assert events[0].data["to_status"] == "due"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -100,7 +95,7 @@ async def test_coordinator_no_event_when_status_unchanged(hass):
     coordinator = await _setup_coordinator(hass, store)
 
     events: list = []
-    hass.bus.async_listen(EVENT_STATUS_CHANGED, lambda e: events.append(e))
+    hass.bus.async_listen(EVENT_STATUS_CHANGED, events.append)
 
     await coordinator.async_refresh()
     await hass.async_block_till_done()
@@ -126,7 +121,7 @@ async def test_coordinator_cleans_up_deleted_chores(hass):
     assert "temp" in coordinator.data
 
     events: list = []
-    hass.bus.async_listen(EVENT_STATUS_CHANGED, lambda e: events.append(e))
+    hass.bus.async_listen(EVENT_STATUS_CHANGED, events.append)
 
     await store.async_delete_chore("temp")
     await coordinator.async_refresh()

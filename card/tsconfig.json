@@ -13,6 +13,7 @@
     "rootDir": "src",
     "experimentalDecorators": true,
     "useDefineForClassFields": false,
+    "resolveJsonModule": true,
     "skipLibCheck": true
   },
   "include": ["src/**/*.ts"]

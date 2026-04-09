@@ -35,13 +35,15 @@ All chore management goes through services, matching how native `calendar` and `
 
 The calendar entity generates events dynamically from chore data — no stored calendar events. Events shown:
 
-- **Last completed**: short event at `last_completed` time, only if within the last 24 hours
-- **Next due**: event spanning from `next_due` to `overdue_at`
+- **Last completed**: zero-duration event at `last_completed` time (always shown for history)
+- **Next due**: event spanning from `due_at` to `overdue_at`
 - At most 2 events per chore at any time
 
 ### Built-in Trigger Handling
 
 When `trigger_entity` (a `tag.*` entity) is provided via the service call, its tag UUID is resolved and stored as `trigger_tag_id` on the chore model. The integration listens for `tag_scanned` events and matches by `tag_id`. For shared triggers (multiple chores using the same tag), the listener determines which chore's completion window the timestamp falls into and only completes that one.
+
+On creation, the tag entity's last-scanned timestamp is also used to seed `last_completed`, allowing migration from existing tag-based systems without losing the most recent completion state.
 
 ### Status Transition Events
 
@@ -93,7 +95,7 @@ completed → pending → due → overdue → (trigger) → completed
 - Period rolls forward at `pending_at` (= `period_due - early_window`)
 - Active days filter controls which days the chore is active
 - On non-active days, stays `completed` until next active day's `pending_at`
-- **New chore behavior**: newly created chores (no `last_completed`) start as `completed` if `created_at >= pending_at` for the current period, staying completed until the first pending window opens
+- **New chore behavior**: newly created chores (no `last_completed`) start in pending/due state immediately, but never go overdue — if the grace period has passed, status is `completed` (with no `last_completed`) and `next_due` advances to the next period
 - **Overdue pinning**: `_find_current_period` walks back from the candidate period to find the earliest uncompleted period, using `last_completed` or `created_at` as anchor. An overdue chore stays pinned to the uncompleted period — `next_due` does not advance until the chore is completed
 
 **Interval Chores** — 3 states:
@@ -289,7 +291,7 @@ Models, storage, coordinator, sensors, and services for scheduled and interval c
   - One calendar entity per list, serves as service target
   - entity_id: `calendar.{list_name}`
 - [x] `services.py` — Service handlers
-  - `chore_calendar.create_item` (scheduled and interval types; chore_id auto-generated from name if omitted)
+  - `chore_calendar.create_item` (scheduled and interval types; chore_id auto-generated from name if omitted; when `trigger_entity` is a tag, seeds `last_completed` from the tag's last-scanned time)
   - `chore_calendar.update_item`
   - `chore_calendar.delete_item`
   - `chore_calendar.complete_item`
@@ -312,9 +314,9 @@ Detailed plan: `.claude/phase2-plan.md`
 - [x] `calendar.py` — ChoreCalendarListEntity event generation (read-only)
   - `event` property: nearest active (non-completed) chore as next event
   - `async_get_events()` generates up to 2 events per chore:
-    - Completed: 0-duration event at `last_completed` if within last 24 hours
+    - Completed: 0-duration event at `last_completed` (always shown for history)
     - Next due: event spanning `due_at` to `overdue_at`
-  - Completed chores show the next period's due event
+  - Completed chores show the next period's due event (including interval chores with future due windows)
   - No CREATE_EVENT/DELETE_EVENT/UPDATE_EVENT support
 - [x] `triggers.py` — Tag scan listener
   - Single `hass.bus.async_listen("tag_scanned", callback)` per entry
@@ -329,17 +331,27 @@ Detailed plan: `.claude/phase2-plan.md`
 Read-only timeline card built with Lit 3.x and TypeScript, bundled via Rollup.
 
 - [x] Data fetching via `hass.callWS` calling `get_items` service with `return_response: true`
-- [x] Multi-entity support with per-entity color configuration
+- [x] Multi-entity support with per-entity color configuration (HA theme color names via `ui_color` selector)
 - [x] Status filtering (all, active, overdue, due, pending, completed) with configurable default
 - [x] Sorting: completed by `last_completed` desc, others by `next_due` asc
-- [x] Expandable detail rows (schedule, assigned persons, trigger tag, last completed)
-- [x] Safari `adoptedStyleSheets` compatibility patch
-- [x] Native `ha-form` config editor with entity picker, color inputs, and options
+- [x] Detail dialog (schedule, assigned persons, trigger tag, last completed) via `ha-dialog`
+- [x] Native `ha-form` config editor with entity picker, `ui_color` color picker, and options
+- [x] Graceful empty-entity config — renders inline error instead of throwing
 - [x] Auto-registered via `add_extra_js_url` — no manual resource setup
-- [x] Config options: title, show_header, show_completed, hide_filter, hide_sections, default_filter, no_card_background, completed_limit, update_interval
+- [x] Config options: title, show_header, show_completed, show_sections, default_filter, no_card_background, completed_limit, update_interval
 - [x] Build tooling: `script/card/` scripts (bootstrap, build, dev, clean) and pre-commit hook for build freshness
 
 Detailed design: `.claude/card-design.md`
+
+### Phase B — Card Complete Action + Row Actions ✅
+
+- [x] Complete button in detail dialog (`primaryAction` slot), hidden for completed chores
+- [x] Configurable `tap_action`, `hold_action`, `double_tap_action` on chore rows
+- [x] Custom actions: `details` (open dialog), `complete` (direct completion)
+- [x] Standard HA actions: `more-info`, `call-service`, `navigate`, `url`, `none`
+- [x] Action handler directive adapted from lovelace-mushroom (tap, 500ms hold, double-tap)
+- [x] `fireEvent` utility and `handleChoreAction` executor
+- [x] Visual editor with action type dropdowns
 
 ### Phase 3 — Polish ✅
 
@@ -484,6 +496,8 @@ class ChoreStatus(StrEnum):
 ### create_item
 
 Chore type is determined by which schedule field is provided: `scheduled` (object) for scheduled chores, `interval` (duration) for interval chores. No explicit `chore_type` or `schedule` object field — the typed selectors replace the old generic object approach.
+
+When `trigger_entity` is a `tag.*` entity, the tag's last-scanned timestamp is read from the entity state and used to seed `last_completed`. This allows existing tag-based chore systems to transfer state into chore calendar automatically — the new chore starts with a realistic completion history.
 
 ```yaml
 chore_calendar.create_item:

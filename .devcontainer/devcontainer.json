@@ -1,12 +1,12 @@
 {
   "name": "HA chore_calendar Dev Container",
-  "image": "mcr.microsoft.com/devcontainers/python:3.13",
-  "postCreateCommand": "bash .devcontainer/setup-shell.sh && bash .devcontainer/setup-git.sh && script/setup/setup",
+  "image": "mcr.microsoft.com/devcontainers/python:3.14",
+  "postCreateCommand": "script/setup/setup",
   "containerEnv": {
     // Home Assistant version to install in the devcontainer.
     // Uncomment and set a specific version if needed (e.g., "2025.12.3").
     // If not set, defaults to version from hacs.json.
-    // "HA_VERSION": "2025.12.3",
+    // "HA_VERSION": "2026.3.3",
     // Install HACS in the Home Assistant installation
     "HA_INSTALL_HACS": "1",
     // Enable asyncio debug mode for easier debugging of async code
@@ -39,14 +39,12 @@
       "extensions": [
         "charliermarsh.ruff",
         "davidanson.vscode-markdownlint",
-        "EditorConfig.EditorConfig",
         "esbenp.prettier-vscode",
-        "GitHub.copilot",
-        "github.vscode-pull-request-github",
         "ms-python.python",
         "ms-python.vscode-pylance",
         "ms-vscode-remote.remote-containers",
-        "redhat.vscode-yaml"
+        "redhat.vscode-yaml",
+        "-ms-python.pylint"
       ],
       // Please keep this file in sync with settings in .vscode/settings.default.jsonc
       "settings": {
@@ -107,32 +105,10 @@
         "[jsontranslation]": {
           "editor.defaultFormatter": "esbenp.prettier-vscode",
           "editor.formatOnSave": false
-        },
-        "json.schemas": [
-          {
-            "fileMatch": ["custom_components/*/manifest.json"],
-            "url": "${containerWorkspaceFolder}/schemas/json/manifest_schema.json"
-          },
-          {
-            "fileMatch": ["custom_components/*/translations/*.json"],
-            "url": "${containerWorkspaceFolder}/schemas/json/translation_schema.json"
-          },
-          {
-            "fileMatch": ["hacs.json"],
-            "url": "${containerWorkspaceFolder}/schemas/json/hacs_schema.json"
-          },
-          {
-            "fileMatch": ["custom_components/*/icons.json"],
-            "url": "${containerWorkspaceFolder}/schemas/json/icons_schema.json"
-          }
-        ]
+        }
       }
     }
   },
-  "mounts": [
-    // Mount host gitconfig for local development (ignored in Codespaces)
-    // In Codespaces, GitHub automatically configures Git with your account
-    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.gitconfig,target=/home/vscode/.gitconfig.host,type=bind,consistency=cached,readonly"
-  ],
+  "mounts": ["source=claude-state,target=/home/vscode/.claude,type=volume"],
   "remoteUser": "vscode"
 }

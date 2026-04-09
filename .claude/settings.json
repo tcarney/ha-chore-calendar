@@ -1,5 +1,5 @@
 {
   "permissions": {
-    "allow": ["Bash(script/check*)", "Bash(script/lint*)", "Bash(script/test*)", "Bash(script/hassfest)"]
+    "allow": ["Bash(script/*)"]
   }
 }

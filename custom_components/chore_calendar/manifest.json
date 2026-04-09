@@ -5,6 +5,7 @@
     "@tcarney"
   ],
   "config_flow": true,
+  "after_dependencies": ["lovelace"],
   "dependencies": ["frontend", "http"],
   "documentation": "https://github.com/tcarney/ha-chore-calendar",
   "iot_class": "calculated",
