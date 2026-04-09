@@ -1,0 +1,13 @@
+{
+  "domain": "chore_calendar",
+  "name": "Chore Calendar",
+  "codeowners": [
+    "@tcarney"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/tcarney/ha-chore-calendar",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/tcarney/ha-chore-calendar/issues",
+  "version": "0.1.0"
+}
