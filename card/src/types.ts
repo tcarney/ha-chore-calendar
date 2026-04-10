@@ -49,13 +49,13 @@ export interface ChoreCalendarCardConfig {
   type: string;
   title?: string;
   entities: (string | EntityConfig)[];
-  show_header?: boolean;
-  show_completed?: boolean;
+  hide_completed?: boolean;
+  hide_pending?: boolean;
   completed_limit?: number;
-  show_sections?: boolean;
+  hide_section_headers?: boolean;
   update_interval?: number;
   compact?: boolean;
-  no_card_background?: boolean;
+  hide_card_background?: boolean;
   tap_action?: ActionConfig;
   hold_action?: ActionConfig;
   double_tap_action?: ActionConfig;

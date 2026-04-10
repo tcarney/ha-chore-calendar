@@ -71,8 +71,8 @@ export class ChoreCalendarCard extends LitElement {
     this._entityConfigs = config.entities.map((e, i) =>
       resolveEntityConfig(e, i),
     );
-    // Reflect no_card_background as a host attribute for CSS.
-    if (config.no_card_background) {
+    // Reflect hide_card_background as a host attribute for CSS.
+    if (config.hide_card_background) {
       this.setAttribute("no-card-background", "");
     } else {
       this.removeAttribute("no-card-background");
@@ -270,18 +270,16 @@ export class ChoreCalendarCard extends LitElement {
       `;
     }
 
-    const showHeader = this._config.show_header !== false;
+    const title = this._config.title;
     return html`
       <ha-card
         @chore-detail=${this._onChoreDetail}
         @chore-completed=${this._onChoreCompleted}
       >
-        ${showHeader
+        ${title
           ? html`
               <div class="header">
-                <span class="title"
-                  >${this._config.title ?? "Chores"}</span
-                >
+                <span class="title">${title}</span>
               </div>
             `
           : nothing}
@@ -305,15 +303,17 @@ export class ChoreCalendarCard extends LitElement {
     }
 
     const groups = groupByStatus(this._items);
-    const showCompleted = this._config.show_completed !== false;
+    const hidePending = !!this._config.hide_pending;
+    const hideCompleted = !!this._config.hide_completed;
     const completedLimit = this._config.completed_limit ?? 3;
-    const hideSections = this._config.show_sections === false;
+    const hideSections = !!this._config.hide_section_headers;
 
     return html`
       ${SECTION_ORDER.map((status) => {
         const items = groups.get(status);
         if (!items || items.length === 0) return nothing;
-        if (status === "completed" && !showCompleted) return nothing;
+        if (status === "pending" && hidePending) return nothing;
+        if (status === "completed" && hideCompleted) return nothing;
 
         const isCompleted = status === "completed";
         const visibleItems =

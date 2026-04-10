@@ -127,6 +127,8 @@ When a chore is created with a `trigger_entity`, the tag's last-scanned timestam
 
 ## Services
 
+Services are the primary method of managing `chore_calendar` entities.
+
 ### Add Chores
 
 ```yaml
@@ -212,6 +214,25 @@ entities:
 
 ### Full Configuration
 
+| Option | Default | Description |
+| --- | --- | --- |
+| `entities` | required | List of `chore_calendar` calendar entities to display |
+| `entities[].color` | auto | Color for the entity's left bar (HA theme name like `"red"` or CSS value like `"#4FC3F7"`) |
+| `entities[].exclude` | `[]` | Statuses to hide for this entity: `overdue`, `due`, `pending`, `completed` |
+| `title` | none | Card title text |
+| `hide_pending` | `false` | Hide the pending section |
+| `hide_completed` | `false` | Hide the completed section |
+| `completed_limit` | `3` | Max completed rows shown; `0` for unlimited |
+| `hide_section_headers` | `false` | Hide section headings (Overdue, Due, Upcoming, Completed) |
+| `hide_card_background` | `false` | Hide the card background (transparent) |
+| `update_interval` | `60` | Seconds between data refreshes |
+| `tap_action` | `details` | [Action](#action-configuration) on row tap |
+| `hold_action` | `none` | [Action](#action-configuration) on row hold (500ms) |
+| `double_tap_action` | `none` | [Action](#action-configuration) on row double-tap |
+
+<details>
+<summary>Complete Example</summary>
+
 ```yaml
 type: custom:chore-calendar-card
 title: "Chores"
@@ -222,11 +243,11 @@ entities:
       - completed
   - entity: calendar.weekly_chores
     color: "#81C784"
-show_header: true
-show_completed: true
+title: Chores
+hide_completed: false
 completed_limit: 3
-show_sections: true
-no_card_background: false
+hide_section_headers: false
+hide_card_background: false
 update_interval: 60
 tap_action:
   action: details
@@ -236,21 +257,7 @@ double_tap_action:
   action: none
 ```
 
-| Option | Default | Description |
-| --- | --- | --- |
-| `entities` | required | List of `chore_calendar` calendar entities to display |
-| `entities[].color` | auto | Color for the entity's left bar (HA theme name like `"red"` or CSS value like `"#4FC3F7"`) |
-| `entities[].exclude` | `[]` | Statuses to hide for this entity: `overdue`, `due`, `pending`, `completed` |
-| `title` | none | Card title text |
-| `show_header` | `true` | Show the card title bar |
-| `show_completed` | `true` | Show the completed section |
-| `completed_limit` | `3` | Max completed rows shown; `0` for unlimited |
-| `show_sections` | `true` | Show section headings (Overdue, Due, Upcoming, Completed) |
-| `no_card_background` | `false` | Transparent card background |
-| `update_interval` | `60` | Seconds between data refreshes |
-| `tap_action` | `details` | Action on row tap |
-| `hold_action` | `none` | Action on row hold (500ms) |
-| `double_tap_action` | `none` | Action on row double-tap |
+</details>
 
 ### Action Configuration
 

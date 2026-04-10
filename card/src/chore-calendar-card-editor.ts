@@ -20,10 +20,10 @@ interface HaFormSchema {
 /** Schema for ha-form options (excludes entities which are handled separately). */
 const OPTIONS_SCHEMA: HaFormSchema[] = [
   { name: "title", selector: { text: {} } },
-  { name: "show_header", selector: { boolean: {} }, default: true },
-  { name: "show_completed", selector: { boolean: {} }, default: true },
-  { name: "show_sections", selector: { boolean: {} }, default: true },
-  { name: "no_card_background", selector: { boolean: {} }, default: false },
+  { name: "hide_completed", selector: { boolean: {} }, default: false },
+  { name: "hide_pending", selector: { boolean: {} }, default: false },
+  { name: "hide_section_headers", selector: { boolean: {} }, default: false },
+  { name: "hide_card_background", selector: { boolean: {} }, default: false },
   {
     name: "completed_limit",
     selector: { number: { min: 0, max: 50, step: 1, mode: "box" } },
@@ -83,10 +83,10 @@ const EXCLUDE_SCHEMA: HaFormSchema[] = [
 
 const LABELS: Record<string, string> = {
   title: "Title",
-  show_header: "Show header",
-  show_completed: "Show completed section",
-  show_sections: "Show section headings",
-  no_card_background: "Transparent card background",
+  hide_completed: "Hide completed section",
+  hide_pending: "Hide pending section",
+  hide_section_headers: "Hide section headings",
+  hide_card_background: "Hide card background",
   completed_limit: "Completed chores limit",
   update_interval: "Update interval (seconds)",
   tap_action: "Tap action",
