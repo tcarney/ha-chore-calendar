@@ -7,10 +7,6 @@ create_item:
           filter:
             - domain: calendar
               integration: chore_calendar
-    chore_id:
-      example: "morning_medicine"
-      selector:
-        text:
     chore_name:
       required: true
       example: "Morning Medicine"
@@ -76,7 +72,7 @@ update_item:
               integration: chore_calendar
             - domain: sensor
               integration: chore_calendar
-    chore_id:
+    item:
       selector:
         text:
     chore_name:
@@ -141,7 +137,7 @@ delete_item:
               integration: chore_calendar
             - domain: sensor
               integration: chore_calendar
-    chore_id:
+    item:
       selector:
         text:
 
@@ -156,7 +152,7 @@ complete_item:
               integration: chore_calendar
             - domain: sensor
               integration: chore_calendar
-    chore_id:
+    item:
       selector:
         text:
     completed_by:

@@ -26,7 +26,7 @@ async def test_store_create_and_get(hass):
     await store.async_load()
 
     chore = IntervalChore(
-        chore_id="water_filter",
+        uid="water_filter",
         chore_name="Change Water Filter",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=90),
@@ -46,7 +46,7 @@ async def test_store_update_chore(hass):
     await store.async_load()
 
     chore = IntervalChore(
-        chore_id="water_filter",
+        uid="water_filter",
         chore_name="Change Water Filter",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=90),
@@ -68,7 +68,7 @@ async def test_store_delete_chore(hass):
     await store.async_load()
 
     chore = IntervalChore(
-        chore_id="water_filter",
+        uid="water_filter",
         chore_name="Change Water Filter",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=90),
@@ -87,7 +87,7 @@ async def test_store_persistence_round_trip(hass):
     await store1.async_load()
 
     chore = ScheduledChore(
-        chore_id="morning_medicine",
+        uid="morning_medicine",
         chore_name="Morning Medicine",
         chore_type=ChoreType.SCHEDULED,
     )
@@ -110,7 +110,7 @@ async def test_store_get_all_returns_copy(hass):
     await store.async_load()
 
     chore = IntervalChore(
-        chore_id="test",
+        uid="test",
         chore_name="Test",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=1),

@@ -16,6 +16,7 @@ from homeassistant.helpers import entity_registry as er
 
 TZ = timezone(timedelta(hours=-5))
 FROZEN_NOW = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
+TEST_UID = "aabbccdd-1122-3344-5566-778899aabbcc"
 
 
 @pytest.fixture
@@ -39,7 +40,7 @@ async def _setup_with_chore(hass, entry: MockConfigEntry) -> str:
     # Create a chore so service tests that need an existing chore can use it.
     runtime_data = entry.runtime_data
     chore = IntervalChore(
-        chore_id="test_chore",
+        uid=TEST_UID,
         chore_name="Test Chore",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=3),
@@ -56,13 +57,21 @@ async def _setup_with_chore(hass, entry: MockConfigEntry) -> str:
     return entity_id
 
 
-def _get_sensor_entity_id(hass, entry: MockConfigEntry, chore_id: str) -> str:
+def _get_sensor_entity_id(hass, entry: MockConfigEntry, uid: str) -> str:
     """Return the sensor entity_id for a chore."""
     registry = er.async_get(hass)
-    unique_id = f"{entry.entry_id}_{chore_id}"
+    unique_id = f"{entry.entry_id}_{uid}"
     entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
     assert entity_id is not None
     return entity_id
+
+
+def _find_chore_by_name(store, name: str):
+    """Find a chore in the store by name."""
+    for chore in store.get_all_chores().values():
+        if chore.chore_name == name:
+            return chore
+    return None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -75,7 +84,6 @@ async def test_create_item(hass, config_entry):
         "create_item",
         {
             "entity_id": entity_id,
-            "chore_id": "new_chore",
             "chore_name": "New Chore",
             "interval": {"days": 1},
             "grace_period": {"hours": 1},
@@ -85,15 +93,15 @@ async def test_create_item(hass, config_entry):
     await hass.async_block_till_done()
 
     store = config_entry.runtime_data.store
-    chore = store.get_chore("new_chore")
+    chore = _find_chore_by_name(store, "New Chore")
     assert chore is not None
-    assert chore.chore_name == "New Chore"
+    assert len(chore.uid) == 36  # Standard UUID format with dashes
     assert chore.created_at is not None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_create_item_auto_generates_chore_id(hass, config_entry):
-    """create_item generates chore_id from chore_name when omitted."""
+async def test_create_item_generates_uid(hass, config_entry):
+    """create_item always generates a unique UID."""
     entity_id = await _setup_with_chore(hass, config_entry)
 
     await hass.services.async_call(
@@ -110,27 +118,35 @@ async def test_create_item_auto_generates_chore_id(hass, config_entry):
     await hass.async_block_till_done()
 
     store = config_entry.runtime_data.store
-    assert store.get_chore("morning_medicine") is not None
-    assert store.get_chore("morning_medicine").chore_name == "Morning Medicine"
+    chore = _find_chore_by_name(store, "Morning Medicine")
+    assert chore is not None
+    assert len(chore.uid) == 36  # Standard UUID format with dashes
+    # UID should not be a slug of the name.
+    assert chore.uid != "morning_medicine"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_create_item_duplicate_raises(hass, config_entry):
-    """create_item raises when chore_id already exists."""
+async def test_create_item_same_name_succeeds(hass, config_entry):
+    """create_item with the same name succeeds because UIDs are always unique."""
     entity_id = await _setup_with_chore(hass, config_entry)
 
-    with pytest.raises(ServiceValidationError, match="already exists"):
+    for _ in range(2):
         await hass.services.async_call(
             DOMAIN,
             "create_item",
             {
                 "entity_id": entity_id,
-                "chore_id": "test_chore",
-                "chore_name": "Duplicate",
+                "chore_name": "Duplicate Name",
                 "interval": {"days": 1},
             },
             blocking=True,
         )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    matches = [c for c in store.get_all_chores().values() if c.chore_name == "Duplicate Name"]
+    assert len(matches) == 2
+    assert matches[0].uid != matches[1].uid
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -143,7 +159,6 @@ async def test_create_scheduled_item(hass, config_entry):
         "create_item",
         {
             "entity_id": entity_id,
-            "chore_id": "morning_med",
             "chore_name": "Morning Medicine",
             "scheduled": {
                 "time": "08:00:00",
@@ -159,7 +174,7 @@ async def test_create_scheduled_item(hass, config_entry):
     await hass.async_block_till_done()
 
     store = config_entry.runtime_data.store
-    chore = store.get_chore("morning_med")
+    chore = _find_chore_by_name(store, "Morning Medicine")
     assert chore is not None
     assert chore.chore_name == "Morning Medicine"
     assert chore.assigned_to == ["person.alice"]
@@ -175,19 +190,19 @@ async def test_update_item(hass, config_entry):
         "update_item",
         {
             "entity_id": entity_id,
-            "chore_id": "test_chore",
+            "item": "Test Chore",
             "chore_name": "Updated Name",
         },
         blocking=True,
     )
 
     store = config_entry.runtime_data.store
-    assert store.get_chore("test_chore").chore_name == "Updated Name"
+    assert store.get_chore(TEST_UID).chore_name == "Updated Name"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_update_item_not_found_raises(hass, config_entry):
-    """update_item raises when chore_id does not exist."""
+    """update_item raises when item does not exist."""
     entity_id = await _setup_with_chore(hass, config_entry)
 
     with pytest.raises(ServiceValidationError, match="not found"):
@@ -196,7 +211,7 @@ async def test_update_item_not_found_raises(hass, config_entry):
             "update_item",
             {
                 "entity_id": entity_id,
-                "chore_id": "nonexistent",
+                "item": "nonexistent",
                 "chore_name": "Nope",
             },
             blocking=True,
@@ -213,19 +228,19 @@ async def test_delete_item(hass, config_entry):
         "delete_item",
         {
             "entity_id": entity_id,
-            "chore_id": "test_chore",
+            "item": "Test Chore",
         },
         blocking=True,
     )
     await hass.async_block_till_done()
 
     store = config_entry.runtime_data.store
-    assert store.get_chore("test_chore") is None
+    assert store.get_chore(TEST_UID) is None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_delete_item_not_found_raises(hass, config_entry):
-    """delete_item raises when chore_id does not exist."""
+    """delete_item raises when item does not exist."""
     entity_id = await _setup_with_chore(hass, config_entry)
 
     with pytest.raises(ServiceValidationError, match="not found"):
@@ -234,7 +249,7 @@ async def test_delete_item_not_found_raises(hass, config_entry):
             "delete_item",
             {
                 "entity_id": entity_id,
-                "chore_id": "nonexistent",
+                "item": "nonexistent",
             },
             blocking=True,
         )
@@ -251,14 +266,14 @@ async def test_complete_item(hass, config_entry):
             "complete_item",
             {
                 "entity_id": entity_id,
-                "chore_id": "test_chore",
+                "item": "Test Chore",
                 "completed_by": "person.alice",
             },
             blocking=True,
         )
 
     store = config_entry.runtime_data.store
-    chore = store.get_chore("test_chore")
+    chore = store.get_chore(TEST_UID)
     assert chore.last_completed is not None
     assert chore.last_completed_by == "person.alice"
 
@@ -273,14 +288,14 @@ async def test_complete_item_with_timestamp(hass, config_entry):
         "complete_item",
         {
             "entity_id": entity_id,
-            "chore_id": "test_chore",
+            "item": TEST_UID,
             "completed_at": "2026-03-30T08:00:00-05:00",
         },
         blocking=True,
     )
 
     store = config_entry.runtime_data.store
-    chore = store.get_chore("test_chore")
+    chore = store.get_chore(TEST_UID)
     assert chore.last_completed is not None
     assert chore.last_completed.hour == 8
 
@@ -296,7 +311,7 @@ async def test_complete_item_invalid_datetime_raises(hass, config_entry):
             "complete_item",
             {
                 "entity_id": entity_id,
-                "chore_id": "test_chore",
+                "item": "Test Chore",
                 "completed_at": "not-a-date",
             },
             blocking=True,
@@ -318,7 +333,7 @@ async def test_get_items(hass, config_entry):
 
     assert "items" in response
     assert len(response["items"]) == 1
-    assert response["items"][0]["chore_id"] == "test_chore"
+    assert response["items"][0]["uid"] == TEST_UID
     assert response["items"][0]["status"] in ("completed", "due", "overdue", "pending")
 
 
@@ -350,7 +365,7 @@ async def test_get_items_with_status_filter(hass, config_entry):
 
 
 # ---------------------------------------------------------------------------
-# Sensor entity targeting (chore_id inferred from entity)
+# Sensor entity targeting (item inferred from entity)
 # ---------------------------------------------------------------------------
 
 
@@ -358,7 +373,7 @@ async def test_get_items_with_status_filter(hass, config_entry):
 async def test_complete_item_via_sensor_entity(hass, config_entry):
     """complete_item works when targeting the sensor entity directly."""
     await _setup_with_chore(hass, config_entry)
-    sensor_id = _get_sensor_entity_id(hass, config_entry, "test_chore")
+    sensor_id = _get_sensor_entity_id(hass, config_entry, TEST_UID)
 
     with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
         await hass.services.async_call(
@@ -368,7 +383,7 @@ async def test_complete_item_via_sensor_entity(hass, config_entry):
             blocking=True,
         )
 
-    chore = config_entry.runtime_data.store.get_chore("test_chore")
+    chore = config_entry.runtime_data.store.get_chore(TEST_UID)
     assert chore.last_completed is not None
     assert chore.last_completed_by == "person.bob"
 
@@ -377,7 +392,7 @@ async def test_complete_item_via_sensor_entity(hass, config_entry):
 async def test_update_item_via_sensor_entity(hass, config_entry):
     """update_item works when targeting the sensor entity directly."""
     await _setup_with_chore(hass, config_entry)
-    sensor_id = _get_sensor_entity_id(hass, config_entry, "test_chore")
+    sensor_id = _get_sensor_entity_id(hass, config_entry, TEST_UID)
 
     await hass.services.async_call(
         DOMAIN,
@@ -386,7 +401,7 @@ async def test_update_item_via_sensor_entity(hass, config_entry):
         blocking=True,
     )
 
-    chore = config_entry.runtime_data.store.get_chore("test_chore")
+    chore = config_entry.runtime_data.store.get_chore(TEST_UID)
     assert chore.chore_name == "Renamed Chore"
 
 
@@ -394,7 +409,7 @@ async def test_update_item_via_sensor_entity(hass, config_entry):
 async def test_delete_item_via_sensor_entity(hass, config_entry):
     """delete_item works when targeting the sensor entity directly."""
     await _setup_with_chore(hass, config_entry)
-    sensor_id = _get_sensor_entity_id(hass, config_entry, "test_chore")
+    sensor_id = _get_sensor_entity_id(hass, config_entry, TEST_UID)
 
     await hass.services.async_call(
         DOMAIN,
@@ -404,15 +419,15 @@ async def test_delete_item_via_sensor_entity(hass, config_entry):
     )
     await hass.async_block_till_done()
 
-    assert config_entry.runtime_data.store.get_chore("test_chore") is None
+    assert config_entry.runtime_data.store.get_chore(TEST_UID) is None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_complete_item_calendar_without_chore_id_raises(hass, config_entry):
-    """complete_item raises when targeting a calendar entity without chore_id."""
+async def test_complete_item_calendar_without_item_raises(hass, config_entry):
+    """complete_item raises when targeting a calendar entity without item."""
     calendar_id = await _setup_with_chore(hass, config_entry)
 
-    with pytest.raises(ServiceValidationError, match="chore_id is required"):
+    with pytest.raises(ServiceValidationError, match="item is required"):
         await hass.services.async_call(
             DOMAIN,
             "complete_item",
@@ -422,11 +437,11 @@ async def test_complete_item_calendar_without_chore_id_raises(hass, config_entry
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_update_item_calendar_without_chore_id_raises(hass, config_entry):
-    """update_item raises when targeting a calendar entity without chore_id."""
+async def test_update_item_calendar_without_item_raises(hass, config_entry):
+    """update_item raises when targeting a calendar entity without item."""
     calendar_id = await _setup_with_chore(hass, config_entry)
 
-    with pytest.raises(ServiceValidationError, match="chore_id is required"):
+    with pytest.raises(ServiceValidationError, match="item is required"):
         await hass.services.async_call(
             DOMAIN,
             "update_item",
@@ -436,11 +451,11 @@ async def test_update_item_calendar_without_chore_id_raises(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_delete_item_calendar_without_chore_id_raises(hass, config_entry):
-    """delete_item raises when targeting a calendar entity without chore_id."""
+async def test_delete_item_calendar_without_item_raises(hass, config_entry):
+    """delete_item raises when targeting a calendar entity without item."""
     calendar_id = await _setup_with_chore(hass, config_entry)
 
-    with pytest.raises(ServiceValidationError, match="chore_id is required"):
+    with pytest.raises(ServiceValidationError, match="item is required"):
         await hass.services.async_call(
             DOMAIN,
             "delete_item",
@@ -480,7 +495,6 @@ async def test_create_item_resolves_tag_id(hass, config_entry):
         "create_item",
         {
             "entity_id": entity_id,
-            "chore_id": "tagged_chore",
             "chore_name": "Tagged Chore",
             "interval": {"days": 1},
             "trigger_entity": tag_entity_id,
@@ -490,7 +504,7 @@ async def test_create_item_resolves_tag_id(hass, config_entry):
     await hass.async_block_till_done()
 
     store = config_entry.runtime_data.store
-    chore = store.get_chore("tagged_chore")
+    chore = _find_chore_by_name(store, "Tagged Chore")
     assert chore is not None
     assert chore.trigger_tag_id == TAG_UUID
 
@@ -505,7 +519,6 @@ async def test_create_item_non_tag_trigger_has_no_tag_id(hass, config_entry):
         "create_item",
         {
             "entity_id": entity_id,
-            "chore_id": "button_chore",
             "chore_name": "Button Chore",
             "interval": {"days": 1},
             "trigger_entity": "input_button.my_button",
@@ -515,7 +528,7 @@ async def test_create_item_non_tag_trigger_has_no_tag_id(hass, config_entry):
     await hass.async_block_till_done()
 
     store = config_entry.runtime_data.store
-    chore = store.get_chore("button_chore")
+    chore = _find_chore_by_name(store, "Button Chore")
     assert chore is not None
     assert chore.trigger_tag_id is None
 
@@ -531,12 +544,12 @@ async def test_update_item_resolves_tag_id(hass, config_entry):
         "update_item",
         {
             "entity_id": entity_id,
-            "chore_id": "test_chore",
+            "item": "Test Chore",
             "trigger_entity": tag_entity_id,
         },
         blocking=True,
     )
 
     store = config_entry.runtime_data.store
-    chore = store.get_chore("test_chore")
+    chore = store.get_chore(TEST_UID)
     assert chore.trigger_tag_id == TAG_UUID

@@ -1,6 +1,6 @@
 /** Chore item as returned by chore_calendar.get_items service. */
 export interface ChoreItem {
-  chore_id: string;
+  uid: string;
   chore_name: string;
   chore_type: "scheduled" | "interval";
   status: ChoreStatus;

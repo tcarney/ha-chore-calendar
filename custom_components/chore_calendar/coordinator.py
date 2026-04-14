@@ -32,16 +32,16 @@ class ChoreCalendarCoordinator(DataUpdateCoordinator[dict[str, BaseChore]]):
         chores = self.store.get_all_chores()
         now = dt_util.now()
 
-        for chore_id, chore in chores.items():
+        for uid, chore in chores.items():
             current_status = chore.compute_status(now)
-            previous_status = self._previous_statuses.get(chore_id)
+            previous_status = self._previous_statuses.get(uid)
 
             if previous_status is not None and current_status != previous_status:
                 next_due = chore.compute_next_due(now)
                 self.hass.bus.async_fire(
                     EVENT_STATUS_CHANGED,
                     {
-                        "chore_id": chore.chore_id,
+                        "uid": chore.uid,
                         "chore_name": chore.chore_name,
                         "from_status": str(previous_status),
                         "to_status": str(current_status),
@@ -50,11 +50,11 @@ class ChoreCalendarCoordinator(DataUpdateCoordinator[dict[str, BaseChore]]):
                     },
                 )
 
-            self._previous_statuses[chore_id] = current_status
+            self._previous_statuses[uid] = current_status
 
         # Clean up statuses for deleted chores.
         deleted = self._previous_statuses.keys() - chores.keys()
-        for chore_id in deleted:
-            del self._previous_statuses[chore_id]
+        for uid in deleted:
+            del self._previous_statuses[uid]
 
         return chores

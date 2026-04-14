@@ -44,7 +44,7 @@ async def test_sensor_created_for_existing_chore(hass, config_entry):
     # Create a chore via the store, then refresh the coordinator.
     runtime_data = config_entry.runtime_data
     chore = IntervalChore(
-        chore_id="water_filter",
+        uid="water_filter",
         chore_name="Change Water Filter",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=90),
@@ -59,8 +59,8 @@ async def test_sensor_created_for_existing_chore(hass, config_entry):
     entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
     assert entity_id is not None
 
-    # Entity ID should have the device name prefix.
-    assert entity_id == "sensor.daily_chores_water_filter"
+    # Entity ID should have the device name prefix + slugified chore name.
+    assert entity_id == "sensor.daily_chores_change_water_filter"
 
     # Check state.
     with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
@@ -76,7 +76,7 @@ async def test_sensor_removed_when_chore_deleted(hass, config_entry):
 
     runtime_data = config_entry.runtime_data
     chore = IntervalChore(
-        chore_id="temp_chore",
+        uid="temp_chore",
         chore_name="Temporary",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=1),
@@ -110,7 +110,7 @@ async def test_sensor_attributes(hass, config_entry):
     registry.async_get_or_create("tag", "tag", "dishes-tag-uuid", suggested_object_id="dishes")
 
     chore = IntervalChore(
-        chore_id="dishes",
+        uid="dishes",
         chore_name="Do Dishes",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=1),
@@ -127,7 +127,7 @@ async def test_sensor_attributes(hass, config_entry):
 
     state = hass.states.get(entity_id)
     assert state is not None
-    assert state.attributes["chore_id"] == "dishes"
+    assert state.attributes["uid"] == "dishes"
     assert state.attributes["chore_type"] == "interval"
     assert state.attributes["trigger_entity"] == "tag.dishes"
     assert state.attributes["assigned_to"] == ["person.alice"]

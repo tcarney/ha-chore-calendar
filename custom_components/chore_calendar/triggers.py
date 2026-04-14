@@ -45,7 +45,7 @@ def async_setup_tag_listener(
         if not matching:
             return
 
-        LOGGER.debug("Tag %s matched %d chore(s): %s", tag_id, len(matching), [c.chore_id for c in matching])
+        LOGGER.debug("Tag %s matched %d chore(s): %s", tag_id, len(matching), [c.chore_name for c in matching])
 
         # Complete each matching chore. We schedule a coroutine because the
         # bus callback is synchronous.
@@ -66,6 +66,6 @@ async def _async_complete_chores(
         updated["last_completed"] = now.isoformat()
         updated_chore = BaseChore.from_dict(updated)
         await store.async_update_chore(updated_chore)
-        LOGGER.info("Auto-completed chore %s via tag scan", chore.chore_id)
+        LOGGER.info("Auto-completed chore %s (%s) via tag scan", chore.chore_name, chore.uid)
 
     await coordinator.async_refresh()

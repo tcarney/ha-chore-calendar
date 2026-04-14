@@ -4,17 +4,18 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, cast
+from uuid import uuid4
 
 import voluptuous as vol
 
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv, entity_registry as er
-from homeassistant.util import dt as dt_util, slugify as slugify_util
+from homeassistant.util import dt as dt_util
 
 from .const import (
     ATTR_ASSIGNED_TO,
-    ATTR_CHORE_ID,
+    ATTR_ITEM,
     ATTR_TRIGGER_ENTITY,
     DOMAIN,
     LOGGER,
@@ -44,7 +45,6 @@ ATTR_GRACE_PERIOD = "grace_period"
 SERVICE_CREATE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-        vol.Optional(ATTR_CHORE_ID): cv.string,
         vol.Required(ATTR_CHORE_NAME): cv.string,
         vol.Optional(ATTR_TRIGGER_ENTITY): cv.entity_id,
         vol.Optional(ATTR_ASSIGNED_TO, default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
@@ -57,7 +57,7 @@ SERVICE_CREATE_SCHEMA = vol.Schema(
 SERVICE_UPDATE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-        vol.Optional(ATTR_CHORE_ID): cv.string,
+        vol.Optional(ATTR_ITEM): cv.string,
         vol.Optional(ATTR_CHORE_NAME): cv.string,
         vol.Optional(ATTR_TRIGGER_ENTITY): cv.entity_id,
         vol.Optional(ATTR_ASSIGNED_TO): vol.All(cv.ensure_list, [cv.entity_id]),
@@ -70,14 +70,14 @@ SERVICE_UPDATE_SCHEMA = vol.Schema(
 SERVICE_DELETE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-        vol.Optional(ATTR_CHORE_ID): cv.string,
+        vol.Optional(ATTR_ITEM): cv.string,
     }
 )
 
 SERVICE_COMPLETE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-        vol.Optional(ATTR_CHORE_ID): cv.string,
+        vol.Optional(ATTR_ITEM): cv.string,
         vol.Optional(ATTR_COMPLETED_BY): cv.entity_id,
         vol.Optional(ATTR_COMPLETED_AT): cv.string,
     }
@@ -116,29 +116,38 @@ def _resolve_entry_data(hass: HomeAssistant, entity_id: str) -> tuple[ChoreStore
     return runtime_data.store, runtime_data.coordinator
 
 
-def _resolve_chore_id(hass: HomeAssistant, entity_id: str, explicit_chore_id: str | None) -> str:
-    """Resolve the chore_id from a service call.
+def _resolve_item(hass: HomeAssistant, entity_id: str, explicit_item: str | None, store: ChoreStore) -> str:
+    """Resolve a chore UID from a service call.
 
-    If *explicit_chore_id* is provided it is returned as-is.  Otherwise the
-    chore_id is extracted from the sensor entity's unique_id (format:
-    ``{entry_id}_{chore_id}``).
+    If *explicit_item* is provided, it is matched first as a UID, then as a
+    case-insensitive chore name.  Otherwise the UID is extracted from the
+    sensor entity's unique_id (format: ``{entry_id}_{uid}``).
     """
-    if explicit_chore_id:
-        return explicit_chore_id
+    if explicit_item:
+        # Try direct UID match.
+        if store.get_chore(explicit_item) is not None:
+            return explicit_item
+        # Try case-insensitive name match.
+        item_lower = explicit_item.lower()
+        for uid, chore in store.get_all_chores().items():
+            if chore.chore_name.lower() == item_lower:
+                return uid
+        msg = f"Chore '{explicit_item}' not found"
+        raise ServiceValidationError(msg)
 
     registry = er.async_get(hass)
     entry = registry.async_get(entity_id)
     if entry is None or entry.domain != "sensor":
-        msg = "chore_id is required when targeting a calendar entity"
+        msg = "item is required when targeting a calendar entity"
         raise ServiceValidationError(msg)
 
-    # unique_id format: {entry_id}_{chore_id}
+    # unique_id format: {entry_id}_{uid}
     unique_id = entry.unique_id
     config_entry_id = entry.config_entry_id or ""
     if unique_id and unique_id.startswith(config_entry_id + "_"):
         return unique_id[len(config_entry_id) + 1 :]
 
-    msg = f"Cannot determine chore_id from entity {entity_id}"
+    msg = f"Cannot determine chore from entity {entity_id}"
     raise ServiceValidationError(msg)
 
 
@@ -231,7 +240,7 @@ def _build_chore_from_data(data: dict[str, Any]) -> BaseChore:
     chore_type = _infer_chore_type(data)
     schedule = _build_schedule_dict(data, chore_type)
     base_kwargs: dict[str, Any] = {
-        "chore_id": data[ATTR_CHORE_ID],
+        "uid": data["uid"],
         "chore_name": data[ATTR_CHORE_NAME],
         "chore_type": chore_type,
         "assigned_to": list(data.get(ATTR_ASSIGNED_TO, [])),
@@ -246,16 +255,13 @@ async def _async_handle_create(call: ServiceCall) -> None:
     """Handle create_item service call."""
     store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
 
-    chore_id = call.data.get(ATTR_CHORE_ID) or slugify_util(call.data[ATTR_CHORE_NAME])
-    if store.get_chore(chore_id) is not None:
-        msg = f"Chore {chore_id} already exists"
-        raise ServiceValidationError(msg)
+    uid = str(uuid4())
 
     # Resolve tag UUID if trigger_entity is a tag.
     trigger_tag_id = _resolve_trigger_tag_id(call.hass, call.data.get(ATTR_TRIGGER_ENTITY))
 
-    # Ensure the resolved chore_id is in the data for _build_chore_from_data.
-    data = {**call.data, ATTR_CHORE_ID: chore_id}
+    # Inject the generated uid for _build_chore_from_data.
+    data = {**call.data, "uid": uid}
     chore = _build_chore_from_data(data)
     chore.trigger_tag_id = trigger_tag_id
     chore.created_at = dt_util.now()
@@ -269,17 +275,17 @@ async def _async_handle_create(call: ServiceCall) -> None:
 
     await store.async_create_chore(chore)
     await coordinator.async_refresh()
-    LOGGER.debug("Created chore %s", chore_id)
+    LOGGER.debug("Created chore %s (%s)", chore.chore_name, uid)
 
 
 async def _async_handle_update(call: ServiceCall) -> None:
     """Handle update_item service call."""
     store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
 
-    chore_id = _resolve_chore_id(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_CHORE_ID))
-    existing = store.get_chore(chore_id)
+    uid = _resolve_item(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_ITEM), store)
+    existing = store.get_chore(uid)
     if existing is None:
-        msg = f"Chore {chore_id} not found"
+        msg = f"Chore '{uid}' not found"
         raise ServiceValidationError(msg)
 
     # Build updated dict from existing chore, overlaying provided fields.
@@ -312,31 +318,32 @@ async def _async_handle_update(call: ServiceCall) -> None:
     chore = BaseChore.from_dict(updated)
     await store.async_update_chore(chore)
     await coordinator.async_refresh()
-    LOGGER.debug("Updated chore %s", chore_id)
+    LOGGER.debug("Updated chore %s (%s)", existing.chore_name, uid)
 
 
 async def _async_handle_delete(call: ServiceCall) -> None:
     """Handle delete_item service call."""
     store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
 
-    chore_id = _resolve_chore_id(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_CHORE_ID))
-    if store.get_chore(chore_id) is None:
-        msg = f"Chore {chore_id} not found"
+    uid = _resolve_item(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_ITEM), store)
+    existing = store.get_chore(uid)
+    if existing is None:
+        msg = f"Chore '{uid}' not found"
         raise ServiceValidationError(msg)
 
-    await store.async_delete_chore(chore_id)
+    await store.async_delete_chore(uid)
     await coordinator.async_refresh()
-    LOGGER.debug("Deleted chore %s", chore_id)
+    LOGGER.debug("Deleted chore %s (%s)", existing.chore_name, uid)
 
 
 async def _async_handle_complete(call: ServiceCall) -> None:
     """Handle complete_item service call."""
     store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
 
-    chore_id = _resolve_chore_id(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_CHORE_ID))
-    existing = store.get_chore(chore_id)
+    uid = _resolve_item(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_ITEM), store)
+    existing = store.get_chore(uid)
     if existing is None:
-        msg = f"Chore {chore_id} not found"
+        msg = f"Chore '{uid}' not found"
         raise ServiceValidationError(msg)
 
     # Parse completion timestamp.
@@ -357,7 +364,7 @@ async def _async_handle_complete(call: ServiceCall) -> None:
     chore = BaseChore.from_dict(updated)
     await store.async_update_chore(chore)
     await coordinator.async_refresh()
-    LOGGER.debug("Completed chore %s at %s", chore_id, completed_at.isoformat())
+    LOGGER.debug("Completed chore %s (%s) at %s", existing.chore_name, uid, completed_at.isoformat())
 
 
 async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
@@ -376,7 +383,7 @@ async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
         next_due = chore.compute_next_due(now)
         items.append(
             {
-                "chore_id": chore.chore_id,
+                "uid": chore.uid,
                 "chore_name": chore.chore_name,
                 "chore_type": str(chore.chore_type),
                 "status": current_status,

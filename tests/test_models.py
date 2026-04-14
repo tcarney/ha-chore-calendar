@@ -28,7 +28,7 @@ def _make_scheduled(
 ) -> ScheduledChore:
     """Create a ScheduledChore with test defaults."""
     return ScheduledChore(
-        chore_id="test_chore",
+        uid="test_chore",
         chore_name="Test Chore",
         chore_type=ChoreType.SCHEDULED,
         time=sched_time,
@@ -230,7 +230,7 @@ def _make_interval(
 ) -> IntervalChore:
     """Create an IntervalChore with test defaults."""
     return IntervalChore(
-        chore_id="test_interval",
+        uid="test_interval",
         chore_name="Test Interval",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(minutes=interval_mins),
@@ -373,7 +373,7 @@ class TestSerialization:
         restored = BaseChore.from_dict(data)
 
         assert isinstance(restored, ScheduledChore)
-        assert restored.chore_id == original.chore_id
+        assert restored.uid == original.uid
         assert restored.chore_name == original.chore_name
         assert restored.time == original.time
         assert restored.active_days == original.active_days
@@ -395,7 +395,7 @@ class TestSerialization:
         restored = BaseChore.from_dict(data)
 
         assert isinstance(restored, IntervalChore)
-        assert restored.chore_id == original.chore_id
+        assert restored.uid == original.uid
         assert restored.interval == original.interval
         assert restored.grace_period == original.grace_period
         assert restored.created_at == original.created_at
@@ -406,7 +406,7 @@ class TestSerialization:
     def test_from_dict_unknown_type_raises(self):
         """from_dict raises ValueError for unknown chore_type."""
         data = {
-            "chore_id": "x",
+            "uid": "x",
             "chore_name": "X",
             "chore_type": "unknown",
             "schedule": {},

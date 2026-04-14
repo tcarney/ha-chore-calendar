@@ -29,7 +29,7 @@ async def test_coordinator_returns_chores(hass):
     await store.async_load()
 
     chore = IntervalChore(
-        chore_id="test_chore",
+        uid="test_chore",
         chore_name="Test",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=1),
@@ -50,7 +50,7 @@ async def test_coordinator_fires_event_on_status_change(hass):
 
     # Create a chore that is currently COMPLETED (completed this morning).
     chore = ScheduledChore(
-        chore_id="medicine",
+        uid="medicine",
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
@@ -73,7 +73,7 @@ async def test_coordinator_fires_event_on_status_change(hass):
     await hass.async_block_till_done()
 
     assert len(events) == 1
-    assert events[0].data["chore_id"] == "medicine"
+    assert events[0].data["uid"] == "medicine"
     assert events[0].data["from_status"] == "completed"
     assert events[0].data["to_status"] == "due"
 
@@ -85,7 +85,7 @@ async def test_coordinator_no_event_when_status_unchanged(hass):
     await store.async_load()
 
     chore = IntervalChore(
-        chore_id="test",
+        uid="test",
         chore_name="Test",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=30),
@@ -110,7 +110,7 @@ async def test_coordinator_cleans_up_deleted_chores(hass):
     await store.async_load()
 
     chore = IntervalChore(
-        chore_id="temp",
+        uid="temp",
         chore_name="Temp",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=1),

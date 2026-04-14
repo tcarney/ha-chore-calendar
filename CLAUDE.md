@@ -63,8 +63,8 @@ See `SPECS.md` for full architecture details (data flow, state machines, storage
 - **Public API**: "item" (`create_item`, `complete_item`) — matches HA `todo` pattern
 - **Internal models**: "chore" (`BaseChore`, `ScheduledChore`) — domain-specific
 - **Domain**: `chore_calendar`, **Class prefix**: `ChoreCalendar`
-- **Entities**: `calendar.daily_chores` (one per list), `sensor.daily_chores_morning_medicine` (one per chore). Unique ID: `{entry_id}_{chore_id}`.
-- **Services over entities** for all mutations. Single-chore services accept either a sensor entity_id (chore_id inferred) or calendar entity_id + explicit chore_id. List-level services require the calendar entity.
+- **Entities**: `calendar.daily_chores` (one per list), `sensor.daily_chores_morning_medicine` (one per chore). Unique ID: `{entry_id}_{uid}` where uid is a standard UUID.
+- **Services over entities** for all mutations. Single-chore services accept either a sensor entity_id (chore inferred) or calendar entity_id + explicit `item` (name or UID). List-level services require the calendar entity.
 - Flat modules (no sub-packages). Services registered in `async_setup()`, not `async_setup_entry()`. Card source in `card/`, built JS copied to `custom_components/chore_calendar/www/`.
 
 ### Key HA Patterns
@@ -72,7 +72,7 @@ See `SPECS.md` for full architecture details (data flow, state machines, storage
 - **Services registration:** `async_setup()`, NOT `async_setup_entry()` (Quality Scale requirement)
 - **Config entry data access:** `entry.runtime_data` (typed `ChoreCalendarData`)
 - **Entity MRO:** `(PlatformEntity, ChoreCalendarEntity)` — order matters
-- **Unique ID:** `{entry_id}_{chore_id}` (chore sensors); base entity sets `_attr_unique_id`
+- **Unique ID:** `{entry_id}_{uid}` (chore sensors, uid is a standard UUID); base entity sets `_attr_unique_id`
 
 ## Workflow Rules
 

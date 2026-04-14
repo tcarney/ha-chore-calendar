@@ -84,7 +84,7 @@ async def test_event_property_returns_soonest_due(hass, config_entry):
 
     # Create two scheduled chores: one at 08:00, one at 10:00.
     chore_early = ScheduledChore(
-        chore_id="early",
+        uid="early",
         chore_name="Early Chore",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
@@ -92,7 +92,7 @@ async def test_event_property_returns_soonest_due(hass, config_entry):
         grace_period=timedelta(hours=1),
     )
     chore_late = ScheduledChore(
-        chore_id="late",
+        uid="late",
         chore_name="Late Chore",
         chore_type=ChoreType.SCHEDULED,
         time=time(10, 0),
@@ -123,7 +123,7 @@ async def test_event_property_shows_next_due_when_completed(hass, config_entry):
 
     frozen = datetime(2026, 3, 30, 7, 0, tzinfo=TZ)
     chore = ScheduledChore(
-        chore_id="done",
+        uid="done",
         chore_name="Done Chore",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
@@ -152,7 +152,7 @@ async def test_event_property_skips_interval_no_anchor(hass, config_entry):
     runtime = config_entry.runtime_data
 
     chore = IntervalChore(
-        chore_id="no_anchor",
+        uid="no_anchor",
         chore_name="No Anchor",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=3),
@@ -178,7 +178,7 @@ async def test_event_property_interval_with_created_at(hass, config_entry):
 
     created = datetime(2026, 3, 27, 12, 0, tzinfo=TZ)
     chore = IntervalChore(
-        chore_id="with_created",
+        uid="with_created",
         chore_name="With Created",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=3),
@@ -211,7 +211,7 @@ async def test_get_events_returns_due_event(hass, config_entry):
     runtime = config_entry.runtime_data
 
     chore = ScheduledChore(
-        chore_id="med",
+        uid="med",
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
@@ -244,7 +244,7 @@ async def test_get_events_returns_completed_event(hass, config_entry):
 
     completed_at = datetime(2026, 3, 30, 7, 30, tzinfo=TZ)
     chore = ScheduledChore(
-        chore_id="med",
+        uid="med",
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
@@ -281,7 +281,7 @@ async def test_get_events_shows_next_due_for_completed_chore(hass, config_entry)
 
     completed_at = datetime(2026, 3, 30, 7, 30, tzinfo=TZ)
     chore = ScheduledChore(
-        chore_id="med",
+        uid="med",
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
@@ -318,7 +318,7 @@ async def test_get_events_includes_old_completed(hass, config_entry):
 
     old_completed = datetime(2026, 3, 28, 7, 0, tzinfo=TZ)
     chore = ScheduledChore(
-        chore_id="med",
+        uid="med",
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
@@ -350,7 +350,7 @@ async def test_get_events_filters_by_date_range(hass, config_entry):
     runtime = config_entry.runtime_data
 
     chore = ScheduledChore(
-        chore_id="med",
+        uid="med",
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
@@ -397,7 +397,7 @@ async def test_get_events_sorted_by_start(hass, config_entry):
     runtime = config_entry.runtime_data
 
     chore_late = ScheduledChore(
-        chore_id="late",
+        uid="late",
         chore_name="Late",
         chore_type=ChoreType.SCHEDULED,
         time=time(10, 0),
@@ -405,7 +405,7 @@ async def test_get_events_sorted_by_start(hass, config_entry):
         grace_period=timedelta(hours=1),
     )
     chore_early = ScheduledChore(
-        chore_id="early",
+        uid="early",
         chore_name="Early",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),

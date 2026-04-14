@@ -32,7 +32,7 @@ async def test_tag_scan_completes_matching_chore(hass):
     store, coordinator = await _setup(hass)
 
     chore = IntervalChore(
-        chore_id="water_filter",
+        uid="water_filter",
         chore_name="Water Filter",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=30),
@@ -62,7 +62,7 @@ async def test_tag_scan_ignores_non_matching_tag(hass):
     store, coordinator = await _setup(hass)
 
     chore = IntervalChore(
-        chore_id="water_filter",
+        uid="water_filter",
         chore_name="Water Filter",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=30),
@@ -89,7 +89,7 @@ async def test_tag_scan_ignores_chore_without_tag(hass):
     store, coordinator = await _setup(hass)
 
     chore = IntervalChore(
-        chore_id="no_tag",
+        uid="no_tag",
         chore_name="No Tag",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=1),
@@ -114,7 +114,7 @@ async def test_tag_scan_completes_overdue_chore(hass):
     store, coordinator = await _setup(hass)
 
     chore = ScheduledChore(
-        chore_id="med",
+        uid="med",
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
@@ -146,7 +146,7 @@ async def test_tag_scan_skips_completed_chore(hass):
 
     completed_time = datetime(2026, 3, 30, 7, 0, tzinfo=TZ)
     chore = ScheduledChore(
-        chore_id="med",
+        uid="med",
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
@@ -180,7 +180,7 @@ async def test_tag_scan_completes_multiple_matching_chores(hass):
 
     for cid in ("chore_a", "chore_b"):
         chore = IntervalChore(
-            chore_id=cid,
+            uid=cid,
             chore_name=cid,
             chore_type=ChoreType.INTERVAL,
             interval=timedelta(days=1),
@@ -208,7 +208,7 @@ async def test_tag_scan_empty_tag_id_ignored(hass):
     store, coordinator = await _setup(hass)
 
     chore = IntervalChore(
-        chore_id="test",
+        uid="test",
         chore_name="Test",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=1),
@@ -233,7 +233,7 @@ async def test_unsubscribe_stops_listener(hass):
     store, coordinator = await _setup(hass)
 
     chore = IntervalChore(
-        chore_id="test",
+        uid="test",
         chore_name="Test",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=1),

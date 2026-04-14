@@ -246,7 +246,7 @@ export async function handleChoreAction(
           service: "complete_item",
           service_data: {
             entity_id: item.source_entity,
-            chore_id: item.chore_id,
+            item: item.uid,
           },
         });
         fireEvent(element, "chore-completed" as keyof HASSDomEvents, { item });

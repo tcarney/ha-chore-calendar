@@ -69,10 +69,6 @@
           "name": "Entity",
           "description": "The calendar entity for the target chore list."
         },
-        "chore_id": {
-          "name": "Chore ID",
-          "description": "Unique identifier for the chore. If omitted, generated from the chore name."
-        },
         "chore_name": {
           "name": "Chore name",
           "description": "Display name for the chore."
@@ -107,9 +103,9 @@
           "name": "Entity",
           "description": "A chore sensor entity or the calendar entity for the target list."
         },
-        "chore_id": {
-          "name": "Chore ID",
-          "description": "Identifier of the chore to update. Required when targeting the calendar entity; inferred when targeting a chore sensor."
+        "item": {
+          "name": "Item name or UID",
+          "description": "Required when targeting the calendar entity; inferred when targeting a chore sensor."
         },
         "chore_name": {
           "name": "Chore name",
@@ -145,9 +141,9 @@
           "name": "Entity",
           "description": "A chore sensor entity or the calendar entity for the target list."
         },
-        "chore_id": {
-          "name": "Chore ID",
-          "description": "Identifier of the chore to delete. Required when targeting the calendar entity; inferred when targeting a chore sensor."
+        "item": {
+          "name": "Item name or UID",
+          "description": "Required when targeting the calendar entity; inferred when targeting a chore sensor."
         }
       }
     },
@@ -159,9 +155,9 @@
           "name": "Entity",
           "description": "A chore sensor entity or the calendar entity for the target list."
         },
-        "chore_id": {
-          "name": "Chore ID",
-          "description": "Identifier of the chore to complete. Required when targeting the calendar entity; inferred when targeting a chore sensor."
+        "item": {
+          "name": "Item name or UID",
+          "description": "Required when targeting the calendar entity; inferred when targeting a chore sensor."
         },
         "completed_by": {
           "name": "Completed by",

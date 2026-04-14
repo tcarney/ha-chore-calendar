@@ -19,7 +19,7 @@ _DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 class BaseChore(abc.ABC):
     """Abstract base for all chore types."""
 
-    chore_id: str
+    uid: str
     chore_name: str
     chore_type: ChoreType
     trigger_tag_id: str | None = None
@@ -56,7 +56,7 @@ class BaseChore(abc.ABC):
     def to_dict(self) -> dict[str, Any]:
         """Serialize the chore to a storage-compatible dict."""
         return {
-            "chore_id": self.chore_id,
+            "uid": self.uid,
             "chore_name": self.chore_name,
             "chore_type": str(self.chore_type),
             "schedule": self._schedule_to_dict(),
@@ -89,7 +89,8 @@ def _extract_base_kwargs(data: dict[str, Any], chore_type: ChoreType) -> dict[st
     last_completed_raw = data.get("last_completed")
     skipped_until_raw = data.get("skipped_until")
     return {
-        "chore_id": data["chore_id"],
+        # Migration v1→v2: remove "chore_id" fallback when dropping v1 support.
+        "uid": data.get("uid") or data["chore_id"],
         "chore_name": data["chore_name"],
         "chore_type": chore_type,
         "trigger_tag_id": data.get("trigger_tag_id"),

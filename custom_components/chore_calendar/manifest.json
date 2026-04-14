@@ -1,14 +1,14 @@
 {
   "domain": "chore_calendar",
   "name": "Chore Calendar",
+  "after_dependencies": ["lovelace"],
   "codeowners": [
     "@tcarney"
   ],
   "config_flow": true,
-  "after_dependencies": ["lovelace"],
   "dependencies": ["frontend", "http"],
   "documentation": "https://github.com/tcarney/ha-chore-calendar",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/tcarney/ha-chore-calendar/issues",
-  "version": "0.2.0"
+  "version": "0.3.0"
 }

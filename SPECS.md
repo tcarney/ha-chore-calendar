@@ -98,11 +98,11 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "data": {
-    "chores": {
-      "morning_medicine": {
-        "chore_id": "morning_medicine",
+    "items": [
+      {
+        "uid": "01244b28-e604-11ee-a0a4-e45f0197c057",
         "chore_name": "Morning Medicine",
         "chore_type": "scheduled",
         "schedule": {
@@ -118,8 +118,8 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "last_completed_by": "person.claire",
         "skipped_until": null
       },
-      "water_filter": {
-        "chore_id": "water_filter",
+      {
+        "uid": "7f3a9c12-b456-4def-8901-abcdef123456",
         "chore_name": "Change Water Filter",
         "chore_type": "interval",
         "schedule": {
@@ -133,8 +133,8 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "last_completed_by": null,
         "skipped_until": null
       },
-      "file_taxes": {
-        "chore_id": "file_taxes",
+      {
+        "uid": "c8d9e0f1-2345-6789-abcd-ef0123456789",
         "chore_name": "File Taxes",
         "chore_type": "oneshot",
         "schedule": {
@@ -150,7 +150,7 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "last_completed_by": null,
         "skipped_until": null
       }
-    }
+    ]
   }
 }
 ```
@@ -247,7 +247,7 @@ Response shape per item:
 
 ```typescript
 interface ChoreItem {
-  chore_id: string;
+  uid: string;
   chore_name: string;
   chore_type: 'scheduled' | 'interval';
   status: 'completed' | 'pending' | 'due' | 'overdue';

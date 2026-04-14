@@ -175,7 +175,7 @@ export class ChoreDetailDialog extends LitElement {
         service: "complete_item",
         service_data: {
           entity_id: this.item.source_entity,
-          chore_id: this.item.chore_id,
+          item: this.item.uid,
         },
       });
       this.dispatchEvent(

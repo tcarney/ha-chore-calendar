@@ -36,13 +36,17 @@ class ChoreType(StrEnum):
 
 # Attribute keys for sensor extra_state_attributes.
 ATTR_ASSIGNED_TO = "assigned_to"
-ATTR_CHORE_ID = "chore_id"
+ATTR_CHORE_ID = "chore_id"  # Migration v1→v2: remove when dropping v1 support.
 ATTR_CHORE_TYPE = "chore_type"
+ATTR_UID = "uid"
 ATTR_LAST_COMPLETED = "last_completed"
 ATTR_LAST_COMPLETED_BY = "last_completed_by"
 ATTR_NEXT_DUE = "next_due"
 ATTR_SCHEDULE = "schedule"
 ATTR_TRIGGER_ENTITY = "trigger_entity"
+
+# Service field key for item lookup by name or UID.
+ATTR_ITEM = "item"
 
 # Service action names.
 SERVICE_COMPLETE_ITEM = "complete_item"
@@ -60,4 +64,4 @@ DEFAULT_GRACE_PERIOD_MINS = 60
 DEFAULT_UPDATE_INTERVAL = 60
 
 # Storage.
-STORAGE_VERSION = 1
+STORAGE_VERSION = 2

@@ -95,7 +95,6 @@ These apply to both chore types:
 | Option | Required | Default | Description |
 | --- | --- | --- | --- |
 | `chore_name` | yes | — | Display name for the chore |
-| `chore_id` | no | auto from name | Unique identifier (e.g. `morning_medicine`); auto-generated from name if omitted |
 | `grace_period` | no | 1 hour | How long after the due time before the chore becomes overdue (duration) |
 | `trigger_entity` | no | — | A `tag.*` entity for NFC tap-to-complete (see [Tag Triggers](#tag-triggers)) |
 | `assigned_to` | no | — | List of `person.*` entities assigned to the chore (informational, shown in card and events) |
@@ -156,16 +155,16 @@ data:
 ### Complete a Chore
 
 ```yaml
-# By sensor entity (chore_id inferred)
+# By sensor entity (chore inferred)
 action: chore_calendar.complete_item
 data:
   entity_id: sensor.daily_chores_morning_medicine
 
-# By calendar entity + explicit chore_id
+# By calendar entity + item name or UID
 action: chore_calendar.complete_item
 data:
   entity_id: calendar.daily_chores
-  chore_id: morning_medicine
+  item: "Morning Medicine"
 ```
 
 ### Update a Chore
@@ -308,7 +307,7 @@ The integration fires `chore_calendar_status_changed` events on status transitio
 ```yaml
 event_type: chore_calendar_status_changed
 data:
-  chore_id: "morning_medicine"
+  uid: "01244b28-e604-11ee-a0a4-e45f0197c057"
   chore_name: "Morning Medicine"
   from_status: "pending"
   to_status: "due"
