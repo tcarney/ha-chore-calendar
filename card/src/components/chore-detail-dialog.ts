@@ -10,12 +10,12 @@ export class ChoreDetailDialog extends LitElement {
   @property({ attribute: false }) hass!: HomeAssistant;
   @property({ attribute: false }) item?: EnrichedChoreItem;
   @property({ type: Boolean }) open = false;
+  @property({ type: Boolean, attribute: "allow-uncomplete" }) allowUncomplete = false;
   @state() private _loading = false;
 
   static styles = css`
     ha-dialog {
-      --mdc-dialog-max-width: 400px;
-      --mdc-dialog-min-width: 320px;
+      --ha-dialog-max-width: 400px;
     }
 
     .header_button {
@@ -91,7 +91,20 @@ export class ChoreDetailDialog extends LitElement {
                 </ha-button>
               </div>
             `
-          : nothing}
+          : this.allowUncomplete && this.item?.last_completed
+            ? html`
+                <div slot="footer" class="footer">
+                  <ha-button
+                    variant="neutral"
+                    appearance="plain"
+                    ?disabled=${this._loading}
+                    @click=${this._onUncomplete}
+                  >
+                    ${this._loading ? "Uncompleting..." : "Uncomplete"}
+                  </ha-button>
+                </div>
+              `
+            : nothing}
       </ha-dialog>
     `;
   }
@@ -187,6 +200,34 @@ export class ChoreDetailDialog extends LitElement {
       );
     } catch (err) {
       console.error("chore-detail-dialog: failed to complete chore", err);
+    } finally {
+      this._loading = false;
+    }
+  }
+
+  private async _onUncomplete() {
+    if (!this.item || this._loading) return;
+
+    this._loading = true;
+    try {
+      await this.hass.callWS({
+        type: "call_service",
+        domain: DOMAIN,
+        service: "uncomplete_item",
+        service_data: {
+          entity_id: this.item.source_entity,
+          item: this.item.uid,
+        },
+      });
+      this.dispatchEvent(
+        new CustomEvent("chore-uncompleted", {
+          detail: { item: this.item },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    } catch (err) {
+      console.error("chore-detail-dialog: failed to uncomplete chore", err);
     } finally {
       this._loading = false;
     }

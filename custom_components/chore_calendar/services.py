@@ -23,6 +23,7 @@ from .const import (
     SERVICE_CREATE_ITEM,
     SERVICE_DELETE_ITEM,
     SERVICE_GET_ITEMS,
+    SERVICE_UNCOMPLETE_ITEM,
     SERVICE_UPDATE_ITEM,
     ChoreStatus,
     ChoreType,
@@ -80,6 +81,13 @@ SERVICE_COMPLETE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_ITEM): cv.string,
         vol.Optional(ATTR_COMPLETED_BY): cv.entity_id,
         vol.Optional(ATTR_COMPLETED_AT): cv.string,
+    }
+)
+
+SERVICE_UNCOMPLETE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Optional(ATTR_ITEM): cv.string,
     }
 )
 
@@ -356,15 +364,31 @@ async def _async_handle_complete(call: ServiceCall) -> None:
     else:
         completed_at = dt_util.now()
 
-    # Update the chore's completion fields.
-    updated = existing.to_dict()
-    updated["last_completed"] = completed_at.isoformat()
-    updated["last_completed_by"] = call.data.get(ATTR_COMPLETED_BY)
-
-    chore = BaseChore.from_dict(updated)
-    await store.async_update_chore(chore)
+    existing.apply_completion(completed_at, call.data.get(ATTR_COMPLETED_BY))
+    await store.async_update_chore(existing)
     await coordinator.async_refresh()
     LOGGER.debug("Completed chore %s (%s) at %s", existing.chore_name, uid, completed_at.isoformat())
+
+
+async def _async_handle_uncomplete(call: ServiceCall) -> None:
+    """Handle uncomplete_item service call."""
+    store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
+
+    uid = _resolve_item(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_ITEM), store)
+    existing = store.get_chore(uid)
+    if existing is None:
+        msg = f"Chore '{uid}' not found"
+        raise ServiceValidationError(msg)
+
+    if existing.last_completed is None:
+        msg = f"Chore '{existing.chore_name}' has no completion to revert"
+        raise ServiceValidationError(msg)
+
+    existing.revert_completion()
+    coordinator.mark_uncompleted(uid)
+    await store.async_update_chore(existing)
+    await coordinator.async_refresh()
+    LOGGER.debug("Uncompleted chore %s (%s)", existing.chore_name, uid)
 
 
 async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
@@ -408,6 +432,12 @@ async def async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, SERVICE_UPDATE_ITEM, _async_handle_update, schema=SERVICE_UPDATE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_DELETE_ITEM, _async_handle_delete, schema=SERVICE_DELETE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_COMPLETE_ITEM, _async_handle_complete, schema=SERVICE_COMPLETE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_UNCOMPLETE_ITEM,
+        _async_handle_uncomplete,
+        schema=SERVICE_UNCOMPLETE_SCHEMA,
+    )
     hass.services.async_register(
         DOMAIN,
         SERVICE_GET_ITEMS,

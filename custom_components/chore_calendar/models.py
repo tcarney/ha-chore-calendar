@@ -27,6 +27,10 @@ class BaseChore(abc.ABC):
     created_at: datetime | None = None
     last_completed: datetime | None = None
     last_completed_by: str | None = None
+    # Internal undo slot — holds the prior completion so it can be restored
+    # once via uncomplete_item. Not user-facing.
+    previous_last_completed: datetime | None = None
+    previous_last_completed_by: str | None = None
     skipped_until: datetime | None = None
 
     @abc.abstractmethod
@@ -44,6 +48,26 @@ class BaseChore(abc.ABC):
     @abc.abstractmethod
     def is_in_completion_window(self, timestamp: datetime) -> bool:
         """Return True if a completion at *timestamp* is valid for the current period."""
+
+    def apply_completion(self, timestamp: datetime, completed_by: str | None) -> None:
+        """Record a completion, saving the prior state to the undo slot."""
+        self.previous_last_completed = self.last_completed
+        self.previous_last_completed_by = self.last_completed_by
+        self.last_completed = timestamp
+        self.last_completed_by = completed_by
+
+    def revert_completion(self) -> None:
+        """Restore the previous completion state from the undo slot.
+
+        Raises ValueError if there is no completion to revert.
+        """
+        if self.last_completed is None:
+            msg = "Chore has no completion to revert."
+            raise ValueError(msg)
+        self.last_completed = self.previous_last_completed
+        self.last_completed_by = self.previous_last_completed_by
+        self.previous_last_completed = None
+        self.previous_last_completed_by = None
 
     @abc.abstractmethod
     def _schedule_to_dict(self) -> dict[str, Any]:
@@ -65,6 +89,10 @@ class BaseChore(abc.ABC):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "last_completed": self.last_completed.isoformat() if self.last_completed else None,
             "last_completed_by": self.last_completed_by,
+            "previous_last_completed": (
+                self.previous_last_completed.isoformat() if self.previous_last_completed else None
+            ),
+            "previous_last_completed_by": self.previous_last_completed_by,
             "skipped_until": self.skipped_until.isoformat() if self.skipped_until else None,
         }
 
@@ -87,6 +115,7 @@ def _extract_base_kwargs(data: dict[str, Any], chore_type: ChoreType) -> dict[st
     """Extract shared BaseChore fields from a storage dict."""
     created_at_raw = data.get("created_at")
     last_completed_raw = data.get("last_completed")
+    previous_last_completed_raw = data.get("previous_last_completed")
     skipped_until_raw = data.get("skipped_until")
     return {
         # Migration v1→v2: remove "chore_id" fallback when dropping v1 support.
@@ -98,6 +127,10 @@ def _extract_base_kwargs(data: dict[str, Any], chore_type: ChoreType) -> dict[st
         "created_at": dt_util.parse_datetime(created_at_raw) if created_at_raw else None,
         "last_completed": dt_util.parse_datetime(last_completed_raw) if last_completed_raw else None,
         "last_completed_by": data.get("last_completed_by"),
+        "previous_last_completed": (
+            dt_util.parse_datetime(previous_last_completed_raw) if previous_last_completed_raw else None
+        ),
+        "previous_last_completed_by": data.get("previous_last_completed_by"),
         "skipped_until": dt_util.parse_datetime(skipped_until_raw) if skipped_until_raw else None,
     }
 

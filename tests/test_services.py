@@ -465,6 +465,110 @@ async def test_delete_item_calendar_without_item_raises(hass, config_entry):
 
 
 # ---------------------------------------------------------------------------
+# uncomplete_item
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_uncomplete_item_reverts_last_completion(hass, config_entry):
+    """uncomplete_item restores last_completed to its prior value."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    store = config_entry.runtime_data.store
+
+    # Two completions in sequence.
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": TEST_UID, "completed_at": "2026-03-29T08:00:00-05:00"},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {
+            "entity_id": entity_id,
+            "item": TEST_UID,
+            "completed_at": "2026-03-30T08:00:00-05:00",
+            "completed_by": "person.bob",
+        },
+        blocking=True,
+    )
+
+    await hass.services.async_call(
+        DOMAIN,
+        "uncomplete_item",
+        {"entity_id": entity_id, "item": TEST_UID},
+        blocking=True,
+    )
+
+    chore = store.get_chore(TEST_UID)
+    assert chore.last_completed is not None
+    assert chore.last_completed.day == 29
+    assert chore.previous_last_completed is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_uncomplete_item_first_completion_clears_state(hass, config_entry):
+    """Uncompleting the first-ever completion clears last_completed to None."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    store = config_entry.runtime_data.store
+
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": TEST_UID, "completed_by": "person.alice"},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "uncomplete_item",
+        {"entity_id": entity_id, "item": TEST_UID},
+        blocking=True,
+    )
+
+    chore = store.get_chore(TEST_UID)
+    assert chore.last_completed is None
+    assert chore.last_completed_by is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_uncomplete_item_never_completed_raises(hass, config_entry):
+    """uncomplete_item raises when the chore has never been completed."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError, match="no completion"):
+        await hass.services.async_call(
+            DOMAIN,
+            "uncomplete_item",
+            {"entity_id": entity_id, "item": TEST_UID},
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_uncomplete_item_via_sensor_entity(hass, config_entry):
+    """uncomplete_item works when targeting the sensor entity directly."""
+    await _setup_with_chore(hass, config_entry)
+    sensor_id = _get_sensor_entity_id(hass, config_entry, TEST_UID)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": sensor_id},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "uncomplete_item",
+        {"entity_id": sensor_id},
+        blocking=True,
+    )
+
+    chore = config_entry.runtime_data.store.get_chore(TEST_UID)
+    assert chore.last_completed is None
+
+
+# ---------------------------------------------------------------------------
 # Tag ID resolution
 # ---------------------------------------------------------------------------
 

@@ -291,8 +291,10 @@ export class ChoreCalendarCard extends LitElement {
         .hass=${this.hass}
         .item=${this._dialogItem}
         .open=${this._dialogOpen}
+        .allowUncomplete=${!!this._config.allow_uncomplete}
         @detail-dialog-closed=${this._onDialogClosed}
         @chore-completed=${this._onChoreCompleted}
+        @chore-uncompleted=${this._onChoreCompleted}
       ></chore-detail-dialog>
     `;
   }

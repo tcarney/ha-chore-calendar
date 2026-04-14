@@ -24,6 +24,7 @@ const OPTIONS_SCHEMA: HaFormSchema[] = [
   { name: "hide_pending", selector: { boolean: {} }, default: false },
   { name: "hide_section_headers", selector: { boolean: {} }, default: false },
   { name: "hide_card_background", selector: { boolean: {} }, default: false },
+  { name: "allow_uncomplete", selector: { boolean: {} }, default: false },
   {
     name: "completed_limit",
     selector: { number: { min: 0, max: 50, step: 1, mode: "box" } },
@@ -87,6 +88,7 @@ const LABELS: Record<string, string> = {
   hide_pending: "Hide pending section",
   hide_section_headers: "Hide section headings",
   hide_card_background: "Hide card background",
+  allow_uncomplete: "Allow uncomplete",
   completed_limit: "Completed chores limit",
   update_interval: "Update interval (seconds)",
   tap_action: "Tap action",

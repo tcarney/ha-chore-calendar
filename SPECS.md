@@ -92,6 +92,10 @@ pending → due → overdue → (trigger) → completed [terminal]
 - `overdue_at` = `due_datetime + grace_period`
 - Once completed, stays completed permanently (or auto-deletes)
 
+### Completion Undo Slot
+
+Each chore carries a one-level undo slot (`previous_last_completed` / `previous_last_completed_by`). Completing saves the prior `last_completed` / `last_completed_by` into the slot; `uncomplete_item` restores them and clears the slot. There is no history log — exactly one completion is undoable at any time, and the slot is refreshed on every completion.
+
 ### Storage Schema
 
 File: `.storage/chore_calendar.{entry_id}` (one per list)
@@ -116,6 +120,8 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "created_at": "2026-03-01T10:00:00+00:00",
         "last_completed": "2026-03-22T07:52:00+00:00",
         "last_completed_by": "person.claire",
+        "previous_last_completed": null,
+        "previous_last_completed_by": null,
         "skipped_until": null
       },
       {
@@ -131,6 +137,8 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "created_at": "2026-01-01T12:00:00+00:00",
         "last_completed": "2026-01-15T10:30:00+00:00",
         "last_completed_by": null,
+        "previous_last_completed": null,
+        "previous_last_completed_by": null,
         "skipped_until": null
       },
       {
@@ -148,6 +156,8 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "created_at": "2026-03-15T09:00:00+00:00",
         "last_completed": null,
         "last_completed_by": null,
+        "previous_last_completed": null,
+        "previous_last_completed_by": null,
         "skipped_until": null
       }
     ]

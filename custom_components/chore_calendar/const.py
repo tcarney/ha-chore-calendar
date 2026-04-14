@@ -53,6 +53,7 @@ SERVICE_COMPLETE_ITEM = "complete_item"
 SERVICE_CREATE_ITEM = "create_item"
 SERVICE_DELETE_ITEM = "delete_item"
 SERVICE_GET_ITEMS = "get_items"
+SERVICE_UNCOMPLETE_ITEM = "uncomplete_item"
 SERVICE_UPDATE_ITEM = "update_item"
 
 # Event names.

@@ -426,3 +426,70 @@ class TestSerialization:
         desc = chore.schedule_description()
         assert desc["interval_mins"] == 4320
         assert desc["grace_period_mins"] == 1440
+
+
+class TestCompletionUndoSlot:
+    """Test apply_completion / revert_completion lifecycle."""
+
+    def test_apply_completion_stores_previous(self):
+        """apply_completion saves prior state into the undo slot."""
+        initial = datetime(2026, 3, 30, 7, 0, tzinfo=TZ)
+        chore = _make_interval(last_completed=initial)
+        chore.last_completed_by = "person.alice"
+
+        second = datetime(2026, 3, 31, 7, 0, tzinfo=TZ)
+        chore.apply_completion(second, "person.bob")
+
+        assert chore.last_completed == second
+        assert chore.last_completed_by == "person.bob"
+        assert chore.previous_last_completed == initial
+        assert chore.previous_last_completed_by == "person.alice"
+
+    def test_revert_completion_restores_previous(self):
+        """revert_completion restores prior state and clears the slot."""
+        initial = datetime(2026, 3, 30, 7, 0, tzinfo=TZ)
+        chore = _make_interval(last_completed=initial)
+        chore.last_completed_by = "person.alice"
+
+        chore.apply_completion(datetime(2026, 3, 31, 7, 0, tzinfo=TZ), "person.bob")
+        chore.revert_completion()
+
+        assert chore.last_completed == initial
+        assert chore.last_completed_by == "person.alice"
+        assert chore.previous_last_completed is None
+        assert chore.previous_last_completed_by is None
+
+    def test_revert_first_completion_clears_to_none(self):
+        """Reverting the first-ever completion clears last_completed to None."""
+        chore = _make_interval()
+        chore.last_completed = None
+        chore.last_completed_by = None
+
+        chore.apply_completion(datetime(2026, 3, 31, 7, 0, tzinfo=TZ), "person.bob")
+        chore.revert_completion()
+
+        assert chore.last_completed is None
+        assert chore.last_completed_by is None
+        assert chore.previous_last_completed is None
+        assert chore.previous_last_completed_by is None
+
+    def test_revert_without_completion_raises(self):
+        """revert_completion raises when there is nothing to revert."""
+        chore = _make_interval()
+        chore.last_completed = None
+        chore.last_completed_by = None
+
+        with pytest.raises(ValueError, match="no completion"):
+            chore.revert_completion()
+
+    def test_undo_slot_survives_round_trip(self):
+        """previous_last_completed / _by are serialized and restored."""
+        initial = datetime(2026, 3, 30, 7, 0, tzinfo=TZ)
+        chore = _make_interval(last_completed=initial)
+        chore.last_completed_by = "person.alice"
+        chore.apply_completion(datetime(2026, 3, 31, 7, 0, tzinfo=TZ), "person.bob")
+
+        restored = BaseChore.from_dict(chore.to_dict())
+
+        assert restored.previous_last_completed == initial
+        assert restored.previous_last_completed_by == "person.alice"

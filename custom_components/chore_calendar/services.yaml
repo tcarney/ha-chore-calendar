@@ -164,6 +164,21 @@ complete_item:
       selector:
         text:
 
+uncomplete_item:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+              integration: chore_calendar
+            - domain: sensor
+              integration: chore_calendar
+    item:
+      selector:
+        text:
+
 get_items:
   fields:
     entity_id:

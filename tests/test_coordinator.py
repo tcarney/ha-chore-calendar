@@ -130,3 +130,51 @@ async def test_coordinator_cleans_up_deleted_chores(hass):
     assert "temp" not in coordinator.data
     # No spurious events for the deleted chore.
     assert len(events) == 0
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_coordinator_uncomplete_marker_on_event(hass):
+    """Events fired after mark_uncompleted include uncomplete=True."""
+    store = ChoreStore(hass, "test")
+    await store.async_load()
+
+    chore = ScheduledChore(
+        uid="medicine",
+        chore_name="Medicine",
+        chore_type=ChoreType.SCHEDULED,
+        time=time(8, 0),
+        early_window=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        last_completed=datetime(2026, 3, 30, 7, 0, tzinfo=TZ),
+    )
+    await store.async_create_chore(chore)
+
+    # Baseline refresh at 07:30 — status COMPLETED.
+    with patch("homeassistant.util.dt.now", return_value=datetime(2026, 3, 30, 7, 30, tzinfo=TZ)):
+        coordinator = await _setup_coordinator(hass, store)
+
+    # Simulate an uncomplete: clear last_completed and flag the uid.
+    stored = store.get_chore("medicine")
+    assert stored is not None
+    stored.revert_completion()
+    await store.async_update_chore(stored)
+    coordinator.mark_uncompleted("medicine")
+
+    events: list = []
+    hass.bus.async_listen(EVENT_STATUS_CHANGED, events.append)
+
+    with patch("homeassistant.util.dt.now", return_value=datetime(2026, 3, 30, 7, 30, tzinfo=TZ)):
+        await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert len(events) == 1
+    assert events[0].data["uid"] == "medicine"
+    assert events[0].data.get("uncomplete") is True
+
+    # Marker is consumed — a subsequent natural transition does not carry it.
+    events.clear()
+    with patch("homeassistant.util.dt.now", return_value=datetime(2026, 3, 31, 8, 30, tzinfo=TZ)):
+        await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert "uncomplete" not in events[0].data

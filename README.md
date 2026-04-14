@@ -167,6 +167,25 @@ data:
   item: "Morning Medicine"
 ```
 
+### Uncomplete a Chore
+
+Revert the most recent completion — useful when a chore was marked complete by mistake (e.g. an accidental NFC tap). Uncomplete is a one-level undo: it restores the previous `last_completed` and `last_completed_by` (or clears them when undoing the first-ever completion). Attempting to uncomplete a chore that has never been completed raises an error.
+
+```yaml
+# By sensor entity (chore inferred)
+action: chore_calendar.uncomplete_item
+data:
+  entity_id: sensor.daily_chores_morning_medicine
+
+# By calendar entity + item name or UID
+action: chore_calendar.uncomplete_item
+data:
+  entity_id: calendar.daily_chores
+  item: "Morning Medicine"
+```
+
+The resulting `chore_calendar_status_changed` event carries `uncomplete: true` so automations can distinguish an undo from natural period transitions.
+
 ### Update a Chore
 
 ```yaml
@@ -224,6 +243,7 @@ entities:
 | `completed_limit` | `3` | Max completed rows shown; `0` for unlimited |
 | `hide_section_headers` | `false` | Hide section headings (Overdue, Due, Upcoming, Completed) |
 | `hide_card_background` | `false` | Hide the card background (transparent) |
+| `allow_uncomplete` | `false` | Show an "Uncomplete" button on completed rows in the detail dialog |
 | `update_interval` | `60` | Seconds between data refreshes |
 | `tap_action` | `details` | [Action](#action-configuration) on row tap |
 | `hold_action` | `none` | [Action](#action-configuration) on row hold (500ms) |
