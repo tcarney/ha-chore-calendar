@@ -34,7 +34,7 @@ fi
 
 log_header "Checking spelling with codespell"
 codespell \
-    --ignore-words-list=aiport,astroid,checkin,currenty,hass,iif,incomfort,lookin,nam,NotIn \
+    --ignore-words-list=aiport,astroid,checkin,currenty,hass,iif,incomfort,lookin,nam,NotIn,uncomplete,uncompleted \
     --skip="./.*,*.csv,*.json,*.ambr,uv.lock,*/www/*" \
     --quiet-level=2 \
     custom_components/ \

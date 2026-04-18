@@ -1,0 +1,60 @@
+name: test
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+
+permissions: {}
+
+jobs:
+  lint-check:
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Home Assistant environment
+        uses: ./.github/actions/setup-ha
+
+      - name: Lint check
+        run: script/lint-check
+
+  type-check:
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Home Assistant environment
+        uses: ./.github/actions/setup-ha
+
+      - name: Type check
+        run: script/type-check
+
+  spell-check:
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Home Assistant environment
+        uses: ./.github/actions/setup-ha
+
+      - name: Spell check
+        run: script/spell-check
+
+  tests:
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Home Assistant environment
+        uses: ./.github/actions/setup-ha
+
+      - name: Run tests
+        run: script/test

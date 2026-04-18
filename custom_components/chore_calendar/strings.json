@@ -169,6 +169,20 @@
         }
       }
     },
+    "uncomplete_item": {
+      "name": "Uncomplete item",
+      "description": "Revert the most recent completion of a chore.",
+      "fields": {
+        "entity_id": {
+          "name": "Entity",
+          "description": "A chore sensor entity or the calendar entity for the target list."
+        },
+        "item": {
+          "name": "Item name or UID",
+          "description": "Required when targeting the calendar entity; inferred when targeting a chore sensor."
+        }
+      }
+    },
     "get_items": {
       "name": "Get items",
       "description": "Retrieve chores from a chore list with their current status.",

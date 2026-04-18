@@ -56,6 +56,7 @@ export interface ChoreCalendarCardConfig {
   update_interval?: number;
   compact?: boolean;
   hide_card_background?: boolean;
+  allow_uncomplete?: boolean;
   tap_action?: ActionConfig;
   hold_action?: ActionConfig;
   double_tap_action?: ActionConfig;
