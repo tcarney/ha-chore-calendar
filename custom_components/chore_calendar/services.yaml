@@ -163,6 +163,27 @@ complete_item:
     completed_at:
       selector:
         text:
+    keep_skip:
+      selector:
+        boolean:
+
+skip_item:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+              integration: chore_calendar
+            - domain: sensor
+              integration: chore_calendar
+    item:
+      selector:
+        text:
+    until:
+      selector:
+        text:
 
 uncomplete_item:
   fields:

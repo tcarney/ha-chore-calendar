@@ -295,6 +295,7 @@ export class ChoreCalendarCard extends LitElement {
         @detail-dialog-closed=${this._onDialogClosed}
         @chore-completed=${this._onChoreCompleted}
         @chore-uncompleted=${this._onChoreCompleted}
+        @chore-skipped=${this._onChoreCompleted}
       ></chore-detail-dialog>
     `;
   }

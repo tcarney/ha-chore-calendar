@@ -53,10 +53,12 @@ SERVICE_COMPLETE_ITEM = "complete_item"
 SERVICE_CREATE_ITEM = "create_item"
 SERVICE_DELETE_ITEM = "delete_item"
 SERVICE_GET_ITEMS = "get_items"
+SERVICE_SKIP_ITEM = "skip_item"
 SERVICE_UNCOMPLETE_ITEM = "uncomplete_item"
 SERVICE_UPDATE_ITEM = "update_item"
 
 # Event names.
+EVENT_ITEM_SKIPPED = "chore_calendar_item_skipped"
 EVENT_STATUS_CHANGED = "chore_calendar_status_changed"
 
 # Default values.
