@@ -55,6 +55,7 @@ Tag Scan Listener  ────────────────────�
 ```text
 calendar.daily_chores                           — the list (one per config entry)
 sensor.daily_chores_morning_medicine            — one per chore, prefixed with list name (state = status)
+todo.daily_chores                               — the list's actionable chores (one per config entry)
 ```
 
 ### State Machine
