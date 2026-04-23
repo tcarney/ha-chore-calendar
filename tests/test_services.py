@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+import voluptuous as vol
 
 from custom_components.chore_calendar.const import CONF_LIST_NAME, DOMAIN, EVENT_ITEM_SKIPPED, ChoreType
 from custom_components.chore_calendar.models import IntervalChore, ScheduledChore
@@ -302,10 +303,10 @@ async def test_complete_item_with_timestamp(hass, config_entry):
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_complete_item_invalid_datetime_raises(hass, config_entry):
-    """complete_item raises on an invalid datetime string."""
+    """complete_item raises on an invalid datetime string (caught by cv.datetime schema)."""
     entity_id = await _setup_with_chore(hass, config_entry)
 
-    with pytest.raises(ServiceValidationError, match="Invalid datetime"):
+    with pytest.raises(vol.Invalid, match="Invalid datetime"):
         await hass.services.async_call(
             DOMAIN,
             "complete_item",
@@ -740,10 +741,10 @@ async def test_skip_item_with_explicit_until(hass, config_entry):
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_skip_item_invalid_datetime_raises(hass, config_entry):
-    """skip_item raises on an invalid `until` string."""
+    """skip_item raises on an invalid `until` string (caught by cv.datetime schema)."""
     entity_id = await _setup_with_chore(hass, config_entry)
 
-    with pytest.raises(ServiceValidationError, match="Invalid datetime"):
+    with pytest.raises(vol.Invalid, match="Invalid datetime"):
         await hass.services.async_call(
             DOMAIN,
             "skip_item",

@@ -58,6 +58,14 @@
           "description": "How long before the scheduled time a completion will count. Default: 3 hours."
         }
       }
+    },
+    "status": {
+      "options": {
+        "completed": "Completed",
+        "due": "Due",
+        "overdue": "Overdue",
+        "pending": "Pending"
+      }
     }
   },
   "services": {
@@ -165,7 +173,7 @@
         },
         "completed_at": {
           "name": "Completed at",
-          "description": "ISO 8601 datetime of completion. Defaults to now."
+          "description": "Datetime of completion. Defaults to now."
         },
         "keep_skip": {
           "name": "Keep skip",
@@ -187,7 +195,7 @@
         },
         "until": {
           "name": "Until",
-          "description": "ISO 8601 datetime to defer the chore until. Omit to use the type-specific default: next active day for scheduled chores, now + interval for interval chores."
+          "description": "Datetime to defer the chore until. Omit to use the type-specific default: next active day for scheduled chores, now + interval for interval chores."
         }
       }
     },

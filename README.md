@@ -166,7 +166,16 @@ action: chore_calendar.complete_item
 data:
   entity_id: calendar.daily_chores
   item: "Morning Medicine"
+
+# Record a completion at a specific time (e.g. backfilling)
+action: chore_calendar.complete_item
+data:
+  entity_id: sensor.daily_chores_morning_medicine
+  completed_at: "2026-04-20 07:30:00"
+  completed_by: person.alice
 ```
+
+`completed_at` takes a datetime — enter it directly in YAML or use the picker in Developer Tools. Defaults to now when omitted.
 
 Completing a chore clears any active skip by default. Pass `keep_skip: true` to preserve the skip — useful when you complete early but still want the deferral to hold until the originally scheduled `skipped_until`.
 
@@ -197,8 +206,10 @@ action: chore_calendar.skip_item
 data:
   entity_id: calendar.daily_chores
   item: "Morning Medicine"
-  until: "2026-04-28T09:00:00-04:00"
+  until: "2026-04-28 09:00:00"
 ```
+
+`until` takes a datetime — enter it directly in YAML or use the picker in Developer Tools.
 
 Completing a skipped chore clears `skipped_until` (unless `keep_skip: true`). Uncompleting that completion restores the skip — the undo is symmetric with `last_completed`.
 

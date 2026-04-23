@@ -84,7 +84,7 @@ SERVICE_COMPLETE_SCHEMA = vol.Schema(
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
         vol.Optional(ATTR_ITEM): cv.string,
         vol.Optional(ATTR_COMPLETED_BY): cv.entity_id,
-        vol.Optional(ATTR_COMPLETED_AT): cv.string,
+        vol.Optional(ATTR_COMPLETED_AT): cv.datetime,
         vol.Optional(ATTR_KEEP_SKIP): cv.boolean,
     }
 )
@@ -100,7 +100,7 @@ SERVICE_SKIP_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
         vol.Optional(ATTR_ITEM): cv.string,
-        vol.Optional(ATTR_UNTIL): cv.string,
+        vol.Optional(ATTR_UNTIL): cv.datetime,
     }
 )
 
@@ -367,16 +367,7 @@ async def _async_handle_complete(call: ServiceCall) -> None:
         msg = f"Chore '{uid}' not found"
         raise ServiceValidationError(msg)
 
-    # Parse completion timestamp.
-    completed_at_raw = call.data.get(ATTR_COMPLETED_AT)
-    if completed_at_raw:
-        completed_at = dt_util.parse_datetime(completed_at_raw)
-        if completed_at is None:
-            msg = f"Invalid datetime: {completed_at_raw}"
-            raise ServiceValidationError(msg)
-    else:
-        completed_at = dt_util.now()
-
+    completed_at = call.data.get(ATTR_COMPLETED_AT) or dt_util.now()
     keep_skip = bool(call.data.get(ATTR_KEEP_SKIP, False))
     existing.apply_completion(
         completed_at,
@@ -423,14 +414,7 @@ async def _async_handle_skip(call: ServiceCall) -> None:
         msg = f"Chore '{uid}' not found"
         raise ServiceValidationError(msg)
 
-    until_raw = call.data.get(ATTR_UNTIL)
-    if until_raw:
-        skipped_until = dt_util.parse_datetime(until_raw)
-        if skipped_until is None:
-            msg = f"Invalid datetime: {until_raw}"
-            raise ServiceValidationError(msg)
-    else:
-        skipped_until = existing.compute_skipped_until_default(dt_util.now())
+    skipped_until = call.data.get(ATTR_UNTIL) or existing.compute_skipped_until_default(dt_util.now())
 
     existing.skipped_until = skipped_until
     await store.async_update_chore(existing)

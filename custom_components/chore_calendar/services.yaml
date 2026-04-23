@@ -162,7 +162,7 @@ complete_item:
             - domain: person
     completed_at:
       selector:
-        text:
+        datetime:
     keep_skip:
       selector:
         boolean:
@@ -183,7 +183,7 @@ skip_item:
         text:
     until:
       selector:
-        text:
+        datetime:
 
 uncomplete_item:
   fields:
@@ -212,8 +212,9 @@ get_items:
     status:
       selector:
         select:
+          translation_key: status
           options:
             - completed
-            - pending
             - due
             - overdue
+            - pending
