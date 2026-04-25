@@ -32,6 +32,7 @@ class BaseChore(abc.ABC):
     previous_last_completed: datetime | None = None
     previous_last_completed_by: str | None = None
     skipped_until: datetime | None = None
+    previous_skipped_until: datetime | None = None
 
     @abc.abstractmethod
     def compute_status(self, now: datetime) -> ChoreStatus:
@@ -49,16 +50,38 @@ class BaseChore(abc.ABC):
     def is_in_completion_window(self, timestamp: datetime) -> bool:
         """Return True if a completion at *timestamp* is valid for the current period."""
 
-    def apply_completion(self, timestamp: datetime, completed_by: str | None) -> None:
-        """Record a completion, saving the prior state to the undo slot."""
+    @abc.abstractmethod
+    def compute_skipped_until_default(self, now: datetime) -> datetime:
+        """Return the default ``skipped_until`` used when the skip service omits ``until``."""
+
+    def apply_completion(
+        self,
+        timestamp: datetime,
+        completed_by: str | None,
+        *,
+        clear_skip: bool = True,
+    ) -> None:
+        """Record a completion, saving the prior state to the undo slot.
+
+        When *clear_skip* is True (the default), any active ``skipped_until`` is
+        moved to the undo slot and cleared. Pass False to preserve the skip —
+        e.g. when the user completed early but still wants the deferral to hold.
+        """
         self.previous_last_completed = self.last_completed
         self.previous_last_completed_by = self.last_completed_by
         self.last_completed = timestamp
         self.last_completed_by = completed_by
+        if clear_skip:
+            self.previous_skipped_until = self.skipped_until
+            self.skipped_until = None
+        else:
+            self.previous_skipped_until = None
 
     def revert_completion(self) -> None:
         """Restore the previous completion state from the undo slot.
 
+        Also restores ``skipped_until`` if it was cleared by the completion,
+        keeping skip state symmetric with the other previous-* fields.
         Raises ValueError if there is no completion to revert.
         """
         if self.last_completed is None:
@@ -66,8 +89,10 @@ class BaseChore(abc.ABC):
             raise ValueError(msg)
         self.last_completed = self.previous_last_completed
         self.last_completed_by = self.previous_last_completed_by
+        self.skipped_until = self.previous_skipped_until
         self.previous_last_completed = None
         self.previous_last_completed_by = None
+        self.previous_skipped_until = None
 
     @abc.abstractmethod
     def _schedule_to_dict(self) -> dict[str, Any]:
@@ -94,6 +119,9 @@ class BaseChore(abc.ABC):
             ),
             "previous_last_completed_by": self.previous_last_completed_by,
             "skipped_until": self.skipped_until.isoformat() if self.skipped_until else None,
+            "previous_skipped_until": (
+                self.previous_skipped_until.isoformat() if self.previous_skipped_until else None
+            ),
         }
 
     @classmethod
@@ -117,6 +145,7 @@ def _extract_base_kwargs(data: dict[str, Any], chore_type: ChoreType) -> dict[st
     last_completed_raw = data.get("last_completed")
     previous_last_completed_raw = data.get("previous_last_completed")
     skipped_until_raw = data.get("skipped_until")
+    previous_skipped_until_raw = data.get("previous_skipped_until")
     return {
         # Migration v1→v2: remove "chore_id" fallback when dropping v1 support.
         "uid": data.get("uid") or data["chore_id"],
@@ -132,6 +161,9 @@ def _extract_base_kwargs(data: dict[str, Any], chore_type: ChoreType) -> dict[st
         ),
         "previous_last_completed_by": data.get("previous_last_completed_by"),
         "skipped_until": dt_util.parse_datetime(skipped_until_raw) if skipped_until_raw else None,
+        "previous_skipped_until": (
+            dt_util.parse_datetime(previous_skipped_until_raw) if previous_skipped_until_raw else None
+        ),
     }
 
 
@@ -151,9 +183,16 @@ class ScheduledChore(BaseChore):
 
     def compute_status(self, now: datetime) -> ChoreStatus:
         """Compute scheduled chore status using the blueprint state machine."""
-        period_due = self._find_current_period(now)
+        using_skip = self._skip_anchor_active(now)
+        period_due = self.skipped_until if using_skip else self._find_current_period(now)
+        assert period_due is not None  # using_skip implies skipped_until set
         pending_at = period_due - self.early_window
         overdue_at = period_due + self.grace_period
+
+        # Skip anchor may place now well before pending_at — the normal path
+        # never hits this because _find_current_period guarantees now ≥ pending_at.
+        if using_skip and now < pending_at:
+            return ChoreStatus.COMPLETED
 
         if self.last_completed and self.last_completed >= pending_at:
             return ChoreStatus.COMPLETED
@@ -177,6 +216,9 @@ class ScheduledChore(BaseChore):
         return the *overdue* period's due time — not the next period's.
         This keeps next_due stable until the chore is completed.
         """
+        if self._skip_anchor_active(now):
+            return self.skipped_until
+
         period_due = self._find_current_period(now)
         overdue_at = period_due + self.grace_period
         pending_at = period_due - self.early_window
@@ -199,6 +241,9 @@ class ScheduledChore(BaseChore):
 
     def compute_due_range(self, now: datetime) -> tuple[datetime, datetime] | None:
         """Return (period_due, overdue_at) for the current scheduled period."""
+        if self._skip_anchor_active(now):
+            assert self.skipped_until is not None
+            return (self.skipped_until, self.skipped_until + self.grace_period)
         period_due = self._find_current_period(now)
         return (period_due, period_due + self.grace_period)
 
@@ -207,6 +252,23 @@ class ScheduledChore(BaseChore):
         period_due = self._find_current_period(timestamp)
         pending_at = period_due - self.early_window
         return timestamp >= pending_at
+
+    def compute_skipped_until_default(self, now: datetime) -> datetime:
+        """Return the next active day's period-due strictly after *now*.
+
+        Walks forward from the current operative period. An overdue chore's
+        period may be pinned in the past — stepping once would still land
+        in the past, so we advance until the candidate is strictly after
+        *now*. Guarantees the skip actually takes effect.
+        """
+        candidate = self._find_next_active_day(self._find_current_period(now))
+        while candidate <= now:
+            candidate = self._find_next_active_day(candidate)
+        return candidate
+
+    def _skip_anchor_active(self, now: datetime) -> bool:
+        """Return True while ``skipped_until`` should override the period anchor."""
+        return self.skipped_until is not None and now < self.skipped_until + self.grace_period
 
     def _find_current_period(self, now: datetime) -> datetime:
         """Find the period_due for the period that *now* falls into.
@@ -341,6 +403,16 @@ class IntervalChore(BaseChore):
         Status uses only last_completed — a chore that has never been
         completed is always DUE regardless of created_at.
         """
+        if self._skip_anchor_active(now):
+            assert self.skipped_until is not None
+            due_at = self.skipped_until
+            overdue_at = due_at + self.grace_period
+            if now >= overdue_at:
+                return ChoreStatus.OVERDUE
+            if now >= due_at:
+                return ChoreStatus.DUE
+            return ChoreStatus.COMPLETED
+
         if self.last_completed is None:
             return ChoreStatus.DUE
 
@@ -355,6 +427,8 @@ class IntervalChore(BaseChore):
 
     def compute_next_due(self, now: datetime) -> datetime | None:
         """Return the next due datetime, or None if no anchor exists."""
+        if self._skip_anchor_active(now):
+            return self.skipped_until
         if self.last_completed is not None:
             return self.last_completed + self.interval
         # Never completed — due at creation time (immediately).
@@ -362,6 +436,9 @@ class IntervalChore(BaseChore):
 
     def compute_due_range(self, now: datetime) -> tuple[datetime, datetime] | None:
         """Return (due_at, overdue_at) or None if no anchor exists."""
+        if self._skip_anchor_active(now):
+            assert self.skipped_until is not None
+            return (self.skipped_until, self.skipped_until + self.grace_period)
         if self.last_completed is not None:
             due_at = self.last_completed + self.interval
             return (due_at, due_at + self.grace_period)
@@ -373,6 +450,14 @@ class IntervalChore(BaseChore):
     def is_in_completion_window(self, timestamp: datetime) -> bool:
         """Interval chores can always be completed (there is no early window)."""
         return True
+
+    def compute_skipped_until_default(self, now: datetime) -> datetime:
+        """Return now + interval as the default deferred due datetime."""
+        return now + self.interval
+
+    def _skip_anchor_active(self, now: datetime) -> bool:
+        """Return True while ``skipped_until`` should override the next-due anchor."""
+        return self.skipped_until is not None and now < self.skipped_until + self.grace_period
 
     def _schedule_to_dict(self) -> dict[str, Any]:
         """Serialize interval-chore-specific fields."""

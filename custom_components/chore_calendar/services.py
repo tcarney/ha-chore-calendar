@@ -18,11 +18,13 @@ from .const import (
     ATTR_ITEM,
     ATTR_TRIGGER_ENTITY,
     DOMAIN,
+    EVENT_ITEM_SKIPPED,
     LOGGER,
     SERVICE_COMPLETE_ITEM,
     SERVICE_CREATE_ITEM,
     SERVICE_DELETE_ITEM,
     SERVICE_GET_ITEMS,
+    SERVICE_SKIP_ITEM,
     SERVICE_UNCOMPLETE_ITEM,
     SERVICE_UPDATE_ITEM,
     ChoreStatus,
@@ -36,7 +38,9 @@ ATTR_CHORE_NAME = "chore_name"
 ATTR_COMPLETED_AT = "completed_at"
 ATTR_COMPLETED_BY = "completed_by"
 ATTR_ENTITY_ID = "entity_id"
+ATTR_KEEP_SKIP = "keep_skip"
 ATTR_STATUS = "status"
+ATTR_UNTIL = "until"
 
 # Service field keys for schedule configuration.
 ATTR_SCHEDULED = "scheduled"
@@ -80,7 +84,8 @@ SERVICE_COMPLETE_SCHEMA = vol.Schema(
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
         vol.Optional(ATTR_ITEM): cv.string,
         vol.Optional(ATTR_COMPLETED_BY): cv.entity_id,
-        vol.Optional(ATTR_COMPLETED_AT): cv.string,
+        vol.Optional(ATTR_COMPLETED_AT): cv.datetime,
+        vol.Optional(ATTR_KEEP_SKIP): cv.boolean,
     }
 )
 
@@ -88,6 +93,14 @@ SERVICE_UNCOMPLETE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
         vol.Optional(ATTR_ITEM): cv.string,
+    }
+)
+
+SERVICE_SKIP_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Optional(ATTR_ITEM): cv.string,
+        vol.Optional(ATTR_UNTIL): cv.datetime,
     }
 )
 
@@ -354,17 +367,13 @@ async def _async_handle_complete(call: ServiceCall) -> None:
         msg = f"Chore '{uid}' not found"
         raise ServiceValidationError(msg)
 
-    # Parse completion timestamp.
-    completed_at_raw = call.data.get(ATTR_COMPLETED_AT)
-    if completed_at_raw:
-        completed_at = dt_util.parse_datetime(completed_at_raw)
-        if completed_at is None:
-            msg = f"Invalid datetime: {completed_at_raw}"
-            raise ServiceValidationError(msg)
-    else:
-        completed_at = dt_util.now()
-
-    existing.apply_completion(completed_at, call.data.get(ATTR_COMPLETED_BY))
+    completed_at = call.data.get(ATTR_COMPLETED_AT) or dt_util.now()
+    keep_skip = bool(call.data.get(ATTR_KEEP_SKIP, False))
+    existing.apply_completion(
+        completed_at,
+        call.data.get(ATTR_COMPLETED_BY),
+        clear_skip=not keep_skip,
+    )
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
     LOGGER.debug("Completed chore %s (%s) at %s", existing.chore_name, uid, completed_at.isoformat())
@@ -389,6 +398,43 @@ async def _async_handle_uncomplete(call: ServiceCall) -> None:
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
     LOGGER.debug("Uncompleted chore %s (%s)", existing.chore_name, uid)
+
+
+async def _async_handle_skip(call: ServiceCall) -> None:
+    """Handle skip_item service call.
+
+    Defers a chore's next occurrence by setting ``skipped_until``. Without an
+    explicit ``until``, falls back to the chore's type-specific default.
+    """
+    store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
+
+    uid = _resolve_item(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_ITEM), store)
+    existing = store.get_chore(uid)
+    if existing is None:
+        msg = f"Chore '{uid}' not found"
+        raise ServiceValidationError(msg)
+
+    skipped_until = call.data.get(ATTR_UNTIL) or existing.compute_skipped_until_default(dt_util.now())
+
+    existing.skipped_until = skipped_until
+    await store.async_update_chore(existing)
+    await coordinator.async_refresh()
+
+    call.hass.bus.async_fire(
+        EVENT_ITEM_SKIPPED,
+        {
+            "uid": existing.uid,
+            "chore_name": existing.chore_name,
+            "skipped_until": skipped_until.isoformat(),
+            "entity_id": call.data[ATTR_ENTITY_ID],
+        },
+    )
+    LOGGER.debug(
+        "Skipped chore %s (%s) until %s",
+        existing.chore_name,
+        uid,
+        skipped_until.isoformat(),
+    )
 
 
 async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
@@ -438,6 +484,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
         _async_handle_uncomplete,
         schema=SERVICE_UNCOMPLETE_SCHEMA,
     )
+    hass.services.async_register(DOMAIN, SERVICE_SKIP_ITEM, _async_handle_skip, schema=SERVICE_SKIP_SCHEMA)
     hass.services.async_register(
         DOMAIN,
         SERVICE_GET_ITEMS,

@@ -11,7 +11,8 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 - **Custom Lovelace card**: Built-in timeline card with per-entity filtering, colors, detail dialog, and configurable actions
 - **Tag scan auto-completion**: Assign NFC tags to chores for tap-to-complete; shared tags automatically resolve to the correct chore based on completion windows
 - **Flexible scheduling**: Scheduled (specific days/times) and interval-based chore types
-- **Status events**: Fires `chore_calendar_status_changed` events for use in automations
+- **Skip occurrences**: Defer a chore's next occurrence without touching its completion history, with an explicit `until` datetime or a type-specific default
+- **Status events**: Fires `chore_calendar_status_changed` and `chore_calendar_item_skipped` events for use in automations
 - **Persistent storage**: Chore data stored locally — no external API or cloud dependency
 
 ## Quick Start
@@ -165,7 +166,52 @@ action: chore_calendar.complete_item
 data:
   entity_id: calendar.daily_chores
   item: "Morning Medicine"
+
+# Record a completion at a specific time (e.g. backfilling)
+action: chore_calendar.complete_item
+data:
+  entity_id: sensor.daily_chores_morning_medicine
+  completed_at: "2026-04-20 07:30:00"
+  completed_by: person.alice
 ```
+
+`completed_at` takes a datetime — enter it directly in YAML or use the picker in Developer Tools. Defaults to now when omitted.
+
+Completing a chore clears any active skip by default. Pass `keep_skip: true` to preserve the skip — useful when you complete early but still want the deferral to hold until the originally scheduled `skipped_until`.
+
+```yaml
+action: chore_calendar.complete_item
+data:
+  entity_id: sensor.daily_chores_morning_medicine
+  keep_skip: true
+```
+
+### Skip a Chore
+
+Defer a chore's next occurrence without recording a completion. `last_completed` is untouched — skipping does not count as doing the chore. While the skip is in force, the chore's status reports as `completed` and `next_due` becomes `skipped_until`; the normal state machine (early window, grace period) runs around the deferred datetime.
+
+Provide `until` to pick the exact resume datetime, or omit it to use the type-specific default:
+
+- **Scheduled chores**: next active day's scheduled time strictly after now (overdue periods are stepped past).
+- **Interval chores**: `now + interval`.
+
+```yaml
+# Default — skip to the next occurrence
+action: chore_calendar.skip_item
+data:
+  entity_id: sensor.daily_chores_morning_medicine
+
+# Explicit until — skip to a specific datetime
+action: chore_calendar.skip_item
+data:
+  entity_id: calendar.daily_chores
+  item: "Morning Medicine"
+  until: "2026-04-28 09:00:00"
+```
+
+`until` takes a datetime — enter it directly in YAML or use the picker in Developer Tools.
+
+Completing a skipped chore clears `skipped_until` (unless `keep_skip: true`). Uncompleting that completion restores the skip — the undo is symmetric with `last_completed`.
 
 ### Uncomplete a Chore
 
@@ -314,7 +360,7 @@ Tapping a chore row (default behavior) opens a detail dialog showing:
 - Trigger tag (if configured)
 - Last completed time and by whom (if set)
 
-For non-completed chores, a "Complete" button appears in the dialog footer.
+For non-completed chores, "Skip" and "Complete" buttons appear in the dialog footer. Skip defers the chore using the type-specific default (see [Skip a Chore](#skip-a-chore)); Complete records the completion and clears any active skip. For completed chores, an "Uncomplete" button is shown when `allow_uncomplete` is enabled — uncomplete restores the skip that was cleared by the completion.
 
 ### Visual Editor
 
@@ -322,7 +368,9 @@ All options are configurable through the visual editor — no YAML required. Eac
 
 ## Automation Events
 
-The integration fires `chore_calendar_status_changed` events on status transitions, useful for notifications or automations:
+### `chore_calendar_status_changed`
+
+Fired on status transitions, useful for notifications or automations:
 
 ```yaml
 event_type: chore_calendar_status_changed
@@ -334,6 +382,19 @@ data:
   next_due: "2026-03-23T08:00:00-04:00"
   assigned_to: ["person.claire"]
   list_entity: "calendar.daily_chores"
+```
+
+### `chore_calendar_item_skipped`
+
+Fired when `skip_item` is called — distinguishes an intentional deferral from natural status transitions.
+
+```yaml
+event_type: chore_calendar_item_skipped
+data:
+  uid: "01244b28-e604-11ee-a0a4-e45f0197c057"
+  chore_name: "Morning Medicine"
+  skipped_until: "2026-04-28T09:00:00-04:00"
+  entity_id: "sensor.daily_chores_morning_medicine"
 ```
 
 ## Troubleshooting

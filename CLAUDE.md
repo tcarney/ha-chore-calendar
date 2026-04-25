@@ -78,7 +78,7 @@ See `SPECS.md` for full architecture details (data flow, state machines, storage
 
 - **Tests:** Write tests for new features and bug fixes. Follow existing test patterns in the `tests/` directory.
 - **Docs:** Do NOT create markdown files without explicit permission. Extend existing docs rather than creating new files.
-- **Translations:** Business logic first; update `translations/en.json` only when asked or at feature completion. Never update other language files automatically — ask first.
+- **Translations:** Business logic first; update `translations/en.json` only when asked or at feature completion. `strings.json` and `translations/en.json` must stay byte-for-byte identical — `script/check` diffs them and fails on drift. Never update other language files automatically — ask first.
 - **Scope:** Implement features completely (e.g., new sensor needs entity class + platform init + descriptions — all at once). For multiple independent features, do one at a time and suggest a commit between each.
 - **Large changes:** For refactors touching >10 files or architectural changes, propose a plan and get explicit confirmation before starting.
 - **Research first:** Don't guess HA patterns — look them up at [developers.home-assistant.io](https://developers.home-assistant.io/). HA evolves rapidly; verify current best practices.

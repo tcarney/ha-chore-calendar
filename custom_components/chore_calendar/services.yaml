@@ -162,7 +162,28 @@ complete_item:
             - domain: person
     completed_at:
       selector:
+        datetime:
+    keep_skip:
+      selector:
+        boolean:
+
+skip_item:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+              integration: chore_calendar
+            - domain: sensor
+              integration: chore_calendar
+    item:
+      selector:
         text:
+    until:
+      selector:
+        datetime:
 
 uncomplete_item:
   fields:
@@ -191,8 +212,9 @@ get_items:
     status:
       selector:
         select:
+          translation_key: status
           options:
             - completed
-            - pending
             - due
             - overdue
+            - pending

@@ -58,6 +58,14 @@
           "description": "How long before the scheduled time a completion will count. Default: 3 hours."
         }
       }
+    },
+    "status": {
+      "options": {
+        "completed": "Completed",
+        "due": "Due",
+        "overdue": "Overdue",
+        "pending": "Pending"
+      }
     }
   },
   "services": {
@@ -165,7 +173,29 @@
         },
         "completed_at": {
           "name": "Completed at",
-          "description": "ISO 8601 datetime of completion. Defaults to now."
+          "description": "Datetime of completion. Defaults to now."
+        },
+        "keep_skip": {
+          "name": "Keep skip",
+          "description": "Preserve any active skip instead of clearing it. Useful when completing early but still wanting the deferral to hold."
+        }
+      }
+    },
+    "skip_item": {
+      "name": "Skip item",
+      "description": "Defer a chore's next occurrence without recording a completion.",
+      "fields": {
+        "entity_id": {
+          "name": "Entity",
+          "description": "A chore sensor entity or the calendar entity for the target list."
+        },
+        "item": {
+          "name": "Item name or UID",
+          "description": "Required when targeting the calendar entity; inferred when targeting a chore sensor."
+        },
+        "until": {
+          "name": "Until",
+          "description": "Datetime to defer the chore until. Omit to use the type-specific default: next active day for scheduled chores, now + interval for interval chores."
         }
       }
     },

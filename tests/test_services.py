@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time as dtime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+import voluptuous as vol
 
-from custom_components.chore_calendar.const import CONF_LIST_NAME, DOMAIN, ChoreType
-from custom_components.chore_calendar.models import IntervalChore
+from custom_components.chore_calendar.const import CONF_LIST_NAME, DOMAIN, EVENT_ITEM_SKIPPED, ChoreType
+from custom_components.chore_calendar.models import IntervalChore, ScheduledChore
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
@@ -302,10 +303,10 @@ async def test_complete_item_with_timestamp(hass, config_entry):
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_complete_item_invalid_datetime_raises(hass, config_entry):
-    """complete_item raises on an invalid datetime string."""
+    """complete_item raises on an invalid datetime string (caught by cv.datetime schema)."""
     entity_id = await _setup_with_chore(hass, config_entry)
 
-    with pytest.raises(ServiceValidationError, match="Invalid datetime"):
+    with pytest.raises(vol.Invalid, match="Invalid datetime"):
         await hass.services.async_call(
             DOMAIN,
             "complete_item",
@@ -657,3 +658,218 @@ async def test_update_item_resolves_tag_id(hass, config_entry):
     store = config_entry.runtime_data.store
     chore = store.get_chore(TEST_UID)
     assert chore.trigger_tag_id == TAG_UUID
+
+
+# ---------------------------------------------------------------------------
+# skip_item
+# ---------------------------------------------------------------------------
+
+
+async def _add_scheduled_chore(hass, entry: MockConfigEntry) -> str:
+    """Add a ScheduledChore to the already-loaded entry and return its UID."""
+    uid = "11112222-3333-4444-5555-666677778888"
+    chore = ScheduledChore(
+        uid=uid,
+        chore_name="Morning Medicine",
+        chore_type=ChoreType.SCHEDULED,
+        time=dtime(8, 0),
+        active_days=[],
+        early_window=timedelta(minutes=180),
+        grace_period=timedelta(minutes=60),
+    )
+    await entry.runtime_data.store.async_create_chore(chore)
+    await entry.runtime_data.coordinator.async_refresh()
+    await hass.async_block_till_done()
+    return uid
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_interval_default_is_now_plus_interval(hass, config_entry):
+    """skip_item with no `until` defaults to now + interval for IntervalChore."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "skip_item",
+            {"entity_id": entity_id, "item": TEST_UID},
+            blocking=True,
+        )
+
+    chore = config_entry.runtime_data.store.get_chore(TEST_UID)
+    assert chore.skipped_until == FROZEN_NOW + timedelta(days=3)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_scheduled_default_is_next_active_day(hass, config_entry):
+    """skip_item with no `until` defaults to next active day for ScheduledChore."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    sched_uid = await _add_scheduled_chore(hass, config_entry)
+
+    # 2026-03-30 is Monday at 12:00; current period Mon 08:00 → next active day Tue 08:00.
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "skip_item",
+            {"entity_id": entity_id, "item": sched_uid},
+            blocking=True,
+        )
+
+    chore = config_entry.runtime_data.store.get_chore(sched_uid)
+    assert chore.skipped_until == datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_with_explicit_until(hass, config_entry):
+    """skip_item with an explicit `until` uses the value as-is (no interval added)."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "skip_item",
+        {
+            "entity_id": entity_id,
+            "item": TEST_UID,
+            "until": "2026-04-10T08:00:00-05:00",
+        },
+        blocking=True,
+    )
+
+    chore = config_entry.runtime_data.store.get_chore(TEST_UID)
+    assert chore.skipped_until == datetime(2026, 4, 10, 8, 0, tzinfo=TZ)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_invalid_datetime_raises(hass, config_entry):
+    """skip_item raises on an invalid `until` string (caught by cv.datetime schema)."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    with pytest.raises(vol.Invalid, match="Invalid datetime"):
+        await hass.services.async_call(
+            DOMAIN,
+            "skip_item",
+            {"entity_id": entity_id, "item": TEST_UID, "until": "not-a-date"},
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_fires_event(hass, config_entry):
+    """skip_item fires chore_calendar_item_skipped with the expected payload."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    events = []
+    hass.bus.async_listen(EVENT_ITEM_SKIPPED, events.append)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "skip_item",
+        {
+            "entity_id": entity_id,
+            "item": TEST_UID,
+            "until": "2026-04-10T08:00:00-05:00",
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert len(events) == 1
+    data = events[0].data
+    assert data["uid"] == TEST_UID
+    assert data["chore_name"] == "Test Chore"
+    assert data["skipped_until"] == "2026-04-10T08:00:00-05:00"
+    assert data["entity_id"] == entity_id
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_via_sensor_entity(hass, config_entry):
+    """skip_item works when targeting the sensor entity directly."""
+    await _setup_with_chore(hass, config_entry)
+    sensor_id = _get_sensor_entity_id(hass, config_entry, TEST_UID)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "skip_item",
+            {"entity_id": sensor_id},
+            blocking=True,
+        )
+
+    chore = config_entry.runtime_data.store.get_chore(TEST_UID)
+    assert chore.skipped_until == FROZEN_NOW + timedelta(days=3)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_complete_item_clears_skip_by_default(hass, config_entry):
+    """complete_item without keep_skip clears skipped_until and seeds the undo slot."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "skip_item",
+        {"entity_id": entity_id, "item": TEST_UID, "until": "2026-04-10T08:00:00-05:00"},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": TEST_UID},
+        blocking=True,
+    )
+
+    chore = config_entry.runtime_data.store.get_chore(TEST_UID)
+    assert chore.skipped_until is None
+    assert chore.previous_skipped_until == datetime(2026, 4, 10, 8, 0, tzinfo=TZ)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_complete_item_keep_skip_preserves(hass, config_entry):
+    """complete_item with keep_skip=True preserves skipped_until and leaves undo empty."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    skipped_iso = "2026-04-10T08:00:00-05:00"
+
+    await hass.services.async_call(
+        DOMAIN,
+        "skip_item",
+        {"entity_id": entity_id, "item": TEST_UID, "until": skipped_iso},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": TEST_UID, "keep_skip": True},
+        blocking=True,
+    )
+
+    chore = config_entry.runtime_data.store.get_chore(TEST_UID)
+    assert chore.skipped_until == datetime(2026, 4, 10, 8, 0, tzinfo=TZ)
+    assert chore.previous_skipped_until is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_uncomplete_item_restores_skip(hass, config_entry):
+    """uncomplete_item restores the skipped_until that was cleared by completion."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "skip_item",
+        {"entity_id": entity_id, "item": TEST_UID, "until": "2026-04-10T08:00:00-05:00"},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": TEST_UID},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "uncomplete_item",
+        {"entity_id": entity_id, "item": TEST_UID},
+        blocking=True,
+    )
+
+    chore = config_entry.runtime_data.store.get_chore(TEST_UID)
+    assert chore.skipped_until == datetime(2026, 4, 10, 8, 0, tzinfo=TZ)
+    assert chore.previous_skipped_until is None

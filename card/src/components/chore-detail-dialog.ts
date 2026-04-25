@@ -54,6 +54,7 @@ export class ChoreDetailDialog extends LitElement {
     .footer {
       display: flex;
       justify-content: flex-end;
+      gap: 8px;
       padding: 16px;
       border-top: 1px solid var(--divider-color);
     }
@@ -83,6 +84,14 @@ export class ChoreDetailDialog extends LitElement {
         ${!isCompleted
           ? html`
               <div slot="footer" class="footer">
+                <ha-button
+                  variant="neutral"
+                  appearance="plain"
+                  ?disabled=${this._loading}
+                  @click=${this._onSkip}
+                >
+                  ${this._loading ? "Skipping..." : "Skip"}
+                </ha-button>
                 <ha-button
                   ?disabled=${this._loading}
                   @click=${this._onComplete}
@@ -200,6 +209,34 @@ export class ChoreDetailDialog extends LitElement {
       );
     } catch (err) {
       console.error("chore-detail-dialog: failed to complete chore", err);
+    } finally {
+      this._loading = false;
+    }
+  }
+
+  private async _onSkip() {
+    if (!this.item || this._loading) return;
+
+    this._loading = true;
+    try {
+      await this.hass.callWS({
+        type: "call_service",
+        domain: DOMAIN,
+        service: "skip_item",
+        service_data: {
+          entity_id: this.item.source_entity,
+          item: this.item.uid,
+        },
+      });
+      this.dispatchEvent(
+        new CustomEvent("chore-skipped", {
+          detail: { item: this.item },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    } catch (err) {
+      console.error("chore-detail-dialog: failed to skip chore", err);
     } finally {
       this._loading = false;
     }

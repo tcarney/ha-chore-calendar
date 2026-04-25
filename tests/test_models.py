@@ -493,3 +493,214 @@ class TestCompletionUndoSlot:
 
         assert restored.previous_last_completed == initial
         assert restored.previous_last_completed_by == "person.alice"
+
+
+# ---------------------------------------------------------------------------
+# Skip semantics
+# ---------------------------------------------------------------------------
+
+
+class TestScheduledChoreSkip:
+    """Test ScheduledChore skip behavior — skipped_until as operative anchor."""
+
+    def test_skipped_until_default_is_next_active_day(self):
+        """Default skipped_until is the next active day's period-due."""
+        chore = _make_scheduled(active_days=["mon", "wed", "fri"])
+        # 2026-03-30 is Monday — current period is Mon 08:00.
+        now = datetime(2026, 3, 30, 10, 0, tzinfo=TZ)
+        # Next active day after Monday is Wednesday (Apr 1) 08:00.
+        assert chore.compute_skipped_until_default(now) == datetime(2026, 4, 1, 8, 0, tzinfo=TZ)
+
+    def test_skipped_until_default_advances_past_now_for_overdue(self):
+        """For an overdue chore pinned in the past, default walks forward past now."""
+        chore = _make_scheduled(
+            last_completed=datetime(2026, 3, 28, 7, 0, tzinfo=TZ),  # Sat, 2 days ago
+        )
+        # now = Mon 14:00. _find_current_period pins to Sun (yesterday) because
+        # Sun is also uncompleted; next active day after Sun is today Mon 08:00,
+        # which is already in the past. Default must walk forward to Tue 08:00.
+        now = datetime(2026, 3, 30, 14, 0, tzinfo=TZ)
+        assert chore.compute_skipped_until_default(now) == datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
+
+    def test_skip_from_overdue_transitions_to_completed(self):
+        """Calling skip on an OVERDUE chore flips status to COMPLETED via skipped_until."""
+        chore = _make_scheduled(
+            last_completed=datetime(2026, 3, 28, 7, 0, tzinfo=TZ),
+        )
+        now = datetime(2026, 3, 30, 14, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.OVERDUE
+
+        chore.skipped_until = chore.compute_skipped_until_default(now)
+        assert chore.compute_status(now) == ChoreStatus.COMPLETED
+        assert chore.compute_next_due(now) == datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
+
+    def test_status_completed_during_skip_before_pending_window(self):
+        """While the skip is active and we haven't reached its early window, status is COMPLETED."""
+        chore = _make_scheduled()
+        # Skip to Apr 2 08:00; pending_at = Apr 2 05:00.
+        chore.skipped_until = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        now = datetime(2026, 3, 31, 12, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.COMPLETED
+
+    def test_status_pending_inside_skip_early_window(self):
+        """Inside the skip's early window, status flips to PENDING."""
+        chore = _make_scheduled()
+        chore.skipped_until = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        # 06:00 — within early window (starts at 05:00), before due (08:00).
+        now = datetime(2026, 4, 2, 6, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.PENDING
+
+    def test_status_due_at_skipped_until(self):
+        """At skipped_until, status is DUE."""
+        chore = _make_scheduled()
+        chore.skipped_until = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        now = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.DUE
+
+    def test_status_due_within_skip_grace(self):
+        """Past skipped_until but within grace period, status is DUE (skip has no OVERDUE state)."""
+        chore = _make_scheduled()
+        chore.skipped_until = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        # 30 minutes past due, within the 60-minute default grace.
+        now = datetime(2026, 4, 2, 8, 30, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.DUE
+
+    def test_status_after_skip_grace_falls_through(self):
+        """Once the skip's grace period fully elapses, normal schedule logic resumes."""
+        chore = _make_scheduled()
+        # Skipped to a date three days back — all of the skip window has passed.
+        chore.skipped_until = datetime(2026, 3, 27, 8, 0, tzinfo=TZ)
+        # Never-completed chore on a fresh day: normal logic returns PENDING
+        # in the early window of today's period.
+        now = datetime(2026, 3, 30, 6, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.PENDING
+
+    def test_next_due_returns_skipped_until(self):
+        """compute_next_due returns skipped_until while skip is live."""
+        chore = _make_scheduled()
+        skipped = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        chore.skipped_until = skipped
+        now = datetime(2026, 3, 31, 12, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == skipped
+
+    def test_due_range_uses_skipped_until(self):
+        """compute_due_range anchors on skipped_until while skip is live."""
+        chore = _make_scheduled(grace_period_mins=60)
+        skipped = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        chore.skipped_until = skipped
+        now = datetime(2026, 3, 31, 12, 0, tzinfo=TZ)
+        result = chore.compute_due_range(now)
+        assert result == (skipped, datetime(2026, 4, 2, 9, 0, tzinfo=TZ))
+
+
+class TestIntervalChoreSkip:
+    """Test IntervalChore skip behavior."""
+
+    def test_skipped_until_default_is_now_plus_interval(self):
+        """Default skipped_until is now + interval."""
+        chore = _make_interval(interval_mins=4320)  # 3 days
+        now = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
+        assert chore.compute_skipped_until_default(now) == datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+
+    def test_status_completed_before_skipped_until(self):
+        """While skip is active and we haven't reached skipped_until, status is COMPLETED."""
+        chore = _make_interval()
+        chore.skipped_until = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        now = datetime(2026, 3, 31, 12, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.COMPLETED
+
+    def test_status_due_at_skipped_until(self):
+        """At skipped_until, status flips to DUE."""
+        chore = _make_interval()
+        chore.skipped_until = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        now = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.DUE
+
+    def test_status_due_within_skip_grace(self):
+        """Past skipped_until but within grace, status is DUE (skip has no OVERDUE state)."""
+        chore = _make_interval(grace_period_mins=1440)  # 1 day
+        chore.skipped_until = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        # 12 hours past skipped_until, within the 1-day grace.
+        now = datetime(2026, 4, 3, 0, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.DUE
+
+    def test_status_after_skip_grace_falls_through(self):
+        """Once the skip's grace fully elapses, last_completed logic resumes."""
+        chore = _make_interval(
+            last_completed=datetime(2026, 3, 27, 12, 0, tzinfo=TZ),
+        )
+        # Skip fully expired (far in the past).
+        chore.skipped_until = datetime(2026, 3, 25, 12, 0, tzinfo=TZ)
+        now = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
+        # Normal logic: last_completed 3 days ago, interval 3 days → DUE.
+        assert chore.compute_status(now) == ChoreStatus.DUE
+
+    def test_next_due_returns_skipped_until(self):
+        """compute_next_due returns skipped_until while skip is live."""
+        chore = _make_interval()
+        skipped = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        chore.skipped_until = skipped
+        now = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == skipped
+
+    def test_due_range_uses_skipped_until(self):
+        """compute_due_range anchors on skipped_until while skip is live."""
+        chore = _make_interval(grace_period_mins=1440)  # 1 day
+        skipped = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        chore.skipped_until = skipped
+        now = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
+        result = chore.compute_due_range(now)
+        assert result == (skipped, datetime(2026, 4, 3, 12, 0, tzinfo=TZ))
+
+
+class TestSkipUndoInteraction:
+    """Test apply_completion / revert_completion with skip semantics."""
+
+    def test_complete_clears_skip_by_default(self):
+        """Default completion clears skipped_until and saves it to the undo slot."""
+        chore = _make_interval()
+        skipped = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        chore.skipped_until = skipped
+
+        chore.apply_completion(datetime(2026, 3, 31, 10, 0, tzinfo=TZ), "person.alice")
+
+        assert chore.skipped_until is None
+        assert chore.previous_skipped_until == skipped
+
+    def test_complete_with_keep_skip_preserves(self):
+        """apply_completion(clear_skip=False) preserves skipped_until and leaves undo empty."""
+        chore = _make_interval()
+        skipped = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        chore.skipped_until = skipped
+
+        chore.apply_completion(
+            datetime(2026, 3, 31, 10, 0, tzinfo=TZ),
+            "person.alice",
+            clear_skip=False,
+        )
+
+        assert chore.skipped_until == skipped
+        assert chore.previous_skipped_until is None
+
+    def test_revert_restores_skipped_until(self):
+        """revert_completion restores skipped_until from the undo slot."""
+        chore = _make_interval()
+        skipped = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        chore.skipped_until = skipped
+
+        chore.apply_completion(datetime(2026, 3, 31, 10, 0, tzinfo=TZ), "person.alice")
+        chore.revert_completion()
+
+        assert chore.skipped_until == skipped
+        assert chore.previous_skipped_until is None
+
+    def test_skip_fields_survive_round_trip(self):
+        """skipped_until and previous_skipped_until are serialized and restored."""
+        chore = _make_interval(last_completed=datetime(2026, 3, 30, 7, 0, tzinfo=TZ))
+        chore.skipped_until = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        chore.previous_skipped_until = datetime(2026, 3, 25, 12, 0, tzinfo=TZ)
+
+        restored = BaseChore.from_dict(chore.to_dict())
+
+        assert restored.skipped_until == chore.skipped_until
+        assert restored.previous_skipped_until == chore.previous_skipped_until

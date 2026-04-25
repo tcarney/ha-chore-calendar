@@ -96,6 +96,24 @@ pending → due → overdue → (trigger) → completed [terminal]
 
 Each chore carries a one-level undo slot (`previous_last_completed` / `previous_last_completed_by`). Completing saves the prior `last_completed` / `last_completed_by` into the slot; `uncomplete_item` restores them and clears the slot. There is no history log — exactly one completion is undoable at any time, and the slot is refreshed on every completion.
 
+A parallel `previous_skipped_until` slot holds any `skipped_until` value that a completion cleared (see [Skip](#skip)). Uncomplete restores it in the same step.
+
+### Skip
+
+`skip_item` defers a chore's next occurrence by writing `skipped_until` on the chore. It does **not** touch `last_completed` — skipping is distinct from completing, preserving an accurate record of when the task was really done.
+
+- **`skipped_until` acts as the operative period anchor** for the existing state machines:
+  - *Scheduled*: `pending_at = skipped_until − early_window`, `overdue_at = skipped_until + grace_period`
+  - *Interval*: `due_at = skipped_until`, `overdue_at = skipped_until + grace_period`
+- **No new status** — a skipped chore reports as `completed` while `now < pending_at` (scheduled) or `now < skipped_until` (interval). Once past that threshold, it transitions through `pending`/`due`/ etc. against the skipped anchor.
+- **Stale-skip fallthrough**: once `now ≥ skipped_until + grace_period`, the skip is ignored and normal period logic resumes. The field is not eagerly cleared.
+- **Defaults when `until` is omitted**:
+  - *Scheduled*: the next active day's period-due strictly after now. Walks forward past the pinned overdue period so the skip cannot land in the past.
+  - *Interval*: `now + interval`.
+- **`complete_item` clears the skip** by default. Pass `keep_skip: true` to preserve it — internally mapped to `apply_completion(clear_skip=False)`. The cleared value is saved to `previous_skipped_until` and restored by `uncomplete_item`.
+- **Fires `chore_calendar_item_skipped`** with `uid`, `chore_name`, `skipped_until`, and the list `entity_id`. Status transitions continue to fire `chore_calendar_status_changed`.
+- **Scope**: scheduled and interval only; oneshot skip behavior is defined alongside the oneshot chore type. List-level skip is deferred.
+
 ### Storage Schema
 
 File: `.storage/chore_calendar.{entry_id}` (one per list)
@@ -292,4 +310,4 @@ Tapping a chore row opens a detail dialog. Each row has an MDI icon and a value 
 | **Trigger**    | `mdi:nfc-tap`                          | Resolved trigger entity name                         |
 | **Last done**  | `mdi:check-circle-outline`             | Formatted completion time + "by {person}" if present |
 
-Non-completed chores show a "Complete" button in the dialog footer.
+Non-completed chores show "Skip" (plain, left) and "Complete" (primary, right) buttons in the dialog footer. Completed chores show an "Uncomplete" button when `allow_uncomplete` is enabled.
