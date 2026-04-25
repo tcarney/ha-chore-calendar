@@ -202,7 +202,7 @@ function t(t,e,i,o){var s,n=arguments.length,a=n<3?e:null===o?o=Object.getOwnPro
       padding: 16px;
       border-top: 1px solid var(--divider-color);
     }
-  `,t([ht({attribute:!1})],Ut.prototype,"hass",void 0),t([ht({attribute:!1})],Ut.prototype,"item",void 0),t([ht({type:Boolean})],Ut.prototype,"open",void 0),t([ht({type:Boolean,attribute:"allow-uncomplete"})],Ut.prototype,"allowUncomplete",void 0),t([pt()],Ut.prototype,"_loading",void 0),ut("chore-detail-dialog",Ut);const Mt=[{name:"title",selector:{text:{}}},{name:"hide_completed",selector:{boolean:{}},default:!1},{name:"hide_pending",selector:{boolean:{}},default:!1},{name:"hide_section_headers",selector:{boolean:{}},default:!1},{name:"hide_card_background",selector:{boolean:{}},default:!1},{name:"allow_uncomplete",selector:{boolean:{}},default:!1}],Nt=[{name:"completed_limit",selector:{number:{min:0,max:50,step:1,mode:"box"}},default:3},{name:"update_interval",selector:{number:{min:10,max:600,step:10,mode:"box"}},default:60}],Lt=[{key:"due_date_period",label:"Due-date period"},{key:"completed_period",label:"Completed period"}],Rt=[{value:"details",label:"Chore Details"},{value:"complete",label:"Complete Chore"},{value:"more-info",label:"More Info"},{value:"navigate",label:"Navigate"},{value:"url",label:"URL"},{value:"call-service",label:"Call Service"},{value:"none",label:"None"}],jt=[{name:"tap_action",selector:{select:{options:Rt,mode:"dropdown"}},default:"details"},{name:"hold_action",selector:{select:{options:Rt,mode:"dropdown"}},default:"none"},{name:"double_tap_action",selector:{select:{options:Rt,mode:"dropdown"}},default:"none"}],zt=[{name:"exclude",selector:{select:{multiple:!0,options:[{value:"overdue",label:"Overdue"},{value:"due",label:"Due"},{value:"pending",label:"Pending"},{value:"completed",label:"Completed"}]}}}],It={title:"Title",hide_completed:"Hide completed section",hide_pending:"Hide pending section",hide_section_headers:"Hide section headings",hide_card_background:"Hide card background",allow_uncomplete:"Allow uncomplete",completed_limit:"Completed chores limit",update_interval:"Update interval (seconds)",tap_action:"Tap action",hold_action:"Hold action",double_tap_action:"Double-tap action",exclude:"Exclude statuses"};function Bt(t){return"string"==typeof t?{entity:t}:{...t}}class Wt extends rt{constructor(){super(...arguments),this._expandedEntities=new Set,this._computeLabel=t=>It[t.name]??t.name}setConfig(t){this._config={...t}}render(){if(!this.hass||!this._config)return W``;const t=(this._config.entities??[]).map(Bt);return W`
+  `,t([ht({attribute:!1})],Ut.prototype,"hass",void 0),t([ht({attribute:!1})],Ut.prototype,"item",void 0),t([ht({type:Boolean})],Ut.prototype,"open",void 0),t([ht({type:Boolean,attribute:"allow-uncomplete"})],Ut.prototype,"allowUncomplete",void 0),t([pt()],Ut.prototype,"_loading",void 0),ut("chore-detail-dialog",Ut);const Mt=[{name:"title",selector:{text:{}}},{name:"hide_completed",selector:{boolean:{}},default:!1},{name:"hide_section_headers",selector:{boolean:{}},default:!1},{name:"hide_card_background",selector:{boolean:{}},default:!1},{name:"allow_uncomplete",selector:{boolean:{}},default:!1}],Nt=[{name:"update_interval",selector:{number:{min:10,max:600,step:10,mode:"box"}},default:60}],Lt=[{key:"due_date_period",label:"Due-date period"},{key:"completed_period",label:"Completed period"}],Rt=[{value:"details",label:"Chore Details"},{value:"complete",label:"Complete Chore"},{value:"more-info",label:"More Info"},{value:"navigate",label:"Navigate"},{value:"url",label:"URL"},{value:"call-service",label:"Call Service"},{value:"none",label:"None"}],jt=[{name:"tap_action",selector:{select:{options:Rt,mode:"dropdown"}},default:"details"},{name:"hold_action",selector:{select:{options:Rt,mode:"dropdown"}},default:"none"},{name:"double_tap_action",selector:{select:{options:Rt,mode:"dropdown"}},default:"none"}],zt=[{name:"exclude",selector:{select:{multiple:!0,options:[{value:"overdue",label:"Overdue"},{value:"due",label:"Due"},{value:"pending",label:"Pending"},{value:"completed",label:"Completed"}]}}}],It={title:"Title",hide_completed:"Hide completed section",hide_section_headers:"Hide section headings",hide_card_background:"Hide card background",allow_uncomplete:"Allow uncomplete",update_interval:"Update interval (seconds)",tap_action:"Tap action",hold_action:"Hold action",double_tap_action:"Double-tap action",exclude:"Exclude statuses"};function Bt(t){return"string"==typeof t?{entity:t}:{...t}}class Wt extends rt{constructor(){super(...arguments),this._expandedEntities=new Set,this._computeLabel=t=>It[t.name]??t.name}setConfig(t){this._config={...t}}render(){if(!this.hass||!this._config)return W``;const t=(this._config.entities??[]).map(Bt);return W`
       <div class="entities-header">
         <span>Entities</span>
       </div>
@@ -457,12 +457,12 @@ function t(t,e,i,o){var s,n=arguments.length,a=n<3?e:null===o?o=Object.getOwnPro
         @chore-uncompleted=${this._onChoreCompleted}
         @chore-skipped=${this._onChoreCompleted}
       ></chore-detail-dialog>
-    `}_renderSections(){if(0===this._items.length)return W`<div class="empty">No chores to show</div>`;const t=function(t){const e=new Map;for(const i of t){let t=e.get(i.status);t||(t=[],e.set(i.status,t)),t.push(i)}return e}(this._items),e=!!this._config.hide_pending,i=!!this._config.hide_completed,o=this._config.completed_limit??3,s=!!this._config.hide_section_headers;return W`
-      ${qt.map(n=>{const a=t.get(n);if(!a||0===a.length)return F;if("pending"===n&&e)return F;if("completed"===n&&i)return F;const r="completed"===n&&o>0&&a.length>o?a.slice(0,o):a;return W`
-          ${s?F:W`<div class="section-header ${n}">
-                ${At[n]}
+    `}_renderSections(){if(0===this._items.length)return W`<div class="empty">No chores to show</div>`;const t=function(t){const e=new Map;for(const i of t){let t=e.get(i.status);t||(t=[],e.set(i.status,t)),t.push(i)}return e}(this._items),e=!!this._config.hide_completed,i=!!this._config.hide_section_headers;return W`
+      ${qt.map(o=>{const s=t.get(o);return s&&0!==s.length?"completed"===o&&e?F:W`
+          ${i?F:W`<div class="section-header ${o}">
+                ${At[o]}
               </div>`}
-          ${r.map(t=>W`
+          ${s.map(t=>W`
               <chore-row
                 .hass=${this.hass}
                 .item=${t}
@@ -471,7 +471,7 @@ function t(t,e,i,o){var s,n=arguments.length,a=n<3?e:null===o?o=Object.getOwnPro
                 .doubleTapAction=${this._config.double_tap_action??{action:"none"}}
               ></chore-row>
             `)}
-        `})}
+        `:F})}
     `}_onChoreDetail(t){this._dialogItem=t.detail.item,this._dialogOpen=!0}_onDialogClosed(){this._dialogOpen=!1}_onChoreCompleted(){this._dialogOpen=!1,this._refreshData()}}Ft.styles=a`
     :host {
       display: block;

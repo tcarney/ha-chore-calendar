@@ -58,8 +58,6 @@ export interface ChoreCalendarCardConfig {
   title?: string;
   entities: (string | EntityConfig)[];
   hide_completed?: boolean;
-  hide_pending?: boolean;
-  completed_limit?: number;
   /**
    * Hide pending chores whose ``next_due`` is further in the future than this
    * relative duration. Overdue and due chores always pass this filter (their

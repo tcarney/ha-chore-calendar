@@ -251,7 +251,7 @@ Chores are grouped under status section headers:
 | **Upcoming**  | `pending` chores   | Default secondary text | `next_due` ascending (soonest first)            |
 | **Completed** | `completed` chores | Muted                  | `last_completed` descending (most recent first) |
 
-Empty sections are hidden. The Completed section is capped at `completed_limit` rows (default 3); items beyond the limit are not shown. Set `completed_limit` to `0` to show all completed items. When `hide_completed` is `true`, the entire section is hidden.
+Empty sections are hidden. When `hide_completed` is `true`, the Completed section is hidden entirely. The `completed_period` option trims the section to items completed within a recent duration (e.g. `{days: 7}`); omitting it shows all completed items. The `due_date_period` option analogously trims the Upcoming section to pending items due within a relative window — overdue and due chores are always shown regardless of that filter.
 
 #### Status Indicators (CSS-only)
 

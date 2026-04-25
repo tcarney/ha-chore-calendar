@@ -22,19 +22,13 @@ interface HaFormSchema {
 const OPTIONS_SCHEMA_TOP: HaFormSchema[] = [
   { name: "title", selector: { text: {} } },
   { name: "hide_completed", selector: { boolean: {} }, default: false },
-  { name: "hide_pending", selector: { boolean: {} }, default: false },
   { name: "hide_section_headers", selector: { boolean: {} }, default: false },
   { name: "hide_card_background", selector: { boolean: {} }, default: false },
   { name: "allow_uncomplete", selector: { boolean: {} }, default: false },
 ];
 
-/** Options below the period rows (completed limit + update interval). */
+/** Options below the period rows. */
 const OPTIONS_SCHEMA_BOTTOM: HaFormSchema[] = [
-  {
-    name: "completed_limit",
-    selector: { number: { min: 0, max: 50, step: 1, mode: "box" } },
-    default: 3,
-  },
   {
     name: "update_interval",
     selector: { number: { min: 10, max: 600, step: 10, mode: "box" } },
@@ -96,11 +90,9 @@ const EXCLUDE_SCHEMA: HaFormSchema[] = [
 const LABELS: Record<string, string> = {
   title: "Title",
   hide_completed: "Hide completed section",
-  hide_pending: "Hide pending section",
   hide_section_headers: "Hide section headings",
   hide_card_background: "Hide card background",
   allow_uncomplete: "Allow uncomplete",
-  completed_limit: "Completed chores limit",
   update_interval: "Update interval (seconds)",
   tap_action: "Tap action",
   hold_action: "Hold action",
