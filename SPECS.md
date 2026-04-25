@@ -25,7 +25,9 @@ All chore management goes through services, matching how native `calendar` and `
 The calendar entity generates events dynamically from chore data — no stored calendar events. Events shown:
 
 - **Last completed**: zero-duration event at `last_completed` time (always shown for history)
-- **Next due**: event spanning from `due_at` to `overdue_at`
+- **Next due**: zero-duration event at `due_at`
+
+Both event types are point-in-time markers rather than spans — a long `grace_period` would otherwise render as a multi-day block on the calendar. HA's default `state` logic depends on `event.start <= now < event.end`, which can never hold for a zero-duration event, so the calendar entity overrides `state` directly: it reads `on` while any chore in the list is `due` or `overdue`, and `off` otherwise.
 - At most 2 events per chore at any time
 
 ### Built-in Trigger Handling

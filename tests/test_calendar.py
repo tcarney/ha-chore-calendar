@@ -78,7 +78,8 @@ async def test_calendar_entity_state_off_no_chores(hass, config_entry):
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_event_property_returns_soonest_due(hass, config_entry):
-    """The event property returns the soonest due chore event."""
+    """The event property returns the soonest due chore event, and state is
+    ``on`` while any chore is due or overdue."""
     entity_id = await _setup_entry(hass, config_entry)
     runtime = config_entry.runtime_data
 
@@ -102,7 +103,7 @@ async def test_event_property_returns_soonest_due(hass, config_entry):
     await runtime.store.async_create_chore(chore_early)
     await runtime.store.async_create_chore(chore_late)
 
-    # Freeze at 08:30 — within the early chore's due window (08:00–09:00).
+    # Freeze at 08:30 — early chore is DUE (08:00 period, 1h grace).
     frozen = datetime(2026, 3, 30, 8, 30, tzinfo=TZ)
     with patch("homeassistant.util.dt.now", return_value=frozen):
         await runtime.coordinator.async_refresh()
@@ -110,7 +111,6 @@ async def test_event_property_returns_soonest_due(hass, config_entry):
         state = hass.states.get(entity_id)
 
     assert state is not None
-    # State is "on" because now is within the event's [start, end) range.
     assert state.state == "on"
     assert state.attributes.get("message") == "Early Chore"
 
@@ -147,7 +147,14 @@ async def test_event_property_shows_next_due_when_completed(hass, config_entry):
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_event_property_skips_interval_no_anchor(hass, config_entry):
-    """Interval chore with no created_at or last_completed has no event."""
+    """Interval chore with no anchor has no drawable event but stays actionable.
+
+    ``compute_due_range`` returns ``None`` for an interval chore with neither
+    ``created_at`` nor ``last_completed`` (nothing to anchor the window to), so
+    ``_make_due_event`` produces no event — the ``message`` attribute is ``None``.
+    Per ``IntervalChore.compute_status`` a never-completed interval chore is
+    always ``DUE``, so the state override still reports ``on``.
+    """
     entity_id = await _setup_entry(hass, config_entry)
     runtime = config_entry.runtime_data
 
@@ -166,8 +173,9 @@ async def test_event_property_skips_interval_no_anchor(hass, config_entry):
         await hass.async_block_till_done()
         state = hass.states.get(entity_id)
 
-    # No anchor (no created_at, no last_completed) → compute_due_range() is None.
-    assert state.state == "off"
+    assert state is not None
+    assert state.state == "on"
+    assert state.attributes.get("message") is None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -194,7 +202,7 @@ async def test_event_property_interval_with_created_at(hass, config_entry):
         await hass.async_block_till_done()
         state = hass.states.get(entity_id)
 
-    # now is within [created_at, created_at + grace_period) so state is "on".
+    # Chore is DUE at this time → state "on" via the override.
     assert state.state == "on"
     assert state.attributes.get("message") == "With Created"
 
@@ -233,7 +241,8 @@ async def test_get_events_returns_due_event(hass, config_entry):
     assert len(events) == 1
     assert events[0].summary == "Medicine"
     assert events[0].start == datetime(2026, 3, 30, 8, 0, tzinfo=TZ)
-    assert events[0].end == datetime(2026, 3, 30, 9, 0, tzinfo=TZ)
+    # Due events are zero-duration markers at the due time.
+    assert events[0].end == events[0].start
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -307,7 +316,7 @@ async def test_get_events_shows_next_due_for_completed_chore(hass, config_entry)
     # Next due is March 31 at 08:00 (next active day after completed period).
     assert due_events[0].summary == "Medicine"
     assert due_events[0].start == datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
-    assert due_events[0].end == datetime(2026, 3, 31, 9, 0, tzinfo=TZ)
+    assert due_events[0].end == due_events[0].start
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
