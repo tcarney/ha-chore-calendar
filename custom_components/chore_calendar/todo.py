@@ -1,11 +1,12 @@
 """Todo platform for Chore Calendar — one todo list entity per chore list.
 
 The todo entity is a read-mostly companion to the calendar entity. It exposes
-actionable chores (``due`` / ``overdue``) as ``needs_action`` items and recently
-completed chores as ``completed`` items. ``pending`` chores (within the early
-window) are intentionally omitted — the todo entity is the *actionable* view;
-the calendar entity and per-chore sensors remain the source of truth for
-upcoming chores still in their early window.
+actionable chores (``pending`` / ``due`` / ``overdue``) as ``needs_action``
+items and recently completed chores as ``completed`` items. Including
+``pending`` chores keeps the todo list aligned with HA's native
+``todo-list-card``, which shows all ``needs_action`` items by default;
+both that card and the chore card support a ``due_date_period`` filter
+for users who want a focused window.
 
 Updates to an item's status are routed through the same helpers that back the
 ``complete_item`` / ``uncomplete_item`` services:
@@ -45,7 +46,8 @@ if TYPE_CHECKING:
 _BUCKET_ORDER: dict[ChoreStatus, int] = {
     ChoreStatus.OVERDUE: 0,
     ChoreStatus.DUE: 1,
-    ChoreStatus.COMPLETED: 2,
+    ChoreStatus.PENDING: 2,
+    ChoreStatus.COMPLETED: 3,
 }
 
 
@@ -90,9 +92,10 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
     def todo_items(self) -> list[TodoItem] | None:
         """Return the current todo items, rebuilt from coordinator data.
 
-        Pending chores are omitted; due/overdue map to ``needs_action``,
-        completed maps to ``completed``. Items are sorted overdue → due →
-        completed, each bucket ordered by ``due`` ascending.
+        Pending/due/overdue map to ``needs_action``, completed maps to
+        ``completed``. Items are sorted overdue → due → pending → completed,
+        each bucket ordered by ``due`` ascending (items with no ``due`` sort
+        last within their bucket).
 
         Field population choices:
 
@@ -114,8 +117,6 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
         for chore in self.coordinator.data.values():
             status = chore.compute_status(now)
             todo_status = _map_status(status)
-            if todo_status is None:
-                continue
             # next_due is used for stable within-bucket sorting regardless of
             # the TodoItem field population rules below.
             next_due = chore.compute_next_due(now)
@@ -178,10 +179,8 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
         return self.coordinator.data.get(uid)
 
 
-def _map_status(status: ChoreStatus) -> TodoItemStatus | None:
-    """Map a ChoreStatus to a TodoItemStatus, or None to omit from the list."""
-    if status in (ChoreStatus.DUE, ChoreStatus.OVERDUE):
-        return TodoItemStatus.NEEDS_ACTION
+def _map_status(status: ChoreStatus) -> TodoItemStatus:
+    """Map a ChoreStatus to a TodoItemStatus."""
     if status == ChoreStatus.COMPLETED:
         return TodoItemStatus.COMPLETED
-    return None  # pending — omitted
+    return TodoItemStatus.NEEDS_ACTION

@@ -8,7 +8,7 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 - **Service-driven management**: Create, update, delete, and complete chores via service calls
 - **Sensor entities**: One sensor per chore tracking its current status (pending, due, overdue, completed)
 - **Calendar entity**: Read-only calendar per list showing upcoming and recently completed chores
-- **Todo entity**: One todo list per chore list, surfacing due/overdue chores through HA's native todo UI and Assist voice; toggling items routes through `complete_item` / `uncomplete_item`
+- **Todo entity**: One todo list per chore list, surfacing actionable chores (pending/due/overdue) through HA's native todo UI and Assist voice; toggling items routes through `complete_item` / `uncomplete_item`
 - **Custom Lovelace card**: Built-in timeline card with per-entity filtering, colors, detail dialog, and configurable actions
 - **Tag scan auto-completion**: Assign NFC tags to chores for tap-to-complete; shared tags automatically resolve to the correct chore based on completion windows
 - **Flexible scheduling**: Scheduled (specific days/times) and interval-based chore types

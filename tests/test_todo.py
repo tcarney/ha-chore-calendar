@@ -211,12 +211,18 @@ async def test_todo_items_maps_completed_to_completed(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_todo_items_omits_pending_chore(hass, config_entry):
-    """A pending (early-window) scheduled chore is excluded from todo_items."""
+async def test_todo_items_includes_pending_chore(hass, config_entry):
+    """A pending (early-window) scheduled chore appears as NEEDS_ACTION.
+
+    Pending chores are included so the todo list mirrors HA's native
+    todo-list-card (which has no date filter); the chore card's
+    ``due_date_period`` option provides date-window filtering on top.
+    """
     entity_id = await _setup_entry(hass, config_entry)
     runtime = config_entry.runtime_data
 
-    # Scheduled chore at 14:00 with 3h early window — at 12:00 it's PENDING.
+    # Scheduled chore at 14:00 with 3h early window — at 12:00 it's PENDING
+    # (early window opens at 11:00; period_due is 14:00).
     chore = ScheduledChore(
         uid="pending-chore",
         chore_name="Evening Chore",
@@ -235,12 +241,17 @@ async def test_todo_items_omits_pending_chore(hass, config_entry):
         items = entity.todo_items
 
     assert items is not None
-    assert items == []
+    assert len(items) == 1
+    assert items[0].uid == "pending-chore"
+    assert items[0].status == TodoItemStatus.NEEDS_ACTION
+    # PENDING items carry the next due time, same as DUE/OVERDUE.
+    assert items[0].due == FROZEN_NOW.replace(hour=14, minute=0)
+    assert items[0].completed is None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_todo_items_sort_order(hass, config_entry):
-    """Items sort overdue → due → completed, each bucket by due ascending."""
+    """Items sort overdue → due → pending → completed, each bucket by due ascending."""
     entity_id = await _setup_entry(hass, config_entry)
     runtime = config_entry.runtime_data
 
@@ -262,6 +273,17 @@ async def test_todo_items_sort_order(hass, config_entry):
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=3),
     )
+    # PENDING scheduled — period_due at 14:00, early window opens at 11:00,
+    # FROZEN_NOW is 12:00 → in the early window.
+    pending_chore = ScheduledChore(
+        uid="pending",
+        chore_name="Pending Chore",
+        chore_type=ChoreType.SCHEDULED,
+        time=time(14, 0),
+        early_window=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        created_at=FROZEN_NOW - timedelta(days=1),
+    )
     # COMPLETED interval — recently completed, not yet due.
     completed_chore = IntervalChore(
         uid="completed",
@@ -271,7 +293,7 @@ async def test_todo_items_sort_order(hass, config_entry):
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(hours=1),
     )
-    for c in (due_chore, overdue_chore, completed_chore):
+    for c in (due_chore, overdue_chore, pending_chore, completed_chore):
         await runtime.store.async_create_chore(c)
     await _refresh_at(hass, config_entry, FROZEN_NOW)
 
@@ -281,7 +303,7 @@ async def test_todo_items_sort_order(hass, config_entry):
         items = entity.todo_items
 
     assert items is not None
-    assert [item.uid for item in items] == ["overdue", "due", "completed"]
+    assert [item.uid for item in items] == ["overdue", "due", "pending", "completed"]
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

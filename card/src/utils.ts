@@ -115,8 +115,12 @@ export function durationToMs(d: DurationConfig | undefined): number | null {
  * list of chores.
  *
  * - ``due_date_period`` hides ``pending`` chores whose ``next_due`` is further
- *   than ``dueMs`` milliseconds in the future. ``overdue`` and ``due`` chores
- *   are retained regardless (their ``next_due`` is at or before ``now``).
+ *   than ``dueMs`` milliseconds in the future. Pending chores with no
+ *   ``next_due`` (unscheduled) are also hidden — the filter is interpreted as
+ *   "show items due within this window," and undated items aren't in any
+ *   window. Mirrors HA's native ``todo-list-card`` behavior. ``overdue`` and
+ *   ``due`` chores are retained regardless (their ``next_due`` is at or
+ *   before ``now``).
  * - ``completed_period`` hides ``completed`` chores whose ``last_completed`` is
  *   further than ``completedMs`` milliseconds in the past.
  *
@@ -139,7 +143,8 @@ export function applyPeriodFilters(
       const age = nowMs - new Date(item.last_completed).getTime();
       if (age > completedMs) return false;
     }
-    if (dueMs !== null && item.status === "pending" && item.next_due) {
+    if (dueMs !== null && item.status === "pending") {
+      if (!item.next_due) return false;
       const lead = new Date(item.next_due).getTime() - nowMs;
       if (lead > dueMs) return false;
     }
