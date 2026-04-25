@@ -5,6 +5,7 @@ import type {
   ActionConfig,
   ChoreCalendarCardConfig,
   ChoreStatus,
+  DurationConfig,
   EntityConfig,
   HomeAssistant,
 } from "./types";
@@ -17,14 +18,18 @@ interface HaFormSchema {
   required?: boolean;
 }
 
-/** Schema for ha-form options (excludes entities which are handled separately). */
-const OPTIONS_SCHEMA: HaFormSchema[] = [
+/** Options above the period rows (title + toggles up through allow_uncomplete). */
+const OPTIONS_SCHEMA_TOP: HaFormSchema[] = [
   { name: "title", selector: { text: {} } },
   { name: "hide_completed", selector: { boolean: {} }, default: false },
   { name: "hide_pending", selector: { boolean: {} }, default: false },
   { name: "hide_section_headers", selector: { boolean: {} }, default: false },
   { name: "hide_card_background", selector: { boolean: {} }, default: false },
   { name: "allow_uncomplete", selector: { boolean: {} }, default: false },
+];
+
+/** Options below the period rows (completed limit + update interval). */
+const OPTIONS_SCHEMA_BOTTOM: HaFormSchema[] = [
   {
     name: "completed_limit",
     selector: { number: { min: 0, max: 50, step: 1, mode: "box" } },
@@ -35,6 +40,12 @@ const OPTIONS_SCHEMA: HaFormSchema[] = [
     selector: { number: { min: 10, max: 600, step: 10, mode: "box" } },
     default: 60,
   },
+];
+
+/** Period filter rows rendered as custom HTML (label + days + hours). */
+const PERIOD_ROWS: { key: "due_date_period" | "completed_period"; label: string }[] = [
+  { key: "due_date_period", label: "Due-date period" },
+  { key: "completed_period", label: "Completed period" },
 ];
 
 const ACTION_OPTIONS = [
@@ -211,6 +222,35 @@ export class ChoreCalendarCardEditor extends LitElement {
       border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
       margin: 12px 0;
     }
+
+    .period-group {
+      /* Matches ha-form's between-field rhythm so the bottom options form
+         doesn't sit flush against the last period row. */
+      margin-bottom: 16px;
+    }
+
+    .period-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+    }
+
+    .period-label {
+      flex: 1;
+      font-size: 14px;
+      color: var(--primary-text-color);
+    }
+
+    .period-inputs {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .period-inputs ha-textfield {
+      width: 88px;
+    }
   `;
 
   protected render() {
@@ -306,7 +346,19 @@ export class ChoreCalendarCardEditor extends LitElement {
       <ha-form
         .hass=${this.hass}
         .data=${this._config}
-        .schema=${OPTIONS_SCHEMA}
+        .schema=${OPTIONS_SCHEMA_TOP}
+        .computeLabel=${this._computeLabel}
+        @value-changed=${this._optionsChanged}
+      ></ha-form>
+
+      <div class="period-group">
+        ${PERIOD_ROWS.map((row) => this._renderPeriodRow(row.key, row.label))}
+      </div>
+
+      <ha-form
+        .hass=${this.hass}
+        .data=${this._config}
+        .schema=${OPTIONS_SCHEMA_BOTTOM}
         .computeLabel=${this._computeLabel}
         @value-changed=${this._optionsChanged}
       ></ha-form>
@@ -432,17 +484,66 @@ export class ChoreCalendarCardEditor extends LitElement {
     this._dispatch();
   }
 
+  private _renderPeriodRow(key: "due_date_period" | "completed_period", label: string) {
+    const current = this._config[key] ?? {};
+    // If either unit is set, show both (the missing one as "0"). If neither is
+    // set, both fields stay blank so the Material floating labels are visible.
+    const anySet = !!(current.days || current.hours);
+    const daysValue = anySet ? String(current.days ?? 0) : "";
+    const hoursValue = anySet ? String(current.hours ?? 0) : "";
+    return html`
+      <div class="period-row">
+        <span class="period-label">${label}</span>
+        <div class="period-inputs">
+          <ha-textfield
+            type="number"
+            min="0"
+            max="365"
+            label="days"
+            .value=${daysValue}
+            @change=${(ev: Event) =>
+              this._setPeriod(key, "days", (ev.target as HTMLInputElement).value)}
+          ></ha-textfield>
+          <ha-textfield
+            type="number"
+            min="0"
+            max="23"
+            label="hours"
+            .value=${hoursValue}
+            @change=${(ev: Event) =>
+              this._setPeriod(key, "hours", (ev.target as HTMLInputElement).value)}
+          ></ha-textfield>
+        </div>
+      </div>
+    `;
+  }
+
+  private _setPeriod(
+    key: "due_date_period" | "completed_period",
+    unit: "days" | "hours",
+    raw: string,
+  ) {
+    if (!this._config) return;
+    const value = Math.max(0, Math.floor(Number(raw) || 0));
+    const current = this._config[key] ?? {};
+    const next: DurationConfig = { ...current, [unit]: value };
+    // Drop zero fields; if both are zero, drop the whole key.
+    if (!next.days) delete next.days;
+    if (!next.hours) delete next.hours;
+    const hasValue = Object.keys(next).length > 0;
+    this._config = { ...this._config, [key]: hasValue ? next : undefined };
+    this._dispatch();
+  }
+
   private _optionsChanged(ev: CustomEvent) {
     ev.stopPropagation();
     if (!this._config || !this.hass) return;
-    // Merge options back, preserving entities and actions (which ha-form doesn't manage).
-    this._config = {
-      ...ev.detail.value,
-      entities: this._config.entities,
-      tap_action: this._config.tap_action,
-      hold_action: this._config.hold_action,
-      double_tap_action: this._config.double_tap_action,
-    };
+    // Shallow-merge the form's values onto the current config. The options
+    // are split across two forms (above/below the period rows), so either
+    // form's value-changed event only carries its own fields — merging (rather
+    // than replacing) preserves fields managed by the other form, plus
+    // entities, periods, and actions which aren't in any ha-form here.
+    this._config = { ...this._config, ...ev.detail.value };
     this._dispatch();
   }
 }

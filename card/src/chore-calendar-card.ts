@@ -11,6 +11,8 @@ import type {
   UnsubscribeFunc,
 } from "./types";
 import {
+  applyPeriodFilters,
+  durationToMs,
   groupByStatus,
   resolveEntityConfig,
   sortChores,
@@ -140,7 +142,10 @@ export class ChoreCalendarCard extends LitElement {
       });
 
       await Promise.all(promises);
-      this._items = sortChores(allItems);
+      const dueMs = durationToMs(this._config.due_date_period);
+      const completedMs = durationToMs(this._config.completed_period);
+      const filtered = applyPeriodFilters(allItems, dueMs, completedMs, new Date());
+      this._items = sortChores(filtered);
     } catch (err) {
       console.error("chore-calendar-card: failed to fetch items", err);
     } finally {
