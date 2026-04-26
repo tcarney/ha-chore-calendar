@@ -94,6 +94,20 @@ class BaseChore(abc.ABC):
         self.previous_last_completed_by = None
         self.previous_skipped_until = None
 
+    def apply_default_skip(self, now: datetime) -> datetime | None:
+        """Apply default skip behavior; mutates self and returns the event payload value.
+
+        Default implementation sets ``skipped_until`` to
+        ``compute_skipped_until_default(now)`` and returns it. Subclasses
+        with different default-skip semantics (e.g. clearing the operative
+        anchor entirely) override this method. The returned value is what
+        the skip handler emits as the ``skipped_until`` field of
+        ``chore_calendar_item_skipped`` — ``None`` signals "no scheduled
+        anchor" in the event payload.
+        """
+        self.skipped_until = self.compute_skipped_until_default(now)
+        return self.skipped_until
+
     @abc.abstractmethod
     def _schedule_to_dict(self) -> dict[str, Any]:
         """Serialize type-specific schedule fields."""

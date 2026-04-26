@@ -437,8 +437,12 @@ async def _async_handle_uncomplete(call: ServiceCall) -> None:
 async def _async_handle_skip(call: ServiceCall) -> None:
     """Handle skip_item service call.
 
-    Defers a chore's next occurrence by setting ``skipped_until``. Without an
-    explicit ``until``, falls back to the chore's type-specific default.
+    Defers a chore's next occurrence. With explicit ``until``, sets
+    ``skipped_until`` directly. Without it, delegates to the chore's
+    ``apply_default_skip`` for type-specific default behavior — which may
+    set ``skipped_until`` (scheduled/interval) or clear another anchor.
+    The event payload's ``skipped_until`` mirrors the operative value, or
+    ``None`` when default-skip cleared the anchor entirely.
     """
     store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
 
@@ -448,9 +452,13 @@ async def _async_handle_skip(call: ServiceCall) -> None:
         msg = f"Chore '{uid}' not found"
         raise ServiceValidationError(msg)
 
-    skipped_until = call.data.get(ATTR_UNTIL) or existing.compute_skipped_until_default(dt_util.now())
+    explicit_until: datetime | None = call.data.get(ATTR_UNTIL)
+    if explicit_until is not None:
+        existing.skipped_until = explicit_until
+        event_skipped_until: datetime | None = explicit_until
+    else:
+        event_skipped_until = existing.apply_default_skip(dt_util.now())
 
-    existing.skipped_until = skipped_until
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
 
@@ -459,7 +467,7 @@ async def _async_handle_skip(call: ServiceCall) -> None:
         {
             "uid": existing.uid,
             "chore_name": existing.chore_name,
-            "skipped_until": skipped_until.isoformat(),
+            "skipped_until": event_skipped_until.isoformat() if event_skipped_until else None,
             "entity_id": call.data[ATTR_ENTITY_ID],
         },
     )
@@ -467,7 +475,7 @@ async def _async_handle_skip(call: ServiceCall) -> None:
         "Skipped chore %s (%s) until %s",
         existing.chore_name,
         uid,
-        skipped_until.isoformat(),
+        event_skipped_until.isoformat() if event_skipped_until else "(cleared)",
     )
 
 
