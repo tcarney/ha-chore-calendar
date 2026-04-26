@@ -59,6 +59,7 @@ SERVICE_UNCOMPLETE_ITEM = "uncomplete_item"
 SERVICE_UPDATE_ITEM = "update_item"
 
 # Event names.
+EVENT_ITEM_DELETED = "chore_calendar_item_deleted"
 EVENT_ITEM_SKIPPED = "chore_calendar_item_skipped"
 EVENT_STATUS_CHANGED = "chore_calendar_status_changed"
 

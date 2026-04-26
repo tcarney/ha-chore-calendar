@@ -9,7 +9,13 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 import voluptuous as vol
 
-from custom_components.chore_calendar.const import CONF_LIST_NAME, DOMAIN, EVENT_ITEM_SKIPPED, ChoreType
+from custom_components.chore_calendar.const import (
+    CONF_LIST_NAME,
+    DOMAIN,
+    EVENT_ITEM_DELETED,
+    EVENT_ITEM_SKIPPED,
+    ChoreType,
+)
 from custom_components.chore_calendar.models import IntervalChore, ScheduledChore
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.exceptions import ServiceValidationError
@@ -237,6 +243,50 @@ async def test_delete_item(hass, config_entry):
 
     store = config_entry.runtime_data.store
     assert store.get_chore(TEST_UID) is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_delete_item_fires_event(hass, config_entry):
+    """delete_item fires chore_calendar_item_deleted with the expected payload."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    events = []
+    hass.bus.async_listen(EVENT_ITEM_DELETED, events.append)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "delete_item",
+        {"entity_id": entity_id, "item": "Test Chore"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert len(events) == 1
+    data = events[0].data
+    assert data["uid"] == TEST_UID
+    assert data["chore_name"] == "Test Chore"
+    assert data["chore_type"] == "interval"
+    assert data["entity_id"] == entity_id
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_delete_item_not_found_does_not_fire_event(hass, config_entry):
+    """A failed delete_item (item not found) does not fire the deletion event."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    events = []
+    hass.bus.async_listen(EVENT_ITEM_DELETED, events.append)
+
+    with pytest.raises(ServiceValidationError, match="not found"):
+        await hass.services.async_call(
+            DOMAIN,
+            "delete_item",
+            {"entity_id": entity_id, "item": "nonexistent"},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+
+    assert events == []
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

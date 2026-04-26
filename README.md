@@ -13,7 +13,7 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 - **Tag scan auto-completion**: Assign NFC tags to chores for tap-to-complete; shared tags automatically resolve to the correct chore based on completion windows
 - **Flexible scheduling**: Scheduled (specific days/times), interval-based, and oneshot (one-time tasks with optional due date) chore types
 - **Skip occurrences**: Defer a chore's next occurrence without touching its completion history, with an explicit `until` datetime or a type-specific default
-- **Status events**: Fires `chore_calendar_status_changed` and `chore_calendar_item_skipped` events for use in automations
+- **Status events**: Fires `chore_calendar_status_changed`, `chore_calendar_item_skipped`, and `chore_calendar_item_deleted` events for use in automations
 - **Persistent storage**: Chore data stored locally — no external API or cloud dependency
 
 ## Quick Start
@@ -432,6 +432,19 @@ data:
   chore_name: "Morning Medicine"
   skipped_until: "2026-04-28T09:00:00-04:00"
   entity_id: "sensor.daily_chores_morning_medicine"
+```
+
+### `chore_calendar_item_deleted`
+
+Fired when a chore is removed from storage via `delete_item`. Useful for cleanup automations or external sync.
+
+```yaml
+event_type: chore_calendar_item_deleted
+data:
+  uid: "01244b28-e604-11ee-a0a4-e45f0197c057"
+  chore_name: "Morning Medicine"
+  chore_type: "scheduled"
+  entity_id: "calendar.daily_chores"
 ```
 
 ## Troubleshooting

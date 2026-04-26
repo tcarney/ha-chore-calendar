@@ -18,6 +18,7 @@ from .const import (
     ATTR_ITEM,
     ATTR_TRIGGER_ENTITY,
     DOMAIN,
+    EVENT_ITEM_DELETED,
     EVENT_ITEM_SKIPPED,
     LOGGER,
     SERVICE_COMPLETE_ITEM,
@@ -382,6 +383,16 @@ async def _async_handle_delete(call: ServiceCall) -> None:
 
     await store.async_delete_chore(uid)
     await coordinator.async_refresh()
+
+    call.hass.bus.async_fire(
+        EVENT_ITEM_DELETED,
+        {
+            "uid": existing.uid,
+            "chore_name": existing.chore_name,
+            "chore_type": str(existing.chore_type),
+            "entity_id": call.data[ATTR_ENTITY_ID],
+        },
+    )
     LOGGER.debug("Deleted chore %s (%s)", existing.chore_name, uid)
 
 
