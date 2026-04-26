@@ -94,7 +94,15 @@ async def test_todo_entity_shares_device_with_calendar(hass, config_entry):
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_todo_entity_only_advertises_update(hass, config_entry):
-    """Only UPDATE_TODO_ITEM is advertised; CREATE/DELETE/MOVE are not."""
+    """Only UPDATE_TODO_ITEM is advertised; CREATE/DELETE/MOVE are not.
+
+    Mutation lives on chore_calendar.* services. Advertising DELETE_TODO_ITEM
+    would route both todo.remove_item and todo.remove_completed_items through
+    async_delete_todo_items, where we can't cleanly distinguish "permanently
+    delete this chore" from "clear from completed view" — the native card's
+    "permanently deleted" warning would be misleading for recurring chores
+    whose last_completed is load-bearing.
+    """
     entity_id = await _setup_entry(hass, config_entry)
     state = hass.states.get(entity_id)
     assert state is not None

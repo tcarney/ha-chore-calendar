@@ -525,6 +525,11 @@ class OneshotChore(BaseChore):
     due_datetime: datetime | None = None
     early_window: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_EARLY_WINDOW_MINS))
     grace_period: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_GRACE_PERIOD_MINS))
+    # When False (default), a terminal-completed oneshot is deleted from
+    # storage on the next hide_completed_items / todo.remove_completed_items
+    # sweep. When True, the chore stays in storage and can be reactivated
+    # via update_item by setting a new due_datetime.
+    persist: bool = False
     # Undo slot for the synthetic-due_datetime rule applied at completion time.
     previous_due_datetime: datetime | None = None
 
@@ -659,6 +664,7 @@ class OneshotChore(BaseChore):
             "due_datetime": self.due_datetime.isoformat() if self.due_datetime else None,
             "early_window_mins": int(self.early_window.total_seconds() // 60),
             "grace_period_mins": int(self.grace_period.total_seconds() // 60),
+            "persist": self.persist,
         }
 
     def schedule_description(self) -> dict[str, Any]:
@@ -667,6 +673,7 @@ class OneshotChore(BaseChore):
             "due_datetime": self.due_datetime.isoformat() if self.due_datetime else None,
             "early_window_mins": int(self.early_window.total_seconds() // 60),
             "grace_period_mins": int(self.grace_period.total_seconds() // 60),
+            "persist": self.persist,
         }
 
     @classmethod
@@ -676,6 +683,8 @@ class OneshotChore(BaseChore):
         Coerces a naive ``due_datetime`` (e.g. from the datetime selector or
         a YAML service call without a ``+HH:MM`` suffix) to HA's local
         timezone so comparisons against ``dt_util.now()`` don't raise.
+        ``persist`` defaults to False for backward-compat with stored
+        oneshots that pre-date the field.
         """
         due_datetime_raw = schedule.get("due_datetime")
         due_datetime = dt_util.parse_datetime(due_datetime_raw) if due_datetime_raw else None
@@ -686,4 +695,5 @@ class OneshotChore(BaseChore):
             due_datetime=due_datetime,
             early_window=timedelta(minutes=schedule.get("early_window_mins", DEFAULT_EARLY_WINDOW_MINS)),
             grace_period=timedelta(minutes=schedule.get("grace_period_mins", DEFAULT_GRACE_PERIOD_MINS)),
+            persist=bool(schedule.get("persist", False)),
         )

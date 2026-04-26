@@ -98,12 +98,14 @@ Non-recurring tasks with an optional due datetime. Status cycle: **pending** →
 | --- | --- | --- | --- |
 | `due_datetime` | no | — | When the chore is due. Omit to create an unscheduled chore that can be rescheduled later via `update_item`. |
 | `early_window` | no | 3 hours | How early the chore can be completed before it's due (duration) |
+| `persist` | no | `false` | When `false`, the chore is deleted on the next `hide_completed_items` call once completed. When `true`, the chore stays in storage so it can be reactivated via `update_item` with a new `due_datetime`. |
 
 Behaviors specific to oneshot:
 
 - **Optional due date**: a oneshot created without `due_datetime` reports `pending` until a date is set or the chore is completed directly. Useful for ad-hoc todo-style items ("Buy milk") and "someday" tasks.
 - **Reschedule via update_item**: writing a new `due_datetime` to a completed oneshot reactivates it through the standard pending/due/overdue cycle. Closer values (within the early window of `last_completed`) keep the chore completed — guards against accidental reactivation by past dates.
 - **Skip default clears the date**: `skip_item` with no `until` on a oneshot clears `due_datetime` (the chore enters the unscheduled pending state). Use `update_item` to reschedule. `skip_item` with explicit `until` works the same as scheduled/interval.
+- **Cleanup behavior**: terminal-completed oneshots with `persist: false` are deleted on the next `hide_completed_items` call. Set `persist: true` for chores that recur irregularly via external scripts.
 
 ### Common Options
 
@@ -265,6 +267,34 @@ data:
 ```
 
 The resulting `chore_calendar_status_changed` event carries `uncomplete: true` so automations can distinguish an undo from natural period transitions.
+
+### Hide Completed Items
+
+Set a per-list cutoff for hiding completed items from the calendar and todo entities. Items completed *before* the cutoff are hidden but their `last_completed` timestamps are preserved (recurring chores still compute state correctly; the next cycle reappears naturally). Terminal-completed oneshot chores with `persist: false` are deleted from storage during this call — fires `chore_calendar_item_deleted` for each.
+
+The native `todo.remove_completed_items` action is intentionally not exposed (see [SPECS.md](SPECS.md) under *Hide Completed Items*) — call this service directly instead.
+
+```yaml
+# Hide all completed items as of now
+action: chore_calendar.hide_completed_items
+data:
+  entity_id: calendar.daily_chores
+
+# Keep only items completed in the last 24 hours
+action: chore_calendar.hide_completed_items
+data:
+  entity_id: calendar.daily_chores
+  keep_for:
+    hours: 24
+
+# Hide everything completed before a specific date
+action: chore_calendar.hide_completed_items
+data:
+  entity_id: calendar.daily_chores
+  before: "2026-04-01 00:00:00"
+```
+
+`before` and `keep_for` are mutually exclusive. Omit both for cutoff = now.
 
 ### Update a Chore
 

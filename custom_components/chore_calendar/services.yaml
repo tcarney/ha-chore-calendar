@@ -68,6 +68,9 @@ create_item:
             early_window:
               selector:
                 duration:
+            persist:
+              selector:
+                boolean:
     grace_period:
       selector:
         duration:
@@ -144,6 +147,9 @@ update_item:
             early_window:
               selector:
                 duration:
+            persist:
+              selector:
+                boolean:
     grace_period:
       selector:
         duration:
@@ -221,6 +227,22 @@ uncomplete_item:
     item:
       selector:
         text:
+
+hide_completed_items:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+              integration: chore_calendar
+    before:
+      selector:
+        datetime:
+    keep_for:
+      selector:
+        duration:
 
 get_items:
   fields:

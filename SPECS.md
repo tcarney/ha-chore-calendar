@@ -120,6 +120,23 @@ A parallel `previous_skipped_until` slot holds any `skipped_until` value that a 
 - **Fires `chore_calendar_item_skipped`** with `uid`, `chore_name`, `skipped_until`, and the list `entity_id`. The `skipped_until` field is `null` when oneshot default-skip cleared the date (no operative anchor). Status transitions continue to fire `chore_calendar_status_changed`.
 - **Scope**: per-chore only; list-level skip is deferred.
 
+### Hide Completed Items
+
+`hide_completed_items` is a per-list visibility filter for completed items. The recurring-chore use case (where `last_completed` must be preserved for state computation) makes a true "delete completed" semantic infeasible — instead, a per-list cutoff (`completed_cleared_at`) hides items whose `last_completed` precedes it.
+
+- **Cutoff is set by `chore_calendar.hide_completed_items`** — accepts no args (cutoff = now), `before: <datetime>` (specific cutoff), or `keep_for: <duration>` (cutoff = now − duration). `before` and `keep_for` are mutually exclusive.
+- **Filtering** applies in `_make_completed_event` (calendar) and `todo_items` (todo). `last_completed` is never modified — `compute_status`, history, and per-chore sensors are unaffected. Items completed *after* the cutoff (next cycle of a recurring chore, or a re-completed oneshot) reappear naturally.
+- **Persist option**: `OneshotChore.persist` (default `false`) controls whether the chore is deleted on the cutoff sweep. With `persist=false`, terminal-completed oneshots whose `last_completed < cleared_at` are removed from storage and fire `chore_calendar_item_deleted`. With `persist=true`, they are merely hidden and remain reactivatable via `update_item`. Recurring chores ignore `persist` — they are always merely hidden.
+- **`get_items` exposes `completed_cleared_at`** at the response top level so the card can apply the filter client-side. The response composes with the card's existing `completed_period` filter as AND (whichever is more restrictive wins).
+- **Native `todo.remove_completed_items` is intentionally unavailable** — the todo entity does not advertise `DELETE_TODO_ITEM`. HA's bulk-clear path would route through `async_delete_todo_items` per-uid with no clean way to distinguish a "permanently delete this chore" intent from a "clear from completed view" intent, and the native card's "permanently deleted" warning would be misleading for recurring chores. The `chore_calendar.hide_completed_items` service is the supported path.
+
+### Deletion Event
+
+`chore_calendar_item_deleted` fires on every actual storage deletion. Payload: `uid`, `chore_name`, `chore_type`, list `entity_id`. Sources:
+
+- `chore_calendar.delete_item` — the explicit delete service.
+- The `persist=false` sweep during `hide_completed_items`.
+
 ### Storage Schema
 
 File: `.storage/chore_calendar.{entry_id}` (one per list)
@@ -128,6 +145,7 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
 {
   "version": 2,
   "data": {
+    "completed_cleared_at": null,
     "items": [
       {
         "uid": "01244b28-e604-11ee-a0a4-e45f0197c057",
@@ -172,7 +190,8 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "schedule": {
           "due_datetime": "2026-04-15T10:00:00-04:00",
           "early_window_mins": 10080,
-          "grace_period_mins": 0
+          "grace_period_mins": 0,
+          "persist": false
         },
         "trigger_tag_id": null,
         "assigned_to": ["person.tom"],
@@ -188,6 +207,8 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
   }
 }
 ```
+
+`completed_cleared_at` is a per-list field (alongside `items`) holding the cutoff set by `hide_completed_items`. New keys default to `null` for backward-compat — older stores that omit them load cleanly without a version bump.
 
 ## Lovelace Card
 

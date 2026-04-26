@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, cast
 from uuid import uuid4
 
@@ -25,6 +25,7 @@ from .const import (
     SERVICE_CREATE_ITEM,
     SERVICE_DELETE_ITEM,
     SERVICE_GET_ITEMS,
+    SERVICE_HIDE_COMPLETED_ITEMS,
     SERVICE_SKIP_ITEM,
     SERVICE_UNCOMPLETE_ITEM,
     SERVICE_UPDATE_ITEM,
@@ -36,10 +37,12 @@ from .models import BaseChore, IntervalChore, OneshotChore, ScheduledChore
 from .store import ChoreStore
 
 # Service-specific field keys (not shared with sensor attributes).
+ATTR_BEFORE = "before"
 ATTR_CHORE_NAME = "chore_name"
 ATTR_COMPLETED_AT = "completed_at"
 ATTR_COMPLETED_BY = "completed_by"
 ATTR_ENTITY_ID = "entity_id"
+ATTR_KEEP_FOR = "keep_for"
 ATTR_KEEP_SKIP = "keep_skip"
 ATTR_STATUS = "status"
 ATTR_UNTIL = "until"
@@ -113,6 +116,14 @@ SERVICE_GET_ITEMS_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
         vol.Optional(ATTR_STATUS): vol.In([s.value for s in ChoreStatus]),
+    }
+)
+
+SERVICE_HIDE_COMPLETED_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Optional(ATTR_BEFORE): cv.datetime,
+        vol.Optional(ATTR_KEEP_FOR): dict,
     }
 )
 
@@ -268,6 +279,8 @@ def _build_schedule_dict(data: dict[str, Any], chore_type: ChoreType) -> dict[st
             schedule["due_datetime"] = due.isoformat() if isinstance(due, datetime) else due
         if "early_window" in obj:
             schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
+        if "persist" in obj:
+            schedule["persist"] = bool(obj["persist"])
 
     # grace_period is a top-level field shared by all types.
     if ATTR_GRACE_PERIOD in data:
@@ -317,7 +330,7 @@ async def _async_handle_create(call: ServiceCall) -> None:
 
     await store.async_create_chore(chore)
     await coordinator.async_refresh()
-    LOGGER.debug("Created chore %s (%s)", chore.chore_name, uid)
+    LOGGER.info("created %s (%s)", chore.chore_name, uid)
 
 
 async def _async_handle_update(call: ServiceCall) -> None:
@@ -361,6 +374,8 @@ async def _async_handle_update(call: ServiceCall) -> None:
                 schedule["due_datetime"] = due.isoformat() if isinstance(due, datetime) else due
             if "early_window" in obj:
                 schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
+            if "persist" in obj:
+                schedule["persist"] = bool(obj["persist"])
         if ATTR_GRACE_PERIOD in call.data:
             schedule["grace_period_mins"] = _duration_to_mins(call.data[ATTR_GRACE_PERIOD])
         updated["schedule"] = schedule
@@ -368,7 +383,7 @@ async def _async_handle_update(call: ServiceCall) -> None:
     chore = BaseChore.from_dict(updated)
     await store.async_update_chore(chore)
     await coordinator.async_refresh()
-    LOGGER.debug("Updated chore %s (%s)", existing.chore_name, uid)
+    LOGGER.info("updated %s (%s)", existing.chore_name, uid)
 
 
 async def _async_handle_delete(call: ServiceCall) -> None:
@@ -393,7 +408,7 @@ async def _async_handle_delete(call: ServiceCall) -> None:
             "entity_id": call.data[ATTR_ENTITY_ID],
         },
     )
-    LOGGER.debug("Deleted chore %s (%s)", existing.chore_name, uid)
+    LOGGER.info("deleted %s (%s)", existing.chore_name, uid)
 
 
 async def async_complete_chore(
@@ -420,7 +435,7 @@ async def async_complete_chore(
     existing.apply_completion(timestamp, completed_by, clear_skip=not keep_skip)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
-    LOGGER.debug("Completed chore %s (%s) at %s", existing.chore_name, uid, timestamp.isoformat())
+    LOGGER.info("completed %s (%s) at %s", existing.chore_name, uid, timestamp.isoformat())
 
 
 async def async_uncomplete_chore(
@@ -447,7 +462,7 @@ async def async_uncomplete_chore(
     coordinator.mark_uncompleted(uid)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
-    LOGGER.debug("Uncompleted chore %s (%s)", existing.chore_name, uid)
+    LOGGER.info("uncompleted %s (%s)", existing.chore_name, uid)
 
 
 async def _async_handle_complete(call: ServiceCall) -> None:
@@ -516,11 +531,119 @@ async def _async_handle_skip(call: ServiceCall) -> None:
             "entity_id": call.data[ATTR_ENTITY_ID],
         },
     )
-    LOGGER.debug(
-        "Skipped chore %s (%s) until %s",
+    LOGGER.info(
+        "skipped %s (%s) until %s",
         existing.chore_name,
         uid,
         event_skipped_until.isoformat() if event_skipped_until else "(cleared)",
+    )
+
+
+async def async_apply_completed_cleared_at(
+    hass: HomeAssistant,
+    store: ChoreStore,
+    coordinator: ChoreCalendarCoordinator,
+    entity_id: str,
+    cleared_at: datetime,
+) -> None:
+    """Set the per-list completed-items cutoff and sweep persist=false oneshots.
+
+    Used by both the ``hide_completed_items`` service handler and the todo
+    entity's ``async_remove_completed_items``. After updating the cutoff,
+    deletes any terminal-completed oneshot whose ``last_completed`` precedes
+    the new cutoff and whose ``persist`` flag is False — these chores are
+    "done with" by user intent. Each deletion fires
+    ``chore_calendar_item_deleted`` with the supplied *entity_id* in the
+    payload.
+    """
+    await store.async_set_completed_cleared_at(cleared_at)
+    LOGGER.debug(
+        "completed_cleared_at set to %s for %s",
+        cleared_at.isoformat(),
+        entity_id,
+    )
+
+    now = dt_util.now()
+    swept = 0
+    for chore in list(store.get_all_chores().values()):
+        if not isinstance(chore, OneshotChore):
+            continue
+        if chore.persist:
+            continue
+        if chore.last_completed is None or chore.last_completed >= cleared_at:
+            continue
+        if chore.compute_status(now) != ChoreStatus.COMPLETED:
+            continue
+        # Eligible: terminal-completed, pre-cutoff, and not flagged to persist.
+        await store.async_delete_chore(chore.uid)
+        hass.bus.async_fire(
+            EVENT_ITEM_DELETED,
+            {
+                "uid": chore.uid,
+                "chore_name": chore.chore_name,
+                "chore_type": str(chore.chore_type),
+                "entity_id": entity_id,
+            },
+        )
+        LOGGER.info(
+            "deleted persist=false oneshot %s (%s)",
+            chore.chore_name,
+            chore.uid,
+        )
+        swept += 1
+
+    LOGGER.debug("persist=false sweep complete: %d chore(s) deleted", swept)
+    await coordinator.async_refresh()
+
+
+async def _async_handle_hide_completed(call: ServiceCall) -> None:
+    """Handle hide_completed_items service call.
+
+    Sets the per-list completed-items cutoff. Without args, cutoff = now.
+    With ``before``: cutoff = the given datetime (items completed before
+    that point are hidden). With ``keep_for``: cutoff = now - duration.
+    ``before`` and ``keep_for`` are mutually exclusive.
+    """
+    store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
+
+    has_before = ATTR_BEFORE in call.data
+    has_keep_for = ATTR_KEEP_FOR in call.data
+    if has_before and has_keep_for:
+        msg = "Cannot specify both 'before' and 'keep_for'"
+        raise ServiceValidationError(msg)
+
+    if has_before:
+        cleared_at: datetime = call.data[ATTR_BEFORE]
+        # Coerce naive datetimes (from YAML without a tz suffix) to local tz
+        # so storage and comparisons stay tz-aware.
+        if cleared_at.tzinfo is None:
+            cleared_at = cleared_at.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+        LOGGER.debug(
+            "hide_completed_items called with before=%s on %s",
+            cleared_at.isoformat(),
+            call.data[ATTR_ENTITY_ID],
+        )
+    elif has_keep_for:
+        cleared_at = dt_util.now() - timedelta(minutes=_duration_to_mins(call.data[ATTR_KEEP_FOR]))
+        LOGGER.debug(
+            "hide_completed_items called with keep_for=%s on %s (cutoff=%s)",
+            call.data[ATTR_KEEP_FOR],
+            call.data[ATTR_ENTITY_ID],
+            cleared_at.isoformat(),
+        )
+    else:
+        cleared_at = dt_util.now()
+        LOGGER.debug(
+            "hide_completed_items called with no args on %s (cutoff=now)",
+            call.data[ATTR_ENTITY_ID],
+        )
+
+    await async_apply_completed_cleared_at(
+        call.hass,
+        store,
+        coordinator,
+        call.data[ATTR_ENTITY_ID],
+        cleared_at,
     )
 
 
@@ -553,7 +676,21 @@ async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
             }
         )
 
-    return cast(ServiceResponse, {"items": items})
+    cleared_at = store.completed_cleared_at
+    LOGGER.debug(
+        "get_items returning %d item(s) for %s (status_filter=%s, cleared_at=%s)",
+        len(items),
+        call.data[ATTR_ENTITY_ID],
+        status_filter,
+        cleared_at.isoformat() if cleared_at else None,
+    )
+    return cast(
+        ServiceResponse,
+        {
+            "items": items,
+            "completed_cleared_at": cleared_at.isoformat() if cleared_at else None,
+        },
+    )
 
 
 async def async_register_services(hass: HomeAssistant) -> None:
@@ -572,6 +709,12 @@ async def async_register_services(hass: HomeAssistant) -> None:
         schema=SERVICE_UNCOMPLETE_SCHEMA,
     )
     hass.services.async_register(DOMAIN, SERVICE_SKIP_ITEM, _async_handle_skip, schema=SERVICE_SKIP_SCHEMA)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_HIDE_COMPLETED_ITEMS,
+        _async_handle_hide_completed,
+        schema=SERVICE_HIDE_COMPLETED_SCHEMA,
+    )
     hass.services.async_register(
         DOMAIN,
         SERVICE_GET_ITEMS,

@@ -451,3 +451,32 @@ class TestStorageRoundTrip:
         assert restored.due_datetime == timestamp
         assert restored.last_completed == timestamp
         assert restored.previous_due_datetime is None
+
+
+class TestPersistField:
+    """OneshotChore.persist controls deletion behavior on hide_completed_items."""
+
+    def test_default_is_false(self):
+        """A oneshot created without explicit persist defaults to False."""
+        chore = _make_oneshot()
+        assert chore.persist is False
+
+    def test_round_trip_preserves_persist(self):
+        """to_dict / from_dict round-trips persist=True."""
+        chore = _make_oneshot(due_datetime=datetime(2026, 4, 15, 12, 0, tzinfo=TZ))
+        chore.persist = True
+
+        restored = BaseChore.from_dict(chore.to_dict())
+        assert isinstance(restored, OneshotChore)
+        assert restored.persist is True
+
+    def test_round_trip_default_persist(self):
+        """Older stores without the persist field load with persist=False."""
+        chore = _make_oneshot(due_datetime=datetime(2026, 4, 15, 12, 0, tzinfo=TZ))
+        data = chore.to_dict()
+        # Simulate a pre-persist store: drop the field.
+        data["schedule"].pop("persist", None)
+
+        restored = BaseChore.from_dict(data)
+        assert isinstance(restored, OneshotChore)
+        assert restored.persist is False

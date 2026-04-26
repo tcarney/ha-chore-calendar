@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, STORAGE_VERSION
 from .models import BaseChore
@@ -63,23 +65,43 @@ class ChoreStore:
         # when dropping v1 support.
         self._store = _ChoreCalendarStore(hass, f"{DOMAIN}.{entry_id}")
         self._chores: dict[str, BaseChore] = {}
+        # Per-list cutoff for hiding completed items (set by
+        # hide_completed_items / todo.remove_completed_items). Items whose
+        # last_completed precedes this datetime are hidden from the
+        # calendar/todo entities. None means no cutoff is active.
+        self._completed_cleared_at: datetime | None = None
 
     async def async_load(self) -> None:
         """Load chores from persistent storage into memory."""
         raw = await self._store.async_load()
         if raw is None:
             self._chores = {}
+            self._completed_cleared_at = None
             return
 
         items: list[dict[str, Any]] = raw.get("items", [])
         self._chores = {item["uid"]: BaseChore.from_dict(item) for item in items}
+        cleared_raw = raw.get("completed_cleared_at")
+        # Older stores omit this field — load as None for backward compat.
+        self._completed_cleared_at = dt_util.parse_datetime(cleared_raw) if cleared_raw else None
 
     async def async_save(self) -> None:
         """Persist all chores to storage."""
-        data = {
+        data: dict[str, Any] = {
             "items": [chore.to_dict() for chore in self._chores.values()],
+            "completed_cleared_at": (self._completed_cleared_at.isoformat() if self._completed_cleared_at else None),
         }
         await self._store.async_save(data)
+
+    @property
+    def completed_cleared_at(self) -> datetime | None:
+        """Return the per-list cutoff for hiding completed items, or None."""
+        return self._completed_cleared_at
+
+    async def async_set_completed_cleared_at(self, value: datetime | None) -> None:
+        """Set the cutoff and persist."""
+        self._completed_cleared_at = value
+        await self.async_save()
 
     @property
     def slug_to_uid_map(self) -> dict[str, str]:
