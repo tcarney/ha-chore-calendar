@@ -31,7 +31,7 @@ from .const import (
     ChoreType,
 )
 from .coordinator import ChoreCalendarCoordinator
-from .models import BaseChore, IntervalChore, ScheduledChore
+from .models import BaseChore, IntervalChore, OneshotChore, ScheduledChore
 from .store import ChoreStore
 
 # Service-specific field keys (not shared with sensor attributes).
@@ -46,6 +46,7 @@ ATTR_UNTIL = "until"
 # Service field keys for schedule configuration.
 ATTR_SCHEDULED = "scheduled"
 ATTR_INTERVAL = "interval"
+ATTR_ONESHOT = "oneshot"
 ATTR_GRACE_PERIOD = "grace_period"
 
 SERVICE_CREATE_SCHEMA = vol.Schema(
@@ -56,6 +57,7 @@ SERVICE_CREATE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_ASSIGNED_TO, default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
         vol.Optional(ATTR_SCHEDULED): dict,
         vol.Optional(ATTR_INTERVAL): dict,
+        vol.Optional(ATTR_ONESHOT): dict,
         vol.Optional(ATTR_GRACE_PERIOD): dict,
     }
 )
@@ -69,6 +71,7 @@ SERVICE_UPDATE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_ASSIGNED_TO): vol.All(cv.ensure_list, [cv.entity_id]),
         vol.Optional(ATTR_SCHEDULED): dict,
         vol.Optional(ATTR_INTERVAL): dict,
+        vol.Optional(ATTR_ONESHOT): dict,
         vol.Optional(ATTR_GRACE_PERIOD): dict,
     }
 )
@@ -224,34 +227,48 @@ def _duration_to_mins(dur: dict[str, Any]) -> int:
 
 
 def _infer_chore_type(data: dict[str, Any]) -> ChoreType:
-    """Infer chore type from the presence of ``scheduled`` vs ``interval``.
+    """Infer chore type from the presence of ``scheduled`` / ``interval`` / ``oneshot``.
 
-    Raises ServiceValidationError if both or neither are provided.
+    Raises ServiceValidationError if more than one or none are provided.
     """
-    has_scheduled = ATTR_SCHEDULED in data
-    has_interval = ATTR_INTERVAL in data
-    if has_scheduled and has_interval:
-        msg = "Cannot specify both 'scheduled' and 'interval'"
+    type_keys = [ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT]
+    present = [k for k in type_keys if k in data]
+    if len(present) > 1:
+        msg = f"Cannot specify more than one of {type_keys!r}; got {present!r}"
         raise ServiceValidationError(msg)
-    if not has_scheduled and not has_interval:
-        msg = "Either 'scheduled' or 'interval' must be provided"
+    if not present:
+        msg = f"One of {type_keys!r} must be provided"
         raise ServiceValidationError(msg)
-    return ChoreType.SCHEDULED if has_scheduled else ChoreType.INTERVAL
+    return {
+        ATTR_SCHEDULED: ChoreType.SCHEDULED,
+        ATTR_INTERVAL: ChoreType.INTERVAL,
+        ATTR_ONESHOT: ChoreType.ONESHOT,
+    }[present[0]]
 
 
 def _build_schedule_dict(data: dict[str, Any], chore_type: ChoreType) -> dict[str, Any]:
     """Build an internal schedule dict from service call data."""
+    schedule: dict[str, Any]
     if chore_type == ChoreType.SCHEDULED:
         obj = data[ATTR_SCHEDULED]
-        schedule: dict[str, Any] = {"time": obj["time"]}
+        schedule = {"time": obj["time"]}
         if "active_days" in obj:
             schedule["active_days"] = obj["active_days"]
         if "early_window" in obj:
             schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
-    else:
+    elif chore_type == ChoreType.INTERVAL:
         schedule = {"interval_mins": _duration_to_mins(data[ATTR_INTERVAL])}
+    else:  # ONESHOT
+        obj = data[ATTR_ONESHOT]
+        schedule = {}
+        if "due_datetime" in obj:
+            # None is meaningful (explicit unscheduled) — preserve verbatim.
+            due = obj["due_datetime"]
+            schedule["due_datetime"] = due.isoformat() if isinstance(due, datetime) else due
+        if "early_window" in obj:
+            schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
 
-    # grace_period is a top-level field shared by both types.
+    # grace_period is a top-level field shared by all types.
     if ATTR_GRACE_PERIOD in data:
         schedule["grace_period_mins"] = _duration_to_mins(data[ATTR_GRACE_PERIOD])
     return schedule
@@ -270,7 +287,9 @@ def _build_chore_from_data(data: dict[str, Any]) -> BaseChore:
 
     if chore_type == ChoreType.SCHEDULED:
         return ScheduledChore.from_schedule(base_kwargs, schedule)
-    return IntervalChore.from_schedule(base_kwargs, schedule)
+    if chore_type == ChoreType.INTERVAL:
+        return IntervalChore.from_schedule(base_kwargs, schedule)
+    return OneshotChore.from_schedule(base_kwargs, schedule)
 
 
 async def _async_handle_create(call: ServiceCall) -> None:
@@ -320,7 +339,7 @@ async def _async_handle_update(call: ServiceCall) -> None:
         updated["assigned_to"] = list(call.data[ATTR_ASSIGNED_TO])
 
     # Overlay schedule fields if any were provided.
-    has_schedule_fields = any(k in call.data for k in (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_GRACE_PERIOD))
+    has_schedule_fields = any(k in call.data for k in (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT, ATTR_GRACE_PERIOD))
     if has_schedule_fields:
         schedule = dict(updated["schedule"])
         if ATTR_SCHEDULED in call.data:
@@ -333,6 +352,14 @@ async def _async_handle_update(call: ServiceCall) -> None:
                 schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
         if ATTR_INTERVAL in call.data:
             schedule["interval_mins"] = _duration_to_mins(call.data[ATTR_INTERVAL])
+        if ATTR_ONESHOT in call.data:
+            obj = call.data[ATTR_ONESHOT]
+            if "due_datetime" in obj:
+                # Explicit None clears the date back to unscheduled PENDING.
+                due = obj["due_datetime"]
+                schedule["due_datetime"] = due.isoformat() if isinstance(due, datetime) else due
+            if "early_window" in obj:
+                schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
         if ATTR_GRACE_PERIOD in call.data:
             schedule["grace_period_mins"] = _duration_to_mins(call.data[ATTR_GRACE_PERIOD])
         updated["schedule"] = schedule
@@ -450,6 +477,13 @@ async def _async_handle_skip(call: ServiceCall) -> None:
     existing = store.get_chore(uid)
     if existing is None:
         msg = f"Chore '{uid}' not found"
+        raise ServiceValidationError(msg)
+
+    # Skipping a terminal-completed oneshot has no meaningful semantics —
+    # there's no "next occurrence" to defer. Reject explicitly rather than
+    # silently mutating fields the chore won't react to.
+    if isinstance(existing, OneshotChore) and existing.compute_status(dt_util.now()) == ChoreStatus.COMPLETED:
+        msg = f"Cannot skip completed oneshot chore '{existing.chore_name}'"
         raise ServiceValidationError(msg)
 
     explicit_until: datetime | None = call.data.get(ATTR_UNTIL)

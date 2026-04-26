@@ -31,6 +31,7 @@ class ChoreType(StrEnum):
     """Type of chore scheduling."""
 
     INTERVAL = "interval"
+    ONESHOT = "oneshot"
     SCHEDULED = "scheduled"
 
 

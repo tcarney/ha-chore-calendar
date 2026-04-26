@@ -57,6 +57,17 @@ create_item:
     interval:
       selector:
         duration:
+    oneshot:
+      selector:
+        object:
+          translation_key: oneshot
+          fields:
+            due_datetime:
+              selector:
+                datetime:
+            early_window:
+              selector:
+                duration:
     grace_period:
       selector:
         duration:
@@ -122,6 +133,17 @@ update_item:
     interval:
       selector:
         duration:
+    oneshot:
+      selector:
+        object:
+          translation_key: oneshot
+          fields:
+            due_datetime:
+              selector:
+                datetime:
+            early_window:
+              selector:
+                duration:
     grace_period:
       selector:
         duration:

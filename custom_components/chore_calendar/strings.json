@@ -59,6 +59,18 @@
         }
       }
     },
+    "oneshot": {
+      "fields": {
+        "due_datetime": {
+          "name": "Due datetime",
+          "description": "When this chore is due. Omit to create an unscheduled chore that can be rescheduled later."
+        },
+        "early_window": {
+          "name": "Early completion window",
+          "description": "How long before the due time a completion will count. Default: 3 hours."
+        }
+      }
+    },
     "status": {
       "options": {
         "completed": "Completed",
@@ -71,7 +83,7 @@
   "services": {
     "create_item": {
       "name": "Create item",
-      "description": "Add a new chore to a chore list. Provide either 'Scheduled' or 'Interval' configuration.",
+      "description": "Add a new chore to a chore list. Provide one of 'Scheduled', 'Interval', or 'Oneshot' configuration.",
       "fields": {
         "entity_id": {
           "name": "Entity",
@@ -96,6 +108,10 @@
         "interval": {
           "name": "Interval",
           "description": "How often this chore should be performed. Provide this for an interval chore."
+        },
+        "oneshot": {
+          "name": "Oneshot",
+          "description": "Configure a non-recurring chore with a specific due datetime (or no date for an unscheduled item)."
         },
         "grace_period": {
           "name": "Grace period",
@@ -134,6 +150,10 @@
         "interval": {
           "name": "Interval",
           "description": "How often this chore should be performed."
+        },
+        "oneshot": {
+          "name": "Oneshot",
+          "description": "Update a oneshot chore's due datetime or early window. Set due datetime to null to clear it."
         },
         "grace_period": {
           "name": "Grace period",
@@ -195,7 +215,7 @@
         },
         "until": {
           "name": "Until",
-          "description": "Datetime to defer the chore until. Omit to use the type-specific default: next active day for scheduled chores, now + interval for interval chores."
+          "description": "Datetime to defer the chore until. Omit to use the type-specific default: next active day for scheduled chores, now + interval for interval chores, or clear the due date for oneshot chores."
         }
       }
     },

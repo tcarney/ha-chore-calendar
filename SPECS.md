@@ -84,16 +84,17 @@ completed → due → overdue → (trigger) → completed
 - `overdue_at` = `due_at + grace_period`
 - Never-completed interval chores are always `due` (no pending state)
 
-**Oneshot Chores** (planned) — 4 states, same window as scheduled, no recurrence:
+**Oneshot Chores** — 4 states, same window math as scheduled, no built-in recurrence:
 
 ```text
-pending → due → overdue → (trigger) → completed [terminal]
+pending → due → overdue → (trigger) → completed [terminal for current occurrence]
 ```
 
-- Same `early_window` / `grace_period` window as scheduled chores
-- `pending_at` = `due_datetime - early_window`
-- `overdue_at` = `due_datetime + grace_period`
-- Once completed, stays completed permanently (or auto-deletes)
+- `pending_at` = `due_datetime - early_window`, `overdue_at` = `due_datetime + grace_period`
+- `due_datetime` is **optional** — `None` represents an unscheduled chore that reports `pending` (actionable but not requiring action) until a date is set via `update_item` or the chore is completed directly
+- Completion synthesizes `due_datetime` to the completion timestamp when the chore is unscheduled, ensuring `(last_completed=set, due_datetime=None)` reliably means "user explicitly unscheduled" (Path B/C) rather than "completed without a date." `previous_due_datetime` undo slot reverts the synthesis on uncomplete
+- `update_item` can rewrite `due_datetime` at any time, including on a completed oneshot — when `last_completed < new_pending_at` the chore re-enters the cycle. This enables ad-hoc and automation-driven workflows where an external script computes the next occurrence
+- Skip default clears `due_datetime` (leaves the chore unscheduled); skip with explicit `until` uses the standard `skipped_until` anchor; skipping a terminal-completed oneshot raises `ServiceValidationError`
 
 ### Completion Undo Slot
 
@@ -105,17 +106,19 @@ A parallel `previous_skipped_until` slot holds any `skipped_until` value that a 
 
 `skip_item` defers a chore's next occurrence by writing `skipped_until` on the chore. It does **not** touch `last_completed` — skipping is distinct from completing, preserving an accurate record of when the task was really done.
 
-- **`skipped_until` acts as the operative period anchor** for the existing state machines:
+- **`skipped_until` acts as the operative anchor** for scheduled and interval state machines:
   - *Scheduled*: `pending_at = skipped_until − early_window`, `overdue_at = skipped_until + grace_period`
   - *Interval*: `due_at = skipped_until`, `overdue_at = skipped_until + grace_period`
-- **No new status** — a skipped chore reports as `completed` while `now < pending_at` (scheduled) or `now < skipped_until` (interval). Once past that threshold, it transitions through `pending`/`due`/ etc. against the skipped anchor.
+  - *Oneshot*: same window math when `until` is provided (overrides `due_datetime`); when omitted, default skip clears `due_datetime` instead of advancing an anchor
+- **No new status** — a skipped chore reports as `completed` while `now < pending_at` (scheduled / oneshot with explicit `until`) or `now < skipped_until` (interval). Once past that threshold, it transitions through `pending`/`due`/ etc. against the skipped anchor.
 - **Stale-skip fallthrough**: once `now ≥ skipped_until + grace_period`, the skip is ignored and normal period logic resumes. The field is not eagerly cleared.
-- **Defaults when `until` is omitted**:
+- **Defaults when `until` is omitted** — handled type-specifically via `apply_default_skip`:
   - *Scheduled*: the next active day's period-due strictly after now. Walks forward past the pinned overdue period so the skip cannot land in the past.
   - *Interval*: `now + interval`.
+  - *Oneshot*: clears `due_datetime` (the chore enters the unscheduled `pending` state). Skipping a terminal-completed oneshot raises `ServiceValidationError`.
 - **`complete_item` clears the skip** by default. Pass `keep_skip: true` to preserve it — internally mapped to `apply_completion(clear_skip=False)`. The cleared value is saved to `previous_skipped_until` and restored by `uncomplete_item`.
-- **Fires `chore_calendar_item_skipped`** with `uid`, `chore_name`, `skipped_until`, and the list `entity_id`. Status transitions continue to fire `chore_calendar_status_changed`.
-- **Scope**: scheduled and interval only; oneshot skip behavior is defined alongside the oneshot chore type. List-level skip is deferred.
+- **Fires `chore_calendar_item_skipped`** with `uid`, `chore_name`, `skipped_until`, and the list `entity_id`. The `skipped_until` field is `null` when oneshot default-skip cleared the date (no operative anchor). Status transitions continue to fire `chore_calendar_status_changed`.
+- **Scope**: per-chore only; list-level skip is deferred.
 
 ### Storage Schema
 
@@ -169,8 +172,7 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "schedule": {
           "due_datetime": "2026-04-15T10:00:00-04:00",
           "early_window_mins": 10080,
-          "grace_period_mins": 0,
-          "auto_delete": false
+          "grace_period_mins": 0
         },
         "trigger_tag_id": null,
         "assigned_to": ["person.tom"],
@@ -179,7 +181,8 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "last_completed_by": null,
         "previous_last_completed": null,
         "previous_last_completed_by": null,
-        "skipped_until": null
+        "skipped_until": null,
+        "previous_due_datetime": null
       }
     ]
   }

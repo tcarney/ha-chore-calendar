@@ -11,7 +11,7 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 - **Todo entity**: One todo list per chore list, surfacing actionable chores (pending/due/overdue) through HA's native todo UI and Assist voice; toggling items routes through `complete_item` / `uncomplete_item`
 - **Custom Lovelace card**: Built-in timeline card with per-entity filtering, colors, detail dialog, and configurable actions
 - **Tag scan auto-completion**: Assign NFC tags to chores for tap-to-complete; shared tags automatically resolve to the correct chore based on completion windows
-- **Flexible scheduling**: Scheduled (specific days/times) and interval-based chore types
+- **Flexible scheduling**: Scheduled (specific days/times), interval-based, and oneshot (one-time tasks with optional due date) chore types
 - **Skip occurrences**: Defer a chore's next occurrence without touching its completion history, with an explicit `until` datetime or a type-specific default
 - **Status events**: Fires `chore_calendar_status_changed` and `chore_calendar_item_skipped` events for use in automations
 - **Persistent storage**: Chore data stored locally — no external API or cloud dependency
@@ -90,9 +90,24 @@ Recur on a fixed interval from the last completion. Status cycle: **due** → **
 | --- | --- | --- | --- |
 | `interval` | yes | — | Time between occurrences (duration, e.g. `days: 90`) |
 
+### Oneshot Chores
+
+Non-recurring tasks with an optional due datetime. Status cycle: **pending** → **due** → **overdue** → **completed** (terminal for the current occurrence). Unlike scheduled and interval chores, a oneshot has no built-in cadence — its `due_datetime` comes from the create/update call, an automation, or an external script.
+
+| Option | Required | Default | Description |
+| --- | --- | --- | --- |
+| `due_datetime` | no | — | When the chore is due. Omit to create an unscheduled chore that can be rescheduled later via `update_item`. |
+| `early_window` | no | 3 hours | How early the chore can be completed before it's due (duration) |
+
+Behaviors specific to oneshot:
+
+- **Optional due date**: a oneshot created without `due_datetime` reports `pending` until a date is set or the chore is completed directly. Useful for ad-hoc todo-style items ("Buy milk") and "someday" tasks.
+- **Reschedule via update_item**: writing a new `due_datetime` to a completed oneshot reactivates it through the standard pending/due/overdue cycle. Closer values (within the early window of `last_completed`) keep the chore completed — guards against accidental reactivation by past dates.
+- **Skip default clears the date**: `skip_item` with no `until` on a oneshot clears `due_datetime` (the chore enters the unscheduled pending state). Use `update_item` to reschedule. `skip_item` with explicit `until` works the same as scheduled/interval.
+
 ### Common Options
 
-These apply to both chore types:
+These apply to all chore types:
 
 | Option | Required | Default | Description |
 | --- | --- | --- | --- |
@@ -110,7 +125,7 @@ Each chore sensor reports one of four statuses:
 | Status | Meaning |
 | --- | --- |
 | **completed** | The chore has been completed for the current period |
-| **pending** | The early window has opened but the chore is not yet due (scheduled chores only) |
+| **pending** | The early window has opened but the chore is not yet due (scheduled and oneshot); also reported by an unscheduled oneshot (no due date set) |
 | **due** | The chore is due now and waiting to be completed |
 | **overdue** | The grace period has passed without completion |
 
@@ -152,6 +167,23 @@ data:
     days: 90
   grace_period:
     days: 14
+
+# Oneshot chore — single deadline with a 7-day early window
+action: chore_calendar.create_item
+data:
+  entity_id: calendar.daily_chores
+  chore_name: "File Taxes"
+  oneshot:
+    due_datetime: "2026-04-15T10:00:00-04:00"
+    early_window:
+      days: 7
+
+# Unscheduled oneshot — ad-hoc todo, scheduled later via update_item
+action: chore_calendar.create_item
+data:
+  entity_id: calendar.daily_chores
+  chore_name: "Buy Milk"
+  oneshot: {}
 ```
 
 ### Complete a Chore
@@ -195,6 +227,7 @@ Provide `until` to pick the exact resume datetime, or omit it to use the type-sp
 
 - **Scheduled chores**: next active day's scheduled time strictly after now (overdue periods are stepped past).
 - **Interval chores**: `now + interval`.
+- **Oneshot chores**: clears `due_datetime`, leaving the chore unscheduled. Use `update_item` to set a new date. Skipping a terminal-completed oneshot raises an error.
 
 ```yaml
 # Default — skip to the next occurrence
