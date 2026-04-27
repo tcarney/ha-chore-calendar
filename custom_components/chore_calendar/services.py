@@ -353,7 +353,25 @@ async def _async_handle_update(call: ServiceCall) -> None:
     if ATTR_ASSIGNED_TO in call.data:
         updated["assigned_to"] = list(call.data[ATTR_ASSIGNED_TO])
 
-    # Overlay schedule fields if any were provided.
+    # Overlay schedule fields if any were provided. update_item is type-locked:
+    # the type-specific sub-dicts are valid only for matching chore types so a
+    # silent no-op (e.g. interval_mins added to a scheduled chore's schedule and
+    # then ignored by ScheduledChore.from_schedule) doesn't masquerade as a
+    # successful update.
+    type_to_attr = {
+        ChoreType.SCHEDULED: ATTR_SCHEDULED,
+        ChoreType.INTERVAL: ATTR_INTERVAL,
+        ChoreType.ONESHOT: ATTR_ONESHOT,
+    }
+    allowed_attr = type_to_attr[existing.chore_type]
+    for attr in (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT):
+        if attr != allowed_attr and attr in call.data:
+            msg = (
+                f"Cannot update chore '{existing.chore_name}' with '{attr}' — "
+                f"chore type is '{existing.chore_type}'; use '{allowed_attr}'."
+            )
+            raise ServiceValidationError(msg)
+
     has_schedule_fields = any(k in call.data for k in (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT, ATTR_GRACE_PERIOD))
     if has_schedule_fields:
         schedule = dict(updated["schedule"])

@@ -502,6 +502,65 @@ async def test_update_item_calendar_without_item_raises(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_item_rejects_type_mismatch_interval_to_scheduled(hass, config_entry):
+    """update_item raises when the schedule sub-dict doesn't match the chore's type."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    # Pre-existing chore is INTERVAL — passing a 'scheduled' block should be rejected.
+    with pytest.raises(ServiceValidationError, match="type"):
+        await hass.services.async_call(
+            DOMAIN,
+            "update_item",
+            {
+                "entity_id": entity_id,
+                "item": "Test Chore",
+                "scheduled": {"time": "08:00:00"},
+            },
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_item_rejects_type_mismatch_interval_to_oneshot(hass, config_entry):
+    """update_item raises when an interval chore is updated with a oneshot block."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError, match="type"):
+        await hass.services.async_call(
+            DOMAIN,
+            "update_item",
+            {
+                "entity_id": entity_id,
+                "item": "Test Chore",
+                "oneshot": {"due_datetime": "2026-04-15T12:00:00-05:00"},
+            },
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_item_same_type_succeeds(hass, config_entry):
+    """update_item with a matching schedule sub-dict updates without error."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": "Test Chore",
+            "interval": {"days": 7},
+        },
+        blocking=True,
+    )
+
+    chore = config_entry.runtime_data.store.get_chore(TEST_UID)
+    assert chore is not None
+    assert isinstance(chore, IntervalChore)
+    assert chore.interval == timedelta(days=7)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_delete_item_calendar_without_item_raises(hass, config_entry):
     """delete_item raises when targeting a calendar entity without item."""
     calendar_id = await _setup_with_chore(hass, config_entry)

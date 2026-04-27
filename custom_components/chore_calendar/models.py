@@ -51,8 +51,14 @@ class BaseChore(abc.ABC):
         """Return True if a completion at *timestamp* is valid for the current period."""
 
     @abc.abstractmethod
-    def compute_skipped_until_default(self, now: datetime) -> datetime:
-        """Return the default ``skipped_until`` used when the skip service omits ``until``."""
+    def apply_default_skip(self, now: datetime) -> datetime | None:
+        """Apply type-specific default-skip behavior; return the event payload value.
+
+        Most types defer the next occurrence by setting ``skipped_until``; the
+        returned value mirrors that. Some types (e.g. ``OneshotChore``) clear
+        a different anchor instead and return ``None`` to signal "no operative
+        anchor" in the ``chore_calendar_item_skipped`` event payload.
+        """
 
     def apply_completion(
         self,
@@ -93,20 +99,6 @@ class BaseChore(abc.ABC):
         self.previous_last_completed = None
         self.previous_last_completed_by = None
         self.previous_skipped_until = None
-
-    def apply_default_skip(self, now: datetime) -> datetime | None:
-        """Apply default skip behavior; mutates self and returns the event payload value.
-
-        Default implementation sets ``skipped_until`` to
-        ``compute_skipped_until_default(now)`` and returns it. Subclasses
-        with different default-skip semantics (e.g. clearing the operative
-        anchor entirely) override this method. The returned value is what
-        the skip handler emits as the ``skipped_until`` field of
-        ``chore_calendar_item_skipped`` — ``None`` signals "no scheduled
-        anchor" in the event payload.
-        """
-        self.skipped_until = self.compute_skipped_until_default(now)
-        return self.skipped_until
 
     @abc.abstractmethod
     def _schedule_to_dict(self) -> dict[str, Any]:
@@ -272,8 +264,8 @@ class ScheduledChore(BaseChore):
         pending_at = period_due - self.early_window
         return timestamp >= pending_at
 
-    def compute_skipped_until_default(self, now: datetime) -> datetime:
-        """Return the next active day's period-due strictly after *now*.
+    def apply_default_skip(self, now: datetime) -> datetime | None:
+        """Skip to the next active day's period-due strictly after *now*.
 
         Walks forward from the current operative period. An overdue chore's
         period may be pinned in the past — stepping once would still land
@@ -283,6 +275,7 @@ class ScheduledChore(BaseChore):
         candidate = self._find_next_active_day(self._find_current_period(now))
         while candidate <= now:
             candidate = self._find_next_active_day(candidate)
+        self.skipped_until = candidate
         return candidate
 
     def _skip_anchor_active(self, now: datetime) -> bool:
@@ -470,9 +463,10 @@ class IntervalChore(BaseChore):
         """Interval chores can always be completed (there is no early window)."""
         return True
 
-    def compute_skipped_until_default(self, now: datetime) -> datetime:
-        """Return now + interval as the default deferred due datetime."""
-        return now + self.interval
+    def apply_default_skip(self, now: datetime) -> datetime | None:
+        """Skip by one full interval from *now*."""
+        self.skipped_until = now + self.interval
+        return self.skipped_until
 
     def _skip_anchor_active(self, now: datetime) -> bool:
         """Return True while ``skipped_until`` should override the next-due anchor."""
@@ -600,16 +594,6 @@ class OneshotChore(BaseChore):
             return False
         pending_at = self.due_datetime - self.early_window
         return timestamp >= pending_at
-
-    def compute_skipped_until_default(self, now: datetime) -> datetime:
-        """Not used — OneshotChore overrides apply_default_skip directly.
-
-        Default skip clears ``due_datetime`` rather than computing a new
-        skip anchor; this method is required by the abstract base but has
-        no meaningful return value here.
-        """
-        msg = "OneshotChore does not use compute_skipped_until_default; default skip clears due_datetime"
-        raise NotImplementedError(msg)
 
     def apply_completion(
         self,

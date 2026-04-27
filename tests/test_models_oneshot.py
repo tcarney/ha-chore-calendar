@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 from custom_components.chore_calendar.const import ChoreStatus, ChoreType
 from custom_components.chore_calendar.models import BaseChore, OneshotChore
 
@@ -389,20 +387,6 @@ class TestExplicitSkip:
 
         assert chore.compute_status(skipped) == ChoreStatus.DUE
         assert chore.compute_next_due(due) == skipped
-
-
-# ---------------------------------------------------------------------------
-# compute_skipped_until_default — intentionally unsupported
-# ---------------------------------------------------------------------------
-
-
-class TestComputeSkippedUntilDefault:
-    """OneshotChore deliberately does not support compute_skipped_until_default."""
-
-    def test_raises_not_implemented(self):
-        chore = _make_oneshot(due_datetime=datetime(2026, 4, 15, 12, 0, tzinfo=TZ))
-        with pytest.raises(NotImplementedError, match="OneshotChore"):
-            chore.compute_skipped_until_default(datetime(2026, 4, 14, 10, 0, tzinfo=TZ))
 
 
 # ---------------------------------------------------------------------------
