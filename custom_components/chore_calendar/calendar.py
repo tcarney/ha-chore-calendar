@@ -12,7 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, ChoreStatus
+from .const import DOMAIN, LOGGER, ChoreStatus
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore
 
@@ -161,6 +161,14 @@ class ChoreCalendarListEntity(CoordinatorEntity[ChoreCalendarCoordinator], Calen
             if due_evt is not None and _overlaps(due_evt, start_date, end_date):
                 events.append(due_evt)
         events.sort(key=lambda e: e.start)
+        LOGGER.debug(
+            "%s.async_get_events(%s → %s): %d event(s) (cleared_at=%s)",
+            self.entity_id,
+            start_date.isoformat(),
+            end_date.isoformat(),
+            len(events),
+            cleared_at.isoformat() if cleared_at else None,
+        )
         return events
 
 

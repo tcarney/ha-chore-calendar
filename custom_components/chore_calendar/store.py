@@ -65,6 +65,10 @@ class ChoreStore:
         # when dropping v1 support.
         self._store = _ChoreCalendarStore(hass, f"{DOMAIN}.{entry_id}")
         self._chores: dict[str, BaseChore] = {}
+        # Surface the config entry id so shared helpers (e.g. the calendar
+        # event-listener notifier in services.py) can resolve to the
+        # per-list calendar entity without an extra registry hop.
+        self.entry_id = entry_id
         # Per-list cutoff for hiding completed items (set by
         # hide_completed_items / todo.remove_completed_items). Items whose
         # last_completed precedes this datetime are hidden from the

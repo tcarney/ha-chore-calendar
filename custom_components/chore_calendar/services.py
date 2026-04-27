@@ -330,6 +330,7 @@ async def _async_handle_create(call: ServiceCall) -> None:
 
     await store.async_create_chore(chore)
     await coordinator.async_refresh()
+    _notify_calendar_event_listeners(call.hass, store.entry_id)
     LOGGER.info("created %s (%s)", chore.chore_name, uid)
 
 
@@ -383,6 +384,7 @@ async def _async_handle_update(call: ServiceCall) -> None:
     chore = BaseChore.from_dict(updated)
     await store.async_update_chore(chore)
     await coordinator.async_refresh()
+    _notify_calendar_event_listeners(call.hass, store.entry_id)
     LOGGER.info("updated %s (%s)", existing.chore_name, uid)
 
 
@@ -398,6 +400,7 @@ async def _async_handle_delete(call: ServiceCall) -> None:
 
     await store.async_delete_chore(uid)
     await coordinator.async_refresh()
+    _notify_calendar_event_listeners(call.hass, store.entry_id)
 
     call.hass.bus.async_fire(
         EVENT_ITEM_DELETED,
@@ -435,6 +438,7 @@ async def async_complete_chore(
     existing.apply_completion(timestamp, completed_by, clear_skip=not keep_skip)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
+    _notify_calendar_event_listeners(coordinator.hass, store.entry_id)
     LOGGER.info("completed %s (%s) at %s", existing.chore_name, uid, timestamp.isoformat())
 
 
@@ -462,6 +466,7 @@ async def async_uncomplete_chore(
     coordinator.mark_uncompleted(uid)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
+    _notify_calendar_event_listeners(coordinator.hass, store.entry_id)
     LOGGER.info("uncompleted %s (%s)", existing.chore_name, uid)
 
 
@@ -521,6 +526,7 @@ async def _async_handle_skip(call: ServiceCall) -> None:
 
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
+    _notify_calendar_event_listeners(call.hass, store.entry_id)
 
     call.hass.bus.async_fire(
         EVENT_ITEM_SKIPPED,
@@ -594,6 +600,42 @@ async def async_apply_completed_cleared_at(
 
     LOGGER.debug("persist=false sweep complete: %d chore(s) deleted", swept)
     await coordinator.async_refresh()
+    _notify_calendar_event_listeners(hass, store.entry_id)
+
+
+def _notify_calendar_event_listeners(hass: HomeAssistant, entry_id: str) -> None:
+    """Push fresh events to the calendar panel subscribers for *entry_id*.
+
+    HA's calendar dashboard caches event lists client-side and does not
+    refetch on ``state_changed`` — CRUD actions on chores leave stale
+    events visible until the user navigates dates or reloads the browser.
+    ``CalendarEntity.async_update_event_listeners`` (added on HA dev,
+    post-2026.3.1) lets the integration push an invalidation.
+
+    Looks up the calendar entity for the given config entry (its unique_id
+    is the entry_id) and calls the listener-update method when present.
+    Silently no-ops when:
+
+    - The calendar entity isn't loaded for this entry.
+    - The HA version doesn't yet implement ``async_update_event_listeners``.
+    """
+    registry = er.async_get(hass)
+    calendar_entity_id = registry.async_get_entity_id("calendar", DOMAIN, entry_id)
+    if calendar_entity_id is None:
+        return
+
+    calendar_component = hass.data.get("calendar")
+    if calendar_component is None:
+        return
+    entity = calendar_component.get_entity(calendar_entity_id)
+    notify = getattr(entity, "async_update_event_listeners", None)
+    if notify is None:
+        return
+    notify()
+    LOGGER.debug(
+        "Pushed calendar event update to subscribers of %s",
+        calendar_entity_id,
+    )
 
 
 async def _async_handle_hide_completed(call: ServiceCall) -> None:
