@@ -7,10 +7,10 @@ from datetime import datetime
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 
+from .actions import async_complete_chore
 from .const import LOGGER, ChoreStatus
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore
-from .services import async_complete_chore
 from .store import ChoreStore
 
 # HA fires this event when an NFC tag is scanned.
