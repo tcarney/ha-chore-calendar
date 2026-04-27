@@ -8,7 +8,7 @@ A Home Assistant custom integration called **Chore Calendar** (domain: `chore_ca
 
 ### Integration Model (One List = One Config Entry)
 
-Each chore list is added through Settings → Integrations → "Chore Calendar". This matches how `local_calendar` and `local_todo` work — one config entry per list. Each list gets its own config entry, storage file, coordinator, calendar entity, and set of chore sensor entities. All entities are grouped under a `DeviceEntryType.SERVICE` device per list.
+Each chore list is added through Settings → Integrations → "Chore Calendar". This matches how `local_calendar` and `local_todo` work — one config entry per list. Each list gets its own config entry, storage file, coordinator, calendar entity, todo entity, and set of chore sensor entities. All entities are grouped under a `DeviceEntryType.SERVICE` device per list.
 
 ### Naming Convention
 
@@ -304,16 +304,18 @@ Response shape per item:
 interface ChoreItem {
   uid: string;
   chore_name: string;
-  chore_type: 'scheduled' | 'interval';
+  chore_type: 'scheduled' | 'interval' | 'oneshot';
   status: 'completed' | 'pending' | 'due' | 'overdue';
   next_due: string | null;       // ISO 8601
   last_completed: string | null; // ISO 8601
   last_completed_by: string | null;
   assigned_to: string[];
   trigger_entity: string | null;
-  schedule: string;              // Human-readable description
+  schedule: string | Record<string, unknown>;  // Type-specific dict; see Storage Schema
 }
 ```
+
+The full `get_items` response also includes `completed_cleared_at: string | null` at the top level (the per-list cutoff from `hide_completed_items`) so the card can apply the visibility filter client-side.
 
 ### Default Color Palette
 
