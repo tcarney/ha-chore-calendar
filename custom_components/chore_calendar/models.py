@@ -33,6 +33,9 @@ class BaseChore(abc.ABC):
     previous_last_completed_by: str | None = None
     skipped_until: datetime | None = None
     previous_skipped_until: datetime | None = None
+    # Window after the operative due time during which a chore stays DUE
+    # before flipping to OVERDUE. Shared by all chore types.
+    grace_period: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_GRACE_PERIOD_MINS))
 
     @abc.abstractmethod
     def compute_status(self, now: datetime) -> ChoreStatus:
@@ -100,13 +103,26 @@ class BaseChore(abc.ABC):
         self.previous_last_completed_by = None
         self.previous_skipped_until = None
 
+    def _skip_anchor_active(self, now: datetime) -> bool:
+        """Return True while ``skipped_until`` should override the type's normal anchor.
+
+        Active from the moment ``skipped_until`` is set until ``skipped_until + grace_period``,
+        matching the same DUE/OVERDUE window each type applies to its own anchor.
+        """
+        return self.skipped_until is not None and now < self.skipped_until + self.grace_period
+
     @abc.abstractmethod
     def _schedule_to_dict(self) -> dict[str, Any]:
         """Serialize type-specific schedule fields."""
 
-    @abc.abstractmethod
     def schedule_description(self) -> dict[str, Any]:
-        """Return a human-friendly schedule dict for sensor attributes."""
+        """Return a human-friendly schedule dict for sensor attributes.
+
+        Defaults to ``_schedule_to_dict`` since the storage and display shapes
+        match for most types. Subclasses override only when the display shape
+        diverges (e.g. ScheduledChore expanding empty ``active_days``).
+        """
+        return self._schedule_to_dict()
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the chore to a storage-compatible dict."""
@@ -190,7 +206,6 @@ class ScheduledChore(BaseChore):
     time: time = field(default_factory=lambda: time(8, 0))
     active_days: list[str] = field(default_factory=list)
     early_window: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_EARLY_WINDOW_MINS))
-    grace_period: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_GRACE_PERIOD_MINS))
 
     def compute_status(self, now: datetime) -> ChoreStatus:
         """Compute scheduled chore status using the blueprint state machine."""
@@ -277,10 +292,6 @@ class ScheduledChore(BaseChore):
             candidate = self._find_next_active_day(candidate)
         self.skipped_until = candidate
         return candidate
-
-    def _skip_anchor_active(self, now: datetime) -> bool:
-        """Return True while ``skipped_until`` should override the period anchor."""
-        return self.skipped_until is not None and now < self.skipped_until + self.grace_period
 
     def _find_current_period(self, now: datetime) -> datetime:
         """Find the period_due for the period that *now* falls into.
@@ -375,13 +386,11 @@ class ScheduledChore(BaseChore):
         }
 
     def schedule_description(self) -> dict[str, Any]:
-        """Return schedule info for sensor attributes."""
-        return {
-            "time": self.time.isoformat(),
-            "active_days": list(self.active_days) or list(_DAY_NAMES),
-            "early_window_mins": int(self.early_window.total_seconds() // 60),
-            "grace_period_mins": int(self.grace_period.total_seconds() // 60),
-        }
+        """Display empty ``active_days`` as the full week so the sensor reads "every day"."""
+        data = self._schedule_to_dict()
+        if not data["active_days"]:
+            data["active_days"] = list(_DAY_NAMES)
+        return data
 
     @classmethod
     def from_schedule(cls, base: dict[str, Any], schedule: dict[str, Any]) -> Self:
@@ -407,7 +416,6 @@ class IntervalChore(BaseChore):
     """A chore that recurs at a fixed interval from last completion."""
 
     interval: timedelta = field(default_factory=lambda: timedelta(days=1))
-    grace_period: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_GRACE_PERIOD_MINS))
 
     def compute_status(self, now: datetime) -> ChoreStatus:
         """Compute interval chore status (3-state: completed/due/overdue).
@@ -468,19 +476,8 @@ class IntervalChore(BaseChore):
         self.skipped_until = now + self.interval
         return self.skipped_until
 
-    def _skip_anchor_active(self, now: datetime) -> bool:
-        """Return True while ``skipped_until`` should override the next-due anchor."""
-        return self.skipped_until is not None and now < self.skipped_until + self.grace_period
-
     def _schedule_to_dict(self) -> dict[str, Any]:
         """Serialize interval-chore-specific fields."""
-        return {
-            "interval_mins": int(self.interval.total_seconds() // 60),
-            "grace_period_mins": int(self.grace_period.total_seconds() // 60),
-        }
-
-    def schedule_description(self) -> dict[str, Any]:
-        """Return schedule info for sensor attributes."""
         return {
             "interval_mins": int(self.interval.total_seconds() // 60),
             "grace_period_mins": int(self.grace_period.total_seconds() // 60),
@@ -518,7 +515,6 @@ class OneshotChore(BaseChore):
 
     due_datetime: datetime | None = None
     early_window: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_EARLY_WINDOW_MINS))
-    grace_period: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_GRACE_PERIOD_MINS))
     # When False (default), a terminal-completed oneshot is deleted from
     # storage on the next hide_completed_items / todo.remove_completed_items
     # sweep. When True, the chore stays in storage and can be reactivated
@@ -638,21 +634,8 @@ class OneshotChore(BaseChore):
         data["previous_due_datetime"] = self.previous_due_datetime.isoformat() if self.previous_due_datetime else None
         return data
 
-    def _skip_anchor_active(self, now: datetime) -> bool:
-        """Return True while ``skipped_until`` should override the due_datetime anchor."""
-        return self.skipped_until is not None and now < self.skipped_until + self.grace_period
-
     def _schedule_to_dict(self) -> dict[str, Any]:
         """Serialize oneshot-specific schedule fields."""
-        return {
-            "due_datetime": self.due_datetime.isoformat() if self.due_datetime else None,
-            "early_window_mins": int(self.early_window.total_seconds() // 60),
-            "grace_period_mins": int(self.grace_period.total_seconds() // 60),
-            "persist": self.persist,
-        }
-
-    def schedule_description(self) -> dict[str, Any]:
-        """Return schedule info for sensor attributes."""
         return {
             "due_datetime": self.due_datetime.isoformat() if self.due_datetime else None,
             "early_window_mins": int(self.early_window.total_seconds() // 60),

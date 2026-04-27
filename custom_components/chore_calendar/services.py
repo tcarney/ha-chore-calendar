@@ -258,21 +258,30 @@ def _infer_chore_type(data: dict[str, Any]) -> ChoreType:
     }[present[0]]
 
 
-def _build_schedule_dict(data: dict[str, Any], chore_type: ChoreType) -> dict[str, Any]:
-    """Build an internal schedule dict from service call data."""
-    schedule: dict[str, Any]
-    if chore_type == ChoreType.SCHEDULED:
+def _apply_schedule_overlays(
+    data: dict[str, Any],
+    schedule: dict[str, Any],
+    chore_type: ChoreType,
+) -> dict[str, Any]:
+    """Overlay schedule fields from a service call onto an existing schedule dict.
+
+    Used by both ``create_item`` (with an empty starting schedule) and
+    ``update_item`` (overlaying partial fields onto the chore's stored schedule).
+    Only the keys present in *data* are written — absent keys leave *schedule*
+    untouched, preserving stored values during a partial update.
+    """
+    if chore_type == ChoreType.SCHEDULED and ATTR_SCHEDULED in data:
         obj = data[ATTR_SCHEDULED]
-        schedule = {"time": obj["time"]}
+        if "time" in obj:
+            schedule["time"] = obj["time"]
         if "active_days" in obj:
             schedule["active_days"] = obj["active_days"]
         if "early_window" in obj:
             schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
-    elif chore_type == ChoreType.INTERVAL:
-        schedule = {"interval_mins": _duration_to_mins(data[ATTR_INTERVAL])}
-    else:  # ONESHOT
+    elif chore_type == ChoreType.INTERVAL and ATTR_INTERVAL in data:
+        schedule["interval_mins"] = _duration_to_mins(data[ATTR_INTERVAL])
+    elif chore_type == ChoreType.ONESHOT and ATTR_ONESHOT in data:
         obj = data[ATTR_ONESHOT]
-        schedule = {}
         if "due_datetime" in obj:
             # None is meaningful (explicit unscheduled) — preserve verbatim.
             due = obj["due_datetime"]
@@ -291,7 +300,7 @@ def _build_schedule_dict(data: dict[str, Any], chore_type: ChoreType) -> dict[st
 def _build_chore_from_data(data: dict[str, Any]) -> BaseChore:
     """Build a chore model from service call data."""
     chore_type = _infer_chore_type(data)
-    schedule = _build_schedule_dict(data, chore_type)
+    schedule = _apply_schedule_overlays(data, {}, chore_type)
     base_kwargs: dict[str, Any] = {
         "uid": data["uid"],
         "chore_name": data[ATTR_CHORE_NAME],
@@ -374,30 +383,7 @@ async def _async_handle_update(call: ServiceCall) -> None:
 
     has_schedule_fields = any(k in call.data for k in (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT, ATTR_GRACE_PERIOD))
     if has_schedule_fields:
-        schedule = dict(updated["schedule"])
-        if ATTR_SCHEDULED in call.data:
-            obj = call.data[ATTR_SCHEDULED]
-            if "time" in obj:
-                schedule["time"] = obj["time"]
-            if "active_days" in obj:
-                schedule["active_days"] = obj["active_days"]
-            if "early_window" in obj:
-                schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
-        if ATTR_INTERVAL in call.data:
-            schedule["interval_mins"] = _duration_to_mins(call.data[ATTR_INTERVAL])
-        if ATTR_ONESHOT in call.data:
-            obj = call.data[ATTR_ONESHOT]
-            if "due_datetime" in obj:
-                # Explicit None clears the date back to unscheduled PENDING.
-                due = obj["due_datetime"]
-                schedule["due_datetime"] = due.isoformat() if isinstance(due, datetime) else due
-            if "early_window" in obj:
-                schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
-            if "persist" in obj:
-                schedule["persist"] = bool(obj["persist"])
-        if ATTR_GRACE_PERIOD in call.data:
-            schedule["grace_period_mins"] = _duration_to_mins(call.data[ATTR_GRACE_PERIOD])
-        updated["schedule"] = schedule
+        updated["schedule"] = _apply_schedule_overlays(call.data, dict(updated["schedule"]), existing.chore_type)
 
     chore = BaseChore.from_dict(updated)
     await store.async_update_chore(chore)
@@ -443,9 +429,9 @@ async def async_complete_chore(
 ) -> None:
     """Record a completion for *uid* and refresh the coordinator.
 
-    Shared by the ``complete_item`` service handler and the todo entity's
-    ``needs_action`` → ``completed`` transition. Raises ServiceValidationError
-    if the chore is missing.
+    Shared by the ``complete_item`` service handler, the todo entity's
+    ``needs_action`` → ``completed`` transition, and the tag-scan listener.
+    Raises ServiceValidationError if the chore is missing.
     """
     existing = store.get_chore(uid)
     if existing is None:
