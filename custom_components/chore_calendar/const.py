@@ -15,7 +15,7 @@ DOMAIN = "chore_calendar"
 CONF_LIST_NAME = "list_name"
 
 # Platforms.
-PLATFORMS: list[Platform] = [Platform.CALENDAR, Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.CALENDAR, Platform.SENSOR, Platform.TODO]
 
 
 class ChoreStatus(StrEnum):

@@ -1,6 +1,6 @@
 # Chore Calendar
 
-A Home Assistant custom integration for managing recurring household chores. Each chore list is added through Settings > Integrations, with chores managed via service calls. Provides per-chore sensor entities and a per-list calendar entity.
+A Home Assistant custom integration for managing recurring household chores. Each chore list is added through Settings > Integrations, with chores managed via service calls. Provides per-chore sensor entities, a per-list calendar entity, and a per-list todo entity.
 
 ## Features
 
@@ -8,6 +8,7 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 - **Service-driven management**: Create, update, delete, and complete chores via service calls
 - **Sensor entities**: One sensor per chore tracking its current status (pending, due, overdue, completed)
 - **Calendar entity**: Read-only calendar per list showing upcoming and recently completed chores
+- **Todo entity**: One todo list per chore list, surfacing actionable chores (pending/due/overdue) through HA's native todo UI and Assist voice; toggling items routes through `complete_item` / `uncomplete_item`
 - **Custom Lovelace card**: Built-in timeline card with per-entity filtering, colors, detail dialog, and configurable actions
 - **Tag scan auto-completion**: Assign NFC tags to chores for tap-to-complete; shared tags automatically resolve to the correct chore based on completion windows
 - **Flexible scheduling**: Scheduled (specific days/times) and interval-based chore types
@@ -284,9 +285,9 @@ entities:
 | `entities[].color` | auto | Color for the entity's left bar (HA theme name like `"red"` or CSS value like `"#4FC3F7"`) |
 | `entities[].exclude` | `[]` | Statuses to hide for this entity: `overdue`, `due`, `pending`, `completed` |
 | `title` | none | Card title text |
-| `hide_pending` | `false` | Hide the pending section |
-| `hide_completed` | `false` | Hide the completed section |
-| `completed_limit` | `3` | Max completed rows shown; `0` for unlimited |
+| `hide_completed` | `false` | Hide the completed section entirely |
+| `due_date_period` | none | Duration dict — hide `pending` chores whose `next_due` is further in the future than this. Overdue and due chores are always shown. |
+| `completed_period` | none | Duration dict — hide `completed` chores whose `last_completed` is further in the past than this. |
 | `hide_section_headers` | `false` | Hide section headings (Overdue, Due, Upcoming, Completed) |
 | `hide_card_background` | `false` | Hide the card background (transparent) |
 | `allow_uncomplete` | `false` | Show an "Uncomplete" button on completed rows in the detail dialog |
@@ -310,7 +311,10 @@ entities:
     color: "#81C784"
 title: Chores
 hide_completed: false
-completed_limit: 3
+due_date_period:
+  days: 7
+completed_period:
+  days: 14
 hide_section_headers: false
 hide_card_background: false
 update_interval: 60

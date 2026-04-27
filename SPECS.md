@@ -25,7 +25,9 @@ All chore management goes through services, matching how native `calendar` and `
 The calendar entity generates events dynamically from chore data — no stored calendar events. Events shown:
 
 - **Last completed**: zero-duration event at `last_completed` time (always shown for history)
-- **Next due**: event spanning from `due_at` to `overdue_at`
+- **Next due**: zero-duration event at `due_at`
+
+Both event types are point-in-time markers rather than spans — a long `grace_period` would otherwise render as a multi-day block on the calendar. HA's default `state` logic depends on `event.start <= now < event.end`, which can never hold for a zero-duration event, so the calendar entity overrides `state` directly: it reads `on` while any chore in the list is `due` or `overdue`, and `off` otherwise.
 - At most 2 events per chore at any time
 
 ### Built-in Trigger Handling
@@ -55,6 +57,7 @@ Tag Scan Listener  ────────────────────�
 ```text
 calendar.daily_chores                           — the list (one per config entry)
 sensor.daily_chores_morning_medicine            — one per chore, prefixed with list name (state = status)
+todo.daily_chores                               — the list's actionable chores (one per config entry)
 ```
 
 ### State Machine
@@ -250,7 +253,7 @@ Chores are grouped under status section headers:
 | **Upcoming**  | `pending` chores   | Default secondary text | `next_due` ascending (soonest first)            |
 | **Completed** | `completed` chores | Muted                  | `last_completed` descending (most recent first) |
 
-Empty sections are hidden. The Completed section is capped at `completed_limit` rows (default 3); items beyond the limit are not shown. Set `completed_limit` to `0` to show all completed items. When `hide_completed` is `true`, the entire section is hidden.
+Empty sections are hidden. When `hide_completed` is `true`, the Completed section is hidden entirely. The `completed_period` option trims the section to items completed within a recent duration (e.g. `{days: 7}`); omitting it shows all completed items. The `due_date_period` option analogously trims the Upcoming section to pending items due within a relative window — overdue and due chores are always shown regardless. Pending items with no `next_due` (unscheduled) are also hidden when `due_date_period` is set, matching HA's native `todo-list-card` (the filter means "items due within this window," and undated items aren't in any window).
 
 #### Status Indicators (CSS-only)
 

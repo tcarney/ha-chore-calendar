@@ -31,7 +31,14 @@ async def async_setup_entry(
 
 
 def _make_due_event(chore: BaseChore, now: datetime.datetime) -> CalendarEvent | None:
-    """Create a calendar event for the chore's next upcoming due window."""
+    """Create a zero-duration calendar event at the chore's next due time.
+
+    Events are emitted as point-in-time markers (start == end) rather than
+    spanning the grace period — long grace windows would otherwise render as
+    multi-day blocks on the calendar. The entity's ``state`` property is
+    overridden so the ``on``/``off`` signal still reflects "any chore due or
+    overdue" despite the zero-duration events.
+    """
     due_range = chore.compute_due_range(now)
     if due_range is None:
         return None
@@ -41,19 +48,14 @@ def _make_due_event(chore: BaseChore, now: datetime.datetime) -> CalendarEvent |
     if chore.compute_status(now) != ChoreStatus.COMPLETED or due_at > now:
         # Current period is active, or the due window is still in the future
         # (interval chores report the upcoming window even when completed).
-        return CalendarEvent(summary=chore.chore_name, start=due_at, end=overdue_at)
+        return CalendarEvent(summary=chore.chore_name, start=due_at, end=due_at)
 
-    # Current period is completed — show the next one.
-    # Ask for next_due from after the current period ends so we skip past it.
+    # Current period is completed — show the next one. Ask for next_due from
+    # after the current period ends so we skip past it.
     next_due = chore.compute_next_due(overdue_at)
     if next_due is None or next_due <= due_at:
         return None
-    grace_duration = overdue_at - due_at
-    return CalendarEvent(
-        summary=chore.chore_name,
-        start=next_due,
-        end=next_due + grace_duration,
-    )
+    return CalendarEvent(summary=chore.chore_name, start=next_due, end=next_due)
 
 
 def _make_completed_event(chore: BaseChore) -> CalendarEvent | None:
@@ -105,6 +107,26 @@ class ChoreCalendarListEntity(CoordinatorEntity[ChoreCalendarCoordinator], Calen
             if soonest is None or evt.start < soonest.start:
                 soonest = evt
         return soonest
+
+    @property
+    def state(self) -> str:
+        """Return ``on`` while any chore in the list is due or overdue.
+
+        HA's default ``CalendarEntity.state`` reads ``on`` only while
+        ``event.start <= now < event.end``. Our events are zero-duration
+        markers, so that check can never pass — we override to reflect
+        chore-level state instead, keeping the calendar entity useful for
+        automation conditions like "any chore actionable?". Pending and
+        completed chores leave the state ``off``.
+        """
+        if self.coordinator.data is None:
+            return "off"
+        now = dt_util.now()
+        for chore in self.coordinator.data.values():
+            status = chore.compute_status(now)
+            if status in (ChoreStatus.DUE, ChoreStatus.OVERDUE):
+                return "on"
+        return "off"
 
     async def async_get_events(
         self,

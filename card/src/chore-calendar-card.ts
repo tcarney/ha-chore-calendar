@@ -11,6 +11,8 @@ import type {
   UnsubscribeFunc,
 } from "./types";
 import {
+  applyPeriodFilters,
+  durationToMs,
   groupByStatus,
   resolveEntityConfig,
   sortChores,
@@ -140,7 +142,10 @@ export class ChoreCalendarCard extends LitElement {
       });
 
       await Promise.all(promises);
-      this._items = sortChores(allItems);
+      const dueMs = durationToMs(this._config.due_date_period);
+      const completedMs = durationToMs(this._config.completed_period);
+      const filtered = applyPeriodFilters(allItems, dueMs, completedMs, new Date());
+      this._items = sortChores(filtered);
     } catch (err) {
       console.error("chore-calendar-card: failed to fetch items", err);
     } finally {
@@ -306,23 +311,14 @@ export class ChoreCalendarCard extends LitElement {
     }
 
     const groups = groupByStatus(this._items);
-    const hidePending = !!this._config.hide_pending;
     const hideCompleted = !!this._config.hide_completed;
-    const completedLimit = this._config.completed_limit ?? 3;
     const hideSections = !!this._config.hide_section_headers;
 
     return html`
       ${SECTION_ORDER.map((status) => {
         const items = groups.get(status);
         if (!items || items.length === 0) return nothing;
-        if (status === "pending" && hidePending) return nothing;
         if (status === "completed" && hideCompleted) return nothing;
-
-        const isCompleted = status === "completed";
-        const visibleItems =
-          isCompleted && completedLimit > 0 && items.length > completedLimit
-            ? items.slice(0, completedLimit)
-            : items;
 
         return html`
           ${!hideSections
@@ -330,7 +326,7 @@ export class ChoreCalendarCard extends LitElement {
                 ${SECTION_LABELS[status]}
               </div>`
             : nothing}
-          ${visibleItems.map(
+          ${items.map(
             (item) => html`
               <chore-row
                 .hass=${this.hass}

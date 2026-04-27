@@ -1,5 +1,12 @@
 import { fireEvent } from "./fire-event";
-import type { ActionConfig, ChoreStatus, EnrichedChoreItem, EntityConfig, HomeAssistant } from "./types";
+import type {
+  ActionConfig,
+  ChoreStatus,
+  DurationConfig,
+  EnrichedChoreItem,
+  EntityConfig,
+  HomeAssistant,
+} from "./types";
 
 /** Default color palette for multi-list color bars (HA theme color names). */
 const DEFAULT_COLORS = [
@@ -88,6 +95,62 @@ export function groupByStatus(
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
+
+/**
+ * Convert an HA-style duration dict to milliseconds.
+ * Returns null when the duration is unset or all zero, signalling "no filter".
+ */
+export function durationToMs(d: DurationConfig | undefined): number | null {
+  if (!d) return null;
+  const ms =
+    (d.days ?? 0) * DAY +
+    (d.hours ?? 0) * HOUR +
+    (d.minutes ?? 0) * MINUTE +
+    (d.seconds ?? 0) * 1_000;
+  return ms > 0 ? ms : null;
+}
+
+/**
+ * Apply the optional ``due_date_period`` and ``completed_period`` filters to a
+ * list of chores.
+ *
+ * - ``due_date_period`` hides ``pending`` chores whose ``next_due`` is further
+ *   than ``dueMs`` milliseconds in the future. Pending chores with no
+ *   ``next_due`` (unscheduled) are also hidden — the filter is interpreted as
+ *   "show items due within this window," and undated items aren't in any
+ *   window. Mirrors HA's native ``todo-list-card`` behavior. ``overdue`` and
+ *   ``due`` chores are retained regardless (their ``next_due`` is at or
+ *   before ``now``).
+ * - ``completed_period`` hides ``completed`` chores whose ``last_completed`` is
+ *   further than ``completedMs`` milliseconds in the past.
+ *
+ * Passing ``null`` for either bound disables that filter.
+ */
+export function applyPeriodFilters(
+  items: EnrichedChoreItem[],
+  dueMs: number | null,
+  completedMs: number | null,
+  now: Date,
+): EnrichedChoreItem[] {
+  if (dueMs === null && completedMs === null) return items;
+  const nowMs = now.getTime();
+  return items.filter((item) => {
+    if (
+      completedMs !== null &&
+      item.status === "completed" &&
+      item.last_completed
+    ) {
+      const age = nowMs - new Date(item.last_completed).getTime();
+      if (age > completedMs) return false;
+    }
+    if (dueMs !== null && item.status === "pending") {
+      if (!item.next_due) return false;
+      const lead = new Date(item.next_due).getTime() - nowMs;
+      if (lead > dueMs) return false;
+    }
+    return true;
+  });
+}
 
 /**
  * Format a duration as a human-readable string.

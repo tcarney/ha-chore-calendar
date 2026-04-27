@@ -30,6 +30,7 @@ from .const import (
     ChoreStatus,
     ChoreType,
 )
+from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore, IntervalChore, ScheduledChore
 from .store import ChoreStore
 
@@ -112,7 +113,7 @@ SERVICE_GET_ITEMS_SCHEMA = vol.Schema(
 )
 
 
-def _resolve_entry_data(hass: HomeAssistant, entity_id: str) -> tuple[ChoreStore, Any]:
+def _resolve_entry_data(hass: HomeAssistant, entity_id: str) -> tuple[ChoreStore, ChoreCalendarCoordinator]:
     """Resolve an entity_id to the config entry's runtime_data.
 
     Returns (store, coordinator) tuple.
@@ -357,33 +358,44 @@ async def _async_handle_delete(call: ServiceCall) -> None:
     LOGGER.debug("Deleted chore %s (%s)", existing.chore_name, uid)
 
 
-async def _async_handle_complete(call: ServiceCall) -> None:
-    """Handle complete_item service call."""
-    store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
+async def async_complete_chore(
+    store: ChoreStore,
+    coordinator: ChoreCalendarCoordinator,
+    uid: str,
+    *,
+    completed_at: datetime | None = None,
+    completed_by: str | None = None,
+    keep_skip: bool = False,
+) -> None:
+    """Record a completion for *uid* and refresh the coordinator.
 
-    uid = _resolve_item(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_ITEM), store)
+    Shared by the ``complete_item`` service handler and the todo entity's
+    ``needs_action`` → ``completed`` transition. Raises ServiceValidationError
+    if the chore is missing.
+    """
     existing = store.get_chore(uid)
     if existing is None:
         msg = f"Chore '{uid}' not found"
         raise ServiceValidationError(msg)
 
-    completed_at = call.data.get(ATTR_COMPLETED_AT) or dt_util.now()
-    keep_skip = bool(call.data.get(ATTR_KEEP_SKIP, False))
-    existing.apply_completion(
-        completed_at,
-        call.data.get(ATTR_COMPLETED_BY),
-        clear_skip=not keep_skip,
-    )
+    timestamp = completed_at if completed_at is not None else dt_util.now()
+    existing.apply_completion(timestamp, completed_by, clear_skip=not keep_skip)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
-    LOGGER.debug("Completed chore %s (%s) at %s", existing.chore_name, uid, completed_at.isoformat())
+    LOGGER.debug("Completed chore %s (%s) at %s", existing.chore_name, uid, timestamp.isoformat())
 
 
-async def _async_handle_uncomplete(call: ServiceCall) -> None:
-    """Handle uncomplete_item service call."""
-    store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
+async def async_uncomplete_chore(
+    store: ChoreStore,
+    coordinator: ChoreCalendarCoordinator,
+    uid: str,
+) -> None:
+    """Revert the most recent completion for *uid* and refresh the coordinator.
 
-    uid = _resolve_item(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_ITEM), store)
+    Shared by the ``uncomplete_item`` service handler and the todo entity's
+    ``completed`` → ``needs_action`` transition. Raises ServiceValidationError
+    if the chore is missing or has no completion to revert.
+    """
     existing = store.get_chore(uid)
     if existing is None:
         msg = f"Chore '{uid}' not found"
@@ -398,6 +410,28 @@ async def _async_handle_uncomplete(call: ServiceCall) -> None:
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
     LOGGER.debug("Uncompleted chore %s (%s)", existing.chore_name, uid)
+
+
+async def _async_handle_complete(call: ServiceCall) -> None:
+    """Handle complete_item service call."""
+    store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
+    uid = _resolve_item(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_ITEM), store)
+
+    await async_complete_chore(
+        store,
+        coordinator,
+        uid,
+        completed_at=call.data.get(ATTR_COMPLETED_AT) or dt_util.now(),
+        completed_by=call.data.get(ATTR_COMPLETED_BY),
+        keep_skip=bool(call.data.get(ATTR_KEEP_SKIP, False)),
+    )
+
+
+async def _async_handle_uncomplete(call: ServiceCall) -> None:
+    """Handle uncomplete_item service call."""
+    store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
+    uid = _resolve_item(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_ITEM), store)
+    await async_uncomplete_chore(store, coordinator, uid)
 
 
 async def _async_handle_skip(call: ServiceCall) -> None:

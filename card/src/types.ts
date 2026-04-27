@@ -44,14 +44,32 @@ export interface ActionHandlerDetail {
   action: "hold" | "tap" | "double_tap";
 }
 
+/** HA-style duration dict (matches the `duration` selector). */
+export interface DurationConfig {
+  days?: number;
+  hours?: number;
+  minutes?: number;
+  seconds?: number;
+}
+
 /** Card configuration. */
 export interface ChoreCalendarCardConfig {
   type: string;
   title?: string;
   entities: (string | EntityConfig)[];
   hide_completed?: boolean;
-  hide_pending?: boolean;
-  completed_limit?: number;
+  /**
+   * Hide pending chores whose ``next_due`` is further in the future than this
+   * relative duration. Overdue and due chores always pass this filter (their
+   * ``next_due`` is already at or before ``now``). Omit / set to all-zero for
+   * no filter (default).
+   */
+  due_date_period?: DurationConfig;
+  /**
+   * Hide completed chores whose ``last_completed`` is further in the past than
+   * this relative duration. Omit / set to all-zero for no filter (default).
+   */
+  completed_period?: DurationConfig;
   hide_section_headers?: boolean;
   update_interval?: number;
   compact?: boolean;
