@@ -181,7 +181,10 @@ def _resolve_item(hass: HomeAssistant, entity_id: str, explicit_item: str | None
     registry = er.async_get(hass)
     entry = registry.async_get(entity_id)
     if entry is None or entry.domain != "sensor":
-        msg = "item is required when targeting a calendar entity"
+        # Single-chore lookup is only inferable from a chore sensor's unique_id;
+        # any other domain (calendar, todo, missing entity) must pass `item`.
+        domain = entry.domain if entry is not None else "unknown"
+        msg = f"item is required when targeting a {domain} entity ({entity_id})"
         raise ServiceValidationError(msg)
 
     # unique_id format: {entry_id}_{uid}
@@ -433,7 +436,7 @@ async def _async_handle_complete(call: ServiceCall) -> None:
         store,
         coordinator,
         uid,
-        completed_at=call.data.get(ATTR_COMPLETED_AT) or dt_util.now(),
+        completed_at=call.data.get(ATTR_COMPLETED_AT),
         completed_by=call.data.get(ATTR_COMPLETED_BY),
         keep_skip=bool(call.data.get(ATTR_KEEP_SKIP, False)),
     )

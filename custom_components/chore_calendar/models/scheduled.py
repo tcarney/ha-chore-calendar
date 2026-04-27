@@ -23,7 +23,14 @@ class ScheduledChore(BaseChore):
     early_window: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_EARLY_WINDOW_MINS))
 
     def compute_status(self, now: datetime) -> ChoreStatus:
-        """Compute scheduled chore status using the blueprint state machine."""
+        """Compute scheduled chore status using the blueprint state machine.
+
+        Initial-state convention (compare with IntervalChore / OneshotChore —
+        each type handles "never completed" differently; see SPECS.md):
+        a never-completed scheduled chore reads as ``COMPLETED`` once past
+        the grace window, so a new chore created after its scheduled time
+        doesn't immediately nag — ``next_due`` advances to the next period.
+        """
         using_skip = self._skip_anchor_active(now)
         period_due = self.skipped_until if using_skip else self._find_current_period(now)
         assert period_due is not None  # using_skip implies skipped_until set

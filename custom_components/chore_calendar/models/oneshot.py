@@ -40,9 +40,12 @@ class OneshotChore(BaseChore):
     def compute_status(self, now: datetime) -> ChoreStatus:
         """Compute oneshot status using the operative anchor.
 
-        Unscheduled (``due_datetime is None``) reports PENDING — actionable
-        but not requiring action. Otherwise applies the same window math as
-        scheduled, using ``skipped_until`` as the operative anchor when active.
+        Initial-state convention (compare with ScheduledChore / IntervalChore —
+        each type handles "never completed" differently; see SPECS.md):
+        an unscheduled oneshot (``due_datetime is None``) reads as
+        ``PENDING`` — actionable but not requiring action. With a date set,
+        the same window math as ScheduledChore applies, using
+        ``skipped_until`` as the operative anchor when active.
         ``(last_completed=set, due_datetime=None)`` reliably means the user
         explicitly unscheduled the chore (the synthetic-due rule in
         ``apply_completion`` ensures terminal-completed always has a date).

@@ -20,8 +20,11 @@ class IntervalChore(BaseChore):
     def compute_status(self, now: datetime) -> ChoreStatus:
         """Compute interval chore status (3-state: completed/due/overdue).
 
-        Status uses only last_completed — a chore that has never been
-        completed is always DUE regardless of created_at.
+        Initial-state convention (compare with ScheduledChore / OneshotChore —
+        each type handles "never completed" differently; see SPECS.md):
+        a never-completed interval chore is always ``DUE`` since the cycle
+        anchors on ``last_completed`` and there's nothing else to fall back
+        on. ``created_at`` is intentionally not consulted.
         """
         if self._skip_anchor_active(now):
             assert self.skipped_until is not None
