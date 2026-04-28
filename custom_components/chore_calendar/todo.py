@@ -32,10 +32,10 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
+from .actions import async_complete_chore, async_uncomplete_chore
 from .const import DOMAIN, ChoreStatus
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore
-from .services import async_complete_chore, async_uncomplete_chore
 
 if TYPE_CHECKING:
     from datetime import datetime

@@ -17,10 +17,13 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ChoreCa
     items: list[dict[str, Any]] = []
     for chore in store.get_all_chores().values():
         chore_dict = chore.to_dict()
-        # Redact person entity IDs from assigned_to and last_completed_by.
+        # Redact person entity IDs from assigned_to and the *_completed_by fields
+        # (current and undo slot — same privacy class).
         chore_dict["assigned_to"] = [f"**REDACTED** ({i})" for i, _ in enumerate(chore_dict.get("assigned_to", []))]
         if chore_dict.get("last_completed_by"):
             chore_dict["last_completed_by"] = "**REDACTED**"
+        if chore_dict.get("previous_last_completed_by"):
+            chore_dict["previous_last_completed_by"] = "**REDACTED**"
         items.append(chore_dict)
 
     return {
