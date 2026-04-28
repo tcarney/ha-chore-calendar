@@ -254,6 +254,7 @@ async def test_skip_default_on_oneshot_clears_due_and_emits_null(hass, config_en
         {"entity_id": entity_id, "item": "Skippable"},
         blocking=True,
     )
+    await hass.async_block_till_done()
 
     chore = _find_oneshot(config_entry.runtime_data.store, "Skippable")
     assert chore is not None
