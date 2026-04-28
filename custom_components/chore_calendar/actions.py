@@ -173,3 +173,16 @@ def notify_calendar_event_listeners(hass: HomeAssistant, entry_id: str) -> None:
         "Pushed calendar event update to subscribers of %s",
         calendar_entity_id,
     )
+
+
+def resolve_tag_entity_id(hass: HomeAssistant, trigger_tag_id: str | None) -> str | None:
+    """Resolve a tag UUID back to its current ``tag.*`` entity_id, or None.
+
+    Tag entity_ids can be renamed by the user; the tag UUID is stable. We
+    store the UUID on the chore (``trigger_tag_id``) and resolve back to
+    the entity_id on demand for sensor attributes and service responses.
+    """
+    if not trigger_tag_id:
+        return None
+    registry = er.async_get(hass)
+    return registry.async_get_entity_id("tag", "tag", trigger_tag_id)

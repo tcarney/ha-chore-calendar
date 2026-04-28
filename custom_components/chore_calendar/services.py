@@ -18,6 +18,7 @@ from .actions import (
     async_complete_chore,
     async_uncomplete_chore,
     notify_calendar_event_listeners,
+    resolve_tag_entity_id,
 )
 from .const import (
     ATTR_ASSIGNED_TO,
@@ -232,17 +233,6 @@ def _resolve_tag_last_scanned(hass: HomeAssistant, trigger_entity: str | None) -
     if state is None or state.state in ("unknown", "unavailable", ""):
         return None
     return dt_util.parse_datetime(state.state)
-
-
-def _resolve_tag_entity_id(hass: HomeAssistant, trigger_tag_id: str | None) -> str | None:
-    """Resolve a tag UUID back to its entity_id for display.
-
-    Returns the entity_id (e.g. ``tag.morning_medicine``) or None.
-    """
-    if not trigger_tag_id:
-        return None
-    registry = er.async_get(hass)
-    return registry.async_get_entity_id("tag", "tag", trigger_tag_id)
 
 
 def _duration_to_mins(dur: dict[str, Any]) -> int:
@@ -579,7 +569,7 @@ async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
                 "last_completed": chore.last_completed.isoformat() if chore.last_completed else None,
                 "last_completed_by": chore.last_completed_by,
                 "assigned_to": list(chore.assigned_to),
-                "trigger_entity": _resolve_tag_entity_id(call.hass, chore.trigger_tag_id),
+                "trigger_entity": resolve_tag_entity_id(call.hass, chore.trigger_tag_id),
                 "schedule": chore.schedule_description(),
             }
         )

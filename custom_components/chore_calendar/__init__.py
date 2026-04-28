@@ -12,6 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ID, CONF_URL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, PLATFORMS
@@ -37,6 +38,24 @@ class ChoreCalendarData(NamedTuple):
 
 
 type ChoreCalendarConfigEntry = ConfigEntry[ChoreCalendarData]
+
+
+def chore_list_device_info(entry: ChoreCalendarConfigEntry) -> DeviceInfo:
+    """Build the shared DeviceInfo for the per-list device.
+
+    The chore list is modelled as a single ``DeviceEntryType.SERVICE`` device
+    that groups the calendar, todo, and per-chore sensor entities. Whichever
+    list-level entity is set up first seeds the device name; subsequent
+    entities attach by ``identifiers`` only. Used by the calendar and todo
+    platforms — the sensor platform builds a minimal identifiers-only
+    ``DeviceInfo`` since the device is already seeded by the time per-chore
+    sensors are added.
+    """
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=entry.title,
+        entry_type=DeviceEntryType.SERVICE,
+    )
 
 
 async def _async_register_card_resource(hass: HomeAssistant, resource_url: str) -> None:
