@@ -38,9 +38,7 @@ def async_setup_tag_listener(
         matching = [
             chore
             for chore in store.get_all_chores().values()
-            if chore.trigger_tag_id == tag_id
-            and chore.compute_status(now) != ChoreStatus.COMPLETED
-            and chore.is_in_completion_window(now)
+            if chore.trigger_tag_id == tag_id and chore.compute_status(now) != ChoreStatus.COMPLETED
         ]
 
         if not matching:

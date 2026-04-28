@@ -6,48 +6,26 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Self
 
-from custom_components.chore_calendar.const import ChoreStatus
-
 from .base import BaseChore
 
 
 @dataclass
 class IntervalChore(BaseChore):
-    """A chore that recurs at a fixed interval from last completion."""
+    """A chore that recurs at a fixed interval from last completion.
+
+    Cycle anchor is ``last_completed`` — the chore is unscheduled until
+    first completion lands, then the cycle reads
+    ``COMPLETED → PENDING → DUE → OVERDUE`` against ``last_completed + interval``.
+    """
 
     interval: timedelta = field(default_factory=lambda: timedelta(days=1))
 
-    def compute_status(self, now: datetime) -> ChoreStatus:
-        """Compute interval chore status using the standard window machine.
-
-        Initial-state convention (compare with ScheduledChore / OneshotChore —
-        each type handles "never completed" differently; see SPECS.md):
-        a never-completed interval chore reads as ``PENDING`` with no
-        operative due time — the cycle has no anchor until first completion
-        (or until a skip sets one explicitly). The user can complete at any
-        time; that first completion anchors the cycle.
-
-        Once first completion lands, the cycle anchors and the chore reads
-        ``COMPLETED → PENDING → DUE → OVERDUE`` against the next due time.
-        """
-        if self._skip_anchor_active(now):
-            assert self.skipped_until is not None
-            due_at = self.skipped_until
-        elif self.last_completed is None:
-            return ChoreStatus.PENDING
-        else:
-            due_at = self.last_completed + self.interval
-
-        pending_at = due_at - self.pending_period
-        overdue_at = due_at + self.grace_period
-
-        if now >= overdue_at:
-            return ChoreStatus.OVERDUE
-        if now >= due_at:
-            return ChoreStatus.DUE
-        if now >= pending_at:
-            return ChoreStatus.PENDING
-        return ChoreStatus.COMPLETED
+    def _anchor_due_at(self, now: datetime) -> datetime | None:
+        """Return ``last_completed + interval`` once the cycle has anchored."""
+        del now  # cycle is anchored solely on last_completed.
+        if self.last_completed is None:
+            return None
+        return self.last_completed + self.interval
 
     def compute_next_due(self, now: datetime) -> datetime | None:
         """Return the next due datetime, or None when unscheduled."""
@@ -56,34 +34,6 @@ class IntervalChore(BaseChore):
         if self.last_completed is None:
             return None
         return self.last_completed + self.interval
-
-    def compute_due_range(self, now: datetime) -> tuple[datetime, datetime] | None:
-        """Return (due_at, overdue_at) or None when unscheduled."""
-        if self._skip_anchor_active(now):
-            assert self.skipped_until is not None
-            return (self.skipped_until, self.skipped_until + self.grace_period)
-        if self.last_completed is None:
-            return None
-        due_at = self.last_completed + self.interval
-        return (due_at, due_at + self.grace_period)
-
-    def is_in_completion_window(self, timestamp: datetime) -> bool:
-        """Return True iff *timestamp* is at or after the current period's pending window opens.
-
-        Never-completed interval chores have no anchor to gate against —
-        allow completion at any time so the first scan / manual completion
-        can establish the cycle. After first completion (or while a skip
-        anchor is active), gate on ``pending_at`` to match scheduled / oneshot.
-        """
-        if self._skip_anchor_active(timestamp):
-            assert self.skipped_until is not None
-            due_at = self.skipped_until
-        elif self.last_completed is None:
-            return True
-        else:
-            due_at = self.last_completed + self.interval
-        pending_at = due_at - self.pending_period
-        return timestamp >= pending_at
 
     def apply_default_skip(self, now: datetime) -> datetime | None:
         """Skip by one full interval from *now*."""

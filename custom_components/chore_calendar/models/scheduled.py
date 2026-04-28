@@ -6,8 +6,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from typing import Any, Self
 
-from custom_components.chore_calendar.const import ChoreStatus
-
 from .base import BaseChore
 
 # Day name abbreviations used in active_days (Monday = 0).
@@ -21,36 +19,16 @@ class ScheduledChore(BaseChore):
     time: time = field(default_factory=lambda: time(8, 0))
     active_days: list[str] = field(default_factory=list)
 
-    def compute_status(self, now: datetime) -> ChoreStatus:
-        """Compute scheduled chore status using the blueprint state machine.
+    def _anchor_due_at(self, now: datetime) -> datetime:
+        """Return the current scheduled period's due time.
 
-        Initial-state convention (compare with IntervalChore / OneshotChore —
-        each type handles "never completed" differently; see SPECS.md):
-        a never-completed scheduled chore pins to the first active-day
-        period whose due time falls at or after ``created_at``. The chore
-        starts in ``PENDING`` toward that first period, advances through
-        ``DUE → OVERDUE``, and stays ``OVERDUE`` until first completion —
-        i.e. it does not silently roll forward past a missed initial cycle.
+        For a never-completed chore this pins to the first active-day
+        ``period_due`` at or after ``created_at`` (so the cycle does not
+        silently roll forward past a missed initial period). For a
+        completed chore, walks back from the candidate period to the
+        earliest uncompleted one.
         """
-        using_skip = self._skip_anchor_active(now)
-        period_due = self.skipped_until if using_skip else self._find_current_period(now)
-        assert period_due is not None  # using_skip implies skipped_until set
-        pending_at = period_due - self.pending_period
-        overdue_at = period_due + self.grace_period
-
-        # Skip anchor may place now well before pending_at — the normal path
-        # never hits this because _find_current_period guarantees now ≥ pending_at.
-        if using_skip and now < pending_at:
-            return ChoreStatus.COMPLETED
-
-        if self.last_completed and self.last_completed >= pending_at:
-            return ChoreStatus.COMPLETED
-
-        if now >= overdue_at:
-            return ChoreStatus.OVERDUE
-        if now >= period_due:
-            return ChoreStatus.DUE
-        return ChoreStatus.PENDING
+        return self._find_current_period(now)
 
     def compute_next_due(self, now: datetime) -> datetime | None:
         """Return the due time for the current period.
@@ -77,20 +55,6 @@ class ScheduledChore(BaseChore):
             return period_due
         # Current period is past due but not yet overdue; show next active day.
         return self._find_next_active_day(period_due)
-
-    def compute_due_range(self, now: datetime) -> tuple[datetime, datetime] | None:
-        """Return (period_due, overdue_at) for the current scheduled period."""
-        if self._skip_anchor_active(now):
-            assert self.skipped_until is not None
-            return (self.skipped_until, self.skipped_until + self.grace_period)
-        period_due = self._find_current_period(now)
-        return (period_due, period_due + self.grace_period)
-
-    def is_in_completion_window(self, timestamp: datetime) -> bool:
-        """Check if *timestamp* falls after the current period's pending window opens."""
-        period_due = self._find_current_period(timestamp)
-        pending_at = period_due - self.pending_period
-        return timestamp >= pending_at
 
     def apply_default_skip(self, now: datetime) -> datetime | None:
         """Skip to the next active day's period-due strictly after *now*.

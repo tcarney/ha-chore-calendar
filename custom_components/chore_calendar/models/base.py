@@ -45,20 +45,118 @@ class BaseChore(abc.ABC):
     grace_period: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_GRACE_PERIOD_MINS))
 
     @abc.abstractmethod
+    def _anchor_due_at(self, now: datetime) -> datetime | None:
+        """Return the type-specific due anchor (without skip handling).
+
+        Returns None when the chore is unscheduled — interval with no prior
+        completion, oneshot with no ``due_datetime``. Skip handling is
+        layered on by ``_operative_due_at``, which wraps this method.
+
+        Initial-state convention (compare across types — see SPECS.md):
+
+        - ``ScheduledChore``: pins to the first active-day ``period_due``
+          at or after ``created_at`` for never-completed chores; walks
+          back from the candidate period for completed chores. Always
+          non-None.
+        - ``IntervalChore``: ``last_completed + interval`` once first
+          completion lands; None until then.
+        - ``OneshotChore``: returns ``due_datetime`` directly, which may
+          be None for unscheduled chores.
+        """
+
+    def _operative_due_at(self, now: datetime) -> datetime | None:
+        """Return the operative due time, honoring an active skip anchor.
+
+        ``skipped_until`` overrides the type-specific anchor while the skip
+        window is active (until ``skipped_until + grace_period``). Once the
+        window elapses, falls through to the normal anchor.
+        """
+        if self._skip_anchor_active(now):
+            return self.skipped_until
+        return self._anchor_due_at(now)
+
+    def _is_terminal_completed(self, now: datetime) -> bool:
+        """Return True when the current occurrence is terminal-completed.
+
+        Default False — recurring types always have a next cycle, so even
+        when the current period is satisfied there's a next due range to
+        report. ``OneshotChore`` overrides this to suppress the due range
+        once its single occurrence has been completed (until reschedule).
+        """
+        del now  # unused in the default; subclasses use it.
+        return False
+
     def compute_status(self, now: datetime) -> ChoreStatus:
-        """Compute the current chore status based on time."""
+        """Compute the current chore status from the operative anchor.
+
+        Unified state machine across types. The operative anchor (set by
+        ``_operative_due_at``) determines ``due_at``; from there the same
+        window math applies: ``pending_at = due_at - pending_period`` and
+        ``overdue_at = due_at + grace_period``.
+
+        Initial-state convention: a chore with no operative anchor — interval
+        without a prior completion, oneshot without a ``due_datetime`` —
+        reports PENDING (unscheduled but actionable). When ``now`` falls
+        before ``pending_at`` and no completion has landed in the current
+        cycle, the fallthrough rule reads:
+
+        - ``last_completed`` is set → COMPLETED (the previous cycle was
+          satisfied; the chore is dormant until ``pending_at``).
+        - ``last_completed`` is None → PENDING (the chore is awaiting its
+          first action — keep it visible in the upcoming list).
+
+        See ``_anchor_due_at`` for the per-type rules that produce the
+        anchor in the first place.
+        """
+        due_at = self._operative_due_at(now)
+        if due_at is None:
+            return ChoreStatus.PENDING
+
+        pending_at = due_at - self.pending_period
+        overdue_at = due_at + self.grace_period
+
+        # Skip anchor may place ``now`` well before its pending window —
+        # treat the gap before pending_at as COMPLETED (the chore is
+        # explicitly deferred).
+        if self._skip_anchor_active(now) and now < pending_at:
+            return ChoreStatus.COMPLETED
+
+        # Completion landing within the current cycle's pending window
+        # marks the cycle satisfied.
+        if self.last_completed is not None and self.last_completed >= pending_at:
+            return ChoreStatus.COMPLETED
+
+        if now >= overdue_at:
+            return ChoreStatus.OVERDUE
+        if now >= due_at:
+            return ChoreStatus.DUE
+        if now >= pending_at:
+            return ChoreStatus.PENDING
+
+        # Fallthrough — ``now`` is before ``pending_at``. A previous
+        # completion implies the cycle is satisfied (dormant); no completion
+        # implies the chore is awaiting first action.
+        if self.last_completed is not None:
+            return ChoreStatus.COMPLETED
+        return ChoreStatus.PENDING
+
+    def compute_due_range(self, now: datetime) -> tuple[datetime, datetime] | None:
+        """Return (due_at, overdue_at) for the current cycle, or None."""
+        if self._is_terminal_completed(now):
+            return None
+        due_at = self._operative_due_at(now)
+        if due_at is None:
+            return None
+        return (due_at, due_at + self.grace_period)
 
     @abc.abstractmethod
     def compute_next_due(self, now: datetime) -> datetime | None:
-        """Compute the next due datetime, or None if not applicable."""
+        """Compute the next due datetime, or None if not applicable.
 
-    @abc.abstractmethod
-    def compute_due_range(self, now: datetime) -> tuple[datetime, datetime] | None:
-        """Return (due_at, overdue_at) for the current period, or None."""
-
-    @abc.abstractmethod
-    def is_in_completion_window(self, timestamp: datetime) -> bool:
-        """Return True if a completion at *timestamp* is valid for the current period."""
+        Per-type because the cadence-advancement rules genuinely differ:
+        scheduled walks active days, interval adds ``interval`` to
+        ``last_completed``, oneshot has no advancement (terminal).
+        """
 
     @abc.abstractmethod
     def apply_default_skip(self, now: datetime) -> datetime | None:

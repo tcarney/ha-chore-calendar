@@ -231,22 +231,6 @@ class TestScheduledChoreDueRange:
         assert overdue_at == datetime(2026, 3, 30, 9, 0, tzinfo=TZ)
 
 
-class TestScheduledChoreCompletionWindow:
-    """Test ScheduledChore.is_in_completion_window()."""
-
-    def test_in_window(self):
-        """Timestamp within the completion window returns True."""
-        chore = _make_scheduled()
-        ts = datetime(2026, 3, 30, 7, 0, tzinfo=TZ)
-        assert chore.is_in_completion_window(ts) is True
-
-    def test_overdue_still_completable(self):
-        """Timestamp after the grace period is still completable (no upper bound)."""
-        chore = _make_scheduled()
-        ts = datetime(2026, 3, 30, 10, 0, tzinfo=TZ)
-        assert chore.is_in_completion_window(ts) is True
-
-
 # ---------------------------------------------------------------------------
 # IntervalChore — state machine
 # ---------------------------------------------------------------------------
@@ -386,33 +370,6 @@ class TestIntervalChoreNextDue:
         chore = _make_interval(created_at=created)
         now = datetime(2026, 3, 28, 12, 0, tzinfo=TZ)
         assert chore.compute_next_due(now) is None
-
-    def test_never_completed_always_in_window(self):
-        """Never-completed interval chores allow completion at any timestamp."""
-        chore = _make_interval()
-        assert chore.is_in_completion_window(datetime(2026, 1, 1, tzinfo=TZ)) is True
-
-    def test_in_window_after_pending_at(self):
-        """After first completion, completion is allowed once pending_at is reached."""
-        chore = _make_interval(
-            interval_mins=4320,
-            pending_period_mins=180,
-            last_completed=datetime(2026, 3, 27, 12, 0, tzinfo=TZ),
-        )
-        # pending_at = Mar 30 09:00; sample 1h into the pending window.
-        ts = datetime(2026, 3, 30, 10, 0, tzinfo=TZ)
-        assert chore.is_in_completion_window(ts) is True
-
-    def test_outside_pending_window_blocks_completion(self):
-        """Before pending_at, an interval chore with prior completion is not yet completable."""
-        chore = _make_interval(
-            interval_mins=4320,
-            pending_period_mins=180,
-            last_completed=datetime(2026, 3, 27, 12, 0, tzinfo=TZ),
-        )
-        # 6 hours before pending_at (Mar 30 09:00) — well before the window opens.
-        ts = datetime(2026, 3, 30, 3, 0, tzinfo=TZ)
-        assert chore.is_in_completion_window(ts) is False
 
 
 class TestIntervalChoreDueRange:

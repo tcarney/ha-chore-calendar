@@ -46,10 +46,15 @@ class TestComputeStatus:
         assert chore.compute_status(now) == ChoreStatus.PENDING
 
     def test_pending_before_pending_window(self):
-        """Before pending_at — PENDING."""
+        """Before pending_at on a never-completed oneshot — PENDING.
+
+        With no ``last_completed``, the fallthrough rule surfaces the
+        chore as PENDING so it stays visible in upcoming-task views
+        before its pending window opens.
+        """
         due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
         chore = _make_oneshot(due_datetime=due)
-        # 4 hours before due, pending_period = 3h → still pending (anchor is unscheduled-PENDING semantics).
+        # 4 hours before due, pending_period = 3h.
         now = datetime(2026, 4, 15, 8, 0, tzinfo=TZ)
         assert chore.compute_status(now) == ChoreStatus.PENDING
 
@@ -92,6 +97,20 @@ class TestComputeStatus:
         for hours_after in (0, 1, 24, 24 * 365):
             now = completed + timedelta(hours=hours_after)
             assert chore.compute_status(now) == ChoreStatus.COMPLETED
+
+    def test_completed_well_before_pending_is_terminal(self):
+        """Completion well before pending_at also reads COMPLETED.
+
+        Without the conditional fallthrough, a chore completed days
+        before its pending window would land outside the
+        ``last_completed >= pending_at`` gate and stay PENDING. The fact
+        that ``last_completed`` is set is enough to mark the cycle satisfied.
+        """
+        due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
+        completed = datetime(2026, 3, 1, 9, 0, tzinfo=TZ)  # 6 weeks before due
+        chore = _make_oneshot(due_datetime=due, last_completed=completed)
+        assert chore.compute_status(completed + timedelta(hours=1)) == ChoreStatus.COMPLETED
+        assert chore.compute_status(due - timedelta(days=1)) == ChoreStatus.COMPLETED
 
     def test_unscheduled_with_prior_completion_is_pending(self):
         """State-space discriminator: (last_completed=set, due_datetime=None) → PENDING.
@@ -188,26 +207,6 @@ class TestComputeDueRange:
         assert chore.compute_due_range(completed + timedelta(hours=1)) is None
 
 
-class TestIsInCompletionWindow:
-    """is_in_completion_window — only used by tag-scan auto-completion."""
-
-    def test_unscheduled_returns_false(self):
-        chore = _make_oneshot()
-        assert chore.is_in_completion_window(datetime(2026, 4, 15, 10, 0, tzinfo=TZ)) is False
-
-    def test_inside_pending_window(self):
-        due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
-        chore = _make_oneshot(due_datetime=due)
-        # 1h before due, inside 3h window.
-        assert chore.is_in_completion_window(due - timedelta(hours=1)) is True
-
-    def test_before_pending_window(self):
-        due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
-        chore = _make_oneshot(due_datetime=due)
-        # 4h before due, before window opens.
-        assert chore.is_in_completion_window(due - timedelta(hours=4)) is False
-
-
 # ---------------------------------------------------------------------------
 # Reschedule via update_item (mutating due_datetime directly)
 # ---------------------------------------------------------------------------
@@ -229,6 +228,27 @@ class TestReschedule:
         # last_completed (Apr 15) is well before new pending_at (Jun 15 - 3h).
         assert chore.compute_status(new_due - timedelta(hours=1)) == ChoreStatus.PENDING
         assert chore.compute_status(new_due) == ChoreStatus.DUE
+
+    def test_reschedule_to_future_stays_completed_until_pending_window(self):
+        """A rescheduled oneshot reads COMPLETED until new pending_at — the previous cycle is satisfied.
+
+        Mirrors interval's between-cycles behavior: a completion on record
+        means the chore is dormant rather than upcoming-pending while the
+        gap to the next pending window is still wide.
+        """
+        original_due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
+        completed = datetime(2026, 4, 15, 11, 30, tzinfo=TZ)
+        chore = _make_oneshot(due_datetime=original_due, last_completed=completed)
+
+        # Reschedule to 2 months out.
+        new_due = datetime(2026, 6, 15, 12, 0, tzinfo=TZ)
+        chore.due_datetime = new_due
+        # new pending_at = Jun 15 09:00. Far before that, the chore stays
+        # COMPLETED — the previous cycle remains satisfied.
+        assert chore.compute_status(datetime(2026, 4, 16, 10, 0, tzinfo=TZ)) == ChoreStatus.COMPLETED
+        assert chore.compute_status(datetime(2026, 6, 14, 10, 0, tzinfo=TZ)) == ChoreStatus.COMPLETED
+        # Crossing pending_at flips to PENDING.
+        assert chore.compute_status(datetime(2026, 6, 15, 10, 0, tzinfo=TZ)) == ChoreStatus.PENDING
 
     def test_reschedule_too_close_keeps_completed(self):
         """A reschedule where last_completed >= new_pending_at keeps COMPLETED.

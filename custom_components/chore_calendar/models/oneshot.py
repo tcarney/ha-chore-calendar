@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Self
 
-from custom_components.chore_calendar.const import ChoreStatus
 from homeassistant.util import dt as dt_util
 
 from .base import BaseChore
@@ -36,42 +35,33 @@ class OneshotChore(BaseChore):
     # Undo slot for the synthetic-due_datetime rule applied at completion time.
     previous_due_datetime: datetime | None = None
 
-    def compute_status(self, now: datetime) -> ChoreStatus:
-        """Compute oneshot status using the operative anchor.
+    def _anchor_due_at(self, now: datetime) -> datetime | None:
+        """Return ``due_datetime`` directly — may be None for unscheduled chores.
 
-        Initial-state convention (compare with ScheduledChore / IntervalChore —
-        each type handles "never completed" differently; see SPECS.md):
-        an unscheduled oneshot (``due_datetime is None``) reads as
-        ``PENDING`` — actionable but not requiring action. With a date set,
-        the same window math as ScheduledChore applies, using
-        ``skipped_until`` as the operative anchor when active.
         ``(last_completed=set, due_datetime=None)`` reliably means the user
         explicitly unscheduled the chore (the synthetic-due rule in
         ``apply_completion`` ensures terminal-completed always has a date).
         """
+        del now  # oneshot's anchor is fixed; no time-relative resolution needed.
+        return self.due_datetime
+
+    def _is_terminal_completed(self, now: datetime) -> bool:
+        """Return True when the current occurrence is completed in its window.
+
+        Suppresses ``compute_due_range`` so the calendar entity stops
+        rendering a "next due" event for the satisfied occurrence. While a
+        skip anchor is active the chore has a fresh anchor (``skipped_until``)
+        and is not terminal — only the natural ``due_datetime`` window
+        triggers the terminal state.
+        """
         if self.due_datetime is None:
-            return ChoreStatus.PENDING
-
-        using_skip = self._skip_anchor_active(now)
-        operative_due = self.skipped_until if using_skip else self.due_datetime
-        assert operative_due is not None  # using_skip implies skipped_until set
-
-        pending_at = operative_due - self.pending_period
-        overdue_at = operative_due + self.grace_period
-
-        # Skip anchor may place now well before pending_at — pre-skip window
-        # reads as completed (matches scheduled behavior).
-        if using_skip and now < pending_at:
-            return ChoreStatus.COMPLETED
-
-        if self.last_completed is not None and self.last_completed >= pending_at:
-            return ChoreStatus.COMPLETED
-
-        if now >= overdue_at:
-            return ChoreStatus.OVERDUE
-        if now >= operative_due:
-            return ChoreStatus.DUE
-        return ChoreStatus.PENDING
+            return False
+        if self._skip_anchor_active(now):
+            return False
+        if self.last_completed is None:
+            return False
+        pending_at = self.due_datetime - self.pending_period
+        return self.last_completed >= pending_at
 
     def compute_next_due(self, now: datetime) -> datetime | None:
         """Return the operative due datetime, or None when unscheduled or terminal."""
@@ -83,29 +73,6 @@ class OneshotChore(BaseChore):
         if self.last_completed is not None and self.last_completed >= pending_at:
             return None
         return self.due_datetime
-
-    def compute_due_range(self, now: datetime) -> tuple[datetime, datetime] | None:
-        """Return (due, overdue_at) against the operative anchor, or None when terminal/unscheduled."""
-        if self.due_datetime is None:
-            return None
-        if self._skip_anchor_active(now):
-            assert self.skipped_until is not None
-            return (self.skipped_until, self.skipped_until + self.grace_period)
-        pending_at = self.due_datetime - self.pending_period
-        if self.last_completed is not None and self.last_completed >= pending_at:
-            return None
-        return (self.due_datetime, self.due_datetime + self.grace_period)
-
-    def is_in_completion_window(self, timestamp: datetime) -> bool:
-        """Return True iff a due_datetime is set and timestamp ≥ pending_at.
-
-        Affects only tag-scan auto-completion ([triggers.py](triggers.py)).
-        Manual completion via ``complete_item`` / todo entity is not gated.
-        """
-        if self.due_datetime is None:
-            return False
-        pending_at = self.due_datetime - self.pending_period
-        return timestamp >= pending_at
 
     def apply_completion(
         self,
