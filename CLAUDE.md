@@ -65,7 +65,7 @@ See `SPECS.md` for full architecture details (data flow, state machines, storage
 - **Domain**: `chore_calendar`, **Class prefix**: `ChoreCalendar`
 - **Entities** (per config entry / list): `calendar.daily_chores` (one per list), `todo.daily_chores` (one per list), `sensor.daily_chores_<chore_name>` (one per chore). Sensor unique_id: `{entry_id}_{uid}` where uid is a standard UUID. Calendar/todo unique_id: `{entry_id}` / `{entry_id}_todo`.
 - **Services over entities** for all mutations. Single-chore services accept either a sensor entity_id (chore inferred) or calendar entity_id + explicit `item` (name or UID). List-level services require the calendar entity.
-- Flat modules (no sub-packages). Services registered in `async_setup()`, not `async_setup_entry()`. Card source in `card/`, built JS copied to `custom_components/chore_calendar/www/`.
+- Flat modules where practical; the only sub-package is `models/` (one file per chore type). Services registered in `async_setup()`, not `async_setup_entry()`. Card source in `card/`, built JS copied to `custom_components/chore_calendar/www/`.
 
 ### Key HA Patterns
 
