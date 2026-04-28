@@ -10,6 +10,7 @@ import pytest
 from custom_components.chore_calendar.const import ChoreType
 from custom_components.chore_calendar.coordinator import ChoreCalendarCoordinator
 from custom_components.chore_calendar.models import IntervalChore, ScheduledChore
+from custom_components.chore_calendar.services import async_uncomplete_chore
 from custom_components.chore_calendar.store import ChoreStore
 from custom_components.chore_calendar.triggers import EVENT_TAG_SCANNED, async_setup_tag_listener
 
@@ -223,6 +224,86 @@ async def test_tag_scan_empty_tag_id_ignored(hass):
     await hass.async_block_till_done()
 
     assert store.get_chore("test").last_completed is None
+
+    unsub()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_tag_scan_populates_undo_slot(hass):
+    """Tag-scan completion routes through apply_completion so the undo slot is populated.
+
+    Regression test: previously the tag listener bypassed apply_completion by
+    serializing/deserializing through to_dict/from_dict, which preserved the
+    pre-existing previous_last_completed instead of capturing the just-replaced
+    last_completed. A subsequent uncomplete_item then wiped the prior completion.
+    """
+    store, coordinator = await _setup(hass)
+
+    prior = datetime(2026, 3, 1, 8, 0, tzinfo=TZ)
+    chore = IntervalChore(
+        uid="med",
+        chore_name="Medicine",
+        chore_type=ChoreType.INTERVAL,
+        interval=timedelta(days=1),
+        trigger_tag_id=TAG_UUID,
+        last_completed=prior,
+        last_completed_by="person.alice",
+    )
+    await store.async_create_chore(chore)
+    await coordinator.async_refresh()
+
+    unsub = async_setup_tag_listener(hass, store, coordinator)
+
+    frozen = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
+    with patch("homeassistant.util.dt.now", return_value=frozen):
+        hass.bus.async_fire(EVENT_TAG_SCANNED, {"tag_id": TAG_UUID})
+        await hass.async_block_till_done()
+
+    updated = store.get_chore("med")
+    assert updated is not None
+    assert updated.last_completed == frozen
+    # The tag scan must capture the prior completion into the undo slot.
+    assert updated.previous_last_completed == prior
+    assert updated.previous_last_completed_by == "person.alice"
+
+    unsub()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_tag_scan_completion_can_be_uncompleted(hass):
+    """uncomplete_item after a tag-scan completion restores the prior state.
+
+    Regression test for the same bypass: without the undo slot, revert would
+    set last_completed back to whatever previous_last_completed held before
+    the scan (often None), losing both completions.
+    """
+    store, coordinator = await _setup(hass)
+
+    prior = datetime(2026, 3, 1, 8, 0, tzinfo=TZ)
+    chore = IntervalChore(
+        uid="med",
+        chore_name="Medicine",
+        chore_type=ChoreType.INTERVAL,
+        interval=timedelta(days=1),
+        trigger_tag_id=TAG_UUID,
+        last_completed=prior,
+        last_completed_by="person.alice",
+    )
+    await store.async_create_chore(chore)
+    await coordinator.async_refresh()
+
+    unsub = async_setup_tag_listener(hass, store, coordinator)
+
+    frozen = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
+    with patch("homeassistant.util.dt.now", return_value=frozen):
+        hass.bus.async_fire(EVENT_TAG_SCANNED, {"tag_id": TAG_UUID})
+        await hass.async_block_till_done()
+
+    await async_uncomplete_chore(store, coordinator, "med")
+    reverted = store.get_chore("med")
+    assert reverted is not None
+    assert reverted.last_completed == prior
+    assert reverted.last_completed_by == "person.alice"
 
     unsub()
 

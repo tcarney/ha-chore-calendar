@@ -8,8 +8,8 @@ items and recently completed chores as ``completed`` items. Including
 both that card and the chore card support a ``due_date_period`` filter
 for users who want a focused window.
 
-Updates to an item's status are routed through the same helpers that back the
-``complete_item`` / ``uncomplete_item`` services:
+Only ``UPDATE_TODO_ITEM`` is advertised — status toggles route through the
+same helpers that back the ``complete_item`` / ``uncomplete_item`` services:
 
 * ``needs_action`` → ``completed``: record a completion for the current period.
 * ``completed`` → ``needs_action``: revert the most recent completion.
@@ -113,6 +113,7 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
             return None
 
         now = dt_util.now()
+        cleared_at = self.coordinator.store.completed_cleared_at
         entries: list[tuple[int, datetime | None, TodoItem]] = []
         for chore in self.coordinator.data.values():
             status = chore.compute_status(now)
@@ -121,6 +122,10 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
             # the TodoItem field population rules below.
             next_due = chore.compute_next_due(now)
             if todo_status == TodoItemStatus.COMPLETED:
+                # Hide completed items whose last_completed precedes the
+                # per-list cleared_at cutoff.
+                if cleared_at is not None and chore.last_completed is not None and chore.last_completed < cleared_at:
+                    continue
                 item = TodoItem(
                     summary=chore.chore_name,
                     uid=chore.uid,

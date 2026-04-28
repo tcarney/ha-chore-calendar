@@ -235,6 +235,18 @@ export function getTimeText(
   }
 }
 
+/** Format an ``HH:MM:SS`` time-of-day string using the browser's locale. */
+function formatLocalTime(timeStr: string): string {
+  const parts = timeStr.split(":").map(Number);
+  if (parts.length < 2 || parts.some(Number.isNaN)) return timeStr;
+  const dt = new Date();
+  dt.setHours(parts[0], parts[1], 0, 0);
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(dt);
+}
+
 /** Format a schedule object (dict) into a human-readable string. */
 export function formatSchedule(
   schedule: string | Record<string, unknown>,
@@ -243,7 +255,7 @@ export function formatSchedule(
 
   // Scheduled chore: { time, active_days, early_window_mins, grace_period_mins }
   if ("time" in schedule) {
-    const time = String(schedule.time ?? "");
+    const time = formatLocalTime(String(schedule.time ?? ""));
     const days = schedule.active_days as string[] | undefined;
     if (days && days.length > 0 && days.length < 7) {
       return `${days.join(", ")} at ${time}`;
@@ -263,6 +275,20 @@ export function formatSchedule(
       return `Every ${hrs} hour${hrs !== 1 ? "s" : ""}`;
     }
     return `Every ${mins} minute${mins !== 1 ? "s" : ""}`;
+  }
+
+  // Oneshot chore: { due_datetime, early_window_mins, grace_period_mins }
+  if ("due_datetime" in schedule) {
+    const due = schedule.due_datetime as string | null | undefined;
+    if (!due) return "Unscheduled";
+    const target = new Date(due);
+    return `${new Intl.DateTimeFormat(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(target)}`;
   }
 
   return JSON.stringify(schedule);

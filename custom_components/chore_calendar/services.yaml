@@ -57,6 +57,20 @@ create_item:
     interval:
       selector:
         duration:
+    oneshot:
+      selector:
+        object:
+          translation_key: oneshot
+          fields:
+            due_datetime:
+              selector:
+                datetime:
+            early_window:
+              selector:
+                duration:
+            persist:
+              selector:
+                boolean:
     grace_period:
       selector:
         duration:
@@ -122,6 +136,20 @@ update_item:
     interval:
       selector:
         duration:
+    oneshot:
+      selector:
+        object:
+          translation_key: oneshot
+          fields:
+            due_datetime:
+              selector:
+                datetime:
+            early_window:
+              selector:
+                duration:
+            persist:
+              selector:
+                boolean:
     grace_period:
       selector:
         duration:
@@ -199,6 +227,22 @@ uncomplete_item:
     item:
       selector:
         text:
+
+hide_completed_items:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+              integration: chore_calendar
+    before:
+      selector:
+        datetime:
+    keep_for:
+      selector:
+        duration:
 
 get_items:
   fields:

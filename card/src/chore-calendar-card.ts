@@ -120,7 +120,10 @@ export class ChoreCalendarCard extends LitElement {
 
       const promises = this._entityConfigs.map(async (cfg) => {
         const response = await this.hass.callWS<{
-          response: { items: ChoreItem[] };
+          response: {
+            items: ChoreItem[];
+            completed_cleared_at: string | null;
+          };
         }>({
           type: "call_service",
           domain: DOMAIN,
@@ -130,9 +133,24 @@ export class ChoreCalendarCard extends LitElement {
         });
 
         const items = response.response?.items ?? [];
+        // Per-list cutoff for hiding completed items (set by
+        // chore_calendar.hide_completed_items / todo.remove_completed_items).
+        // Items whose last_completed precedes this cutoff are hidden — composes
+        // as AND with the optional completed_period filter applied below.
+        const clearedAtMs = response.response?.completed_cleared_at
+          ? new Date(response.response.completed_cleared_at).getTime()
+          : null;
         const exclude = cfg.exclude ?? [];
         for (const item of items) {
           if (exclude.includes(item.status)) continue;
+          if (
+            clearedAtMs !== null &&
+            item.status === "completed" &&
+            item.last_completed &&
+            new Date(item.last_completed).getTime() < clearedAtMs
+          ) {
+            continue;
+          }
           allItems.push({
             ...item,
             source_entity: cfg.entity,

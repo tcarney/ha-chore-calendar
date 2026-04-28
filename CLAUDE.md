@@ -61,9 +61,9 @@ See `SPECS.md` for full architecture details (data flow, state machines, storage
 ### Key Conventions
 
 - **Public API**: "item" (`create_item`, `complete_item`) — matches HA `todo` pattern
-- **Internal models**: "chore" (`BaseChore`, `ScheduledChore`) — domain-specific
+- **Internal models**: "chore" (`BaseChore`, `ScheduledChore`, `IntervalChore`, `OneshotChore`) — domain-specific
 - **Domain**: `chore_calendar`, **Class prefix**: `ChoreCalendar`
-- **Entities**: `calendar.daily_chores` (one per list), `sensor.daily_chores_morning_medicine` (one per chore). Unique ID: `{entry_id}_{uid}` where uid is a standard UUID.
+- **Entities** (per config entry / list): `calendar.daily_chores` (one per list), `todo.daily_chores` (one per list), `sensor.daily_chores_<chore_name>` (one per chore). Sensor unique_id: `{entry_id}_{uid}` where uid is a standard UUID. Calendar/todo unique_id: `{entry_id}` / `{entry_id}_todo`.
 - **Services over entities** for all mutations. Single-chore services accept either a sensor entity_id (chore inferred) or calendar entity_id + explicit `item` (name or UID). List-level services require the calendar entity.
 - Flat modules (no sub-packages). Services registered in `async_setup()`, not `async_setup_entry()`. Card source in `card/`, built JS copied to `custom_components/chore_calendar/www/`.
 
@@ -71,8 +71,7 @@ See `SPECS.md` for full architecture details (data flow, state machines, storage
 
 - **Services registration:** `async_setup()`, NOT `async_setup_entry()` (Quality Scale requirement)
 - **Config entry data access:** `entry.runtime_data` (typed `ChoreCalendarData`)
-- **Entity MRO:** `(PlatformEntity, ChoreCalendarEntity)` — order matters
-- **Unique ID:** `{entry_id}_{uid}` (chore sensors, uid is a standard UUID); base entity sets `_attr_unique_id`
+- **Entity MRO:** `(CoordinatorEntity[ChoreCalendarCoordinator], <PlatformEntity>)` — `CoordinatorEntity` first so coordinator updates drive state; concrete platform (`CalendarEntity`, `SensorEntity`, `TodoListEntity`) second.
 
 ## Workflow Rules
 

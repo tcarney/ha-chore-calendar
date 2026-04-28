@@ -2,7 +2,7 @@
 export interface ChoreItem {
   uid: string;
   chore_name: string;
-  chore_type: "scheduled" | "interval";
+  chore_type: "scheduled" | "interval" | "oneshot";
   status: ChoreStatus;
   next_due: string | null;
   last_completed: string | null;

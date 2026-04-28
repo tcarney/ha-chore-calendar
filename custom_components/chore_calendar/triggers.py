@@ -10,6 +10,7 @@ from homeassistant.util import dt as dt_util
 from .const import LOGGER, ChoreStatus
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore
+from .services import async_complete_chore
 from .store import ChoreStore
 
 # HA fires this event when an NFC tag is scanned.
@@ -60,12 +61,14 @@ async def _async_complete_chores(
     chores: list[BaseChore],
     now: datetime,
 ) -> None:
-    """Complete one or more chores and refresh the coordinator."""
-    for chore in chores:
-        updated = chore.to_dict()
-        updated["last_completed"] = now.isoformat()
-        updated_chore = BaseChore.from_dict(updated)
-        await store.async_update_chore(updated_chore)
-        LOGGER.info("Auto-completed chore %s (%s) via tag scan", chore.chore_name, chore.uid)
+    """Complete one or more chores via the shared completion helper.
 
-    await coordinator.async_refresh()
+    Routing through ``async_complete_chore`` keeps tag-scan completions
+    consistent with the ``complete_item`` service: the undo slot is populated
+    so a subsequent ``uncomplete_item`` can revert to the prior state, the
+    OneshotChore synthetic-due rule fires, and calendar event listeners are
+    notified so dashboards refresh promptly.
+    """
+    for chore in chores:
+        await async_complete_chore(store, coordinator, chore.uid, completed_at=now)
+        LOGGER.info("Auto-completed chore %s (%s) via tag scan", chore.chore_name, chore.uid)

@@ -12,7 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, ChoreStatus
+from .const import DOMAIN, LOGGER, ChoreStatus
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore
 
@@ -58,9 +58,19 @@ def _make_due_event(chore: BaseChore, now: datetime.datetime) -> CalendarEvent |
     return CalendarEvent(summary=chore.chore_name, start=next_due, end=next_due)
 
 
-def _make_completed_event(chore: BaseChore) -> CalendarEvent | None:
-    """Create a zero-duration event at last_completed."""
+def _make_completed_event(
+    chore: BaseChore,
+    cleared_at: datetime.datetime | None,
+) -> CalendarEvent | None:
+    """Create a zero-duration event at last_completed.
+
+    Returns None when the chore has no completion, or when its
+    ``last_completed`` precedes the per-list ``completed_cleared_at`` cutoff
+    (set by ``hide_completed_items`` / ``todo.remove_completed_items``).
+    """
     if chore.last_completed is None:
+        return None
+    if cleared_at is not None and chore.last_completed < cleared_at:
         return None
     return CalendarEvent(
         summary=f"✓ {chore.chore_name}",
@@ -138,10 +148,12 @@ class ChoreCalendarListEntity(CoordinatorEntity[ChoreCalendarCoordinator], Calen
         if self.coordinator.data is None:
             return []
         now = dt_util.now()
+        cleared_at = self.coordinator.store.completed_cleared_at
         events: list[CalendarEvent] = []
         for chore in self.coordinator.data.values():
-            # Completed event (zero-duration at last_completed).
-            completed_evt = _make_completed_event(chore)
+            # Completed event (zero-duration at last_completed) — hidden
+            # when last_completed precedes the per-list cleared_at cutoff.
+            completed_evt = _make_completed_event(chore, cleared_at)
             if completed_evt is not None and _overlaps(completed_evt, start_date, end_date):
                 events.append(completed_evt)
             # Next due event.
@@ -149,6 +161,14 @@ class ChoreCalendarListEntity(CoordinatorEntity[ChoreCalendarCoordinator], Calen
             if due_evt is not None and _overlaps(due_evt, start_date, end_date):
                 events.append(due_evt)
         events.sort(key=lambda e: e.start)
+        LOGGER.debug(
+            "%s.async_get_events(%s → %s): %d event(s) (cleared_at=%s)",
+            self.entity_id,
+            start_date.isoformat(),
+            end_date.isoformat(),
+            len(events),
+            cleared_at.isoformat() if cleared_at else None,
+        )
         return events
 
 

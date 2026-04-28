@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, cast
 from uuid import uuid4
 
@@ -18,12 +18,14 @@ from .const import (
     ATTR_ITEM,
     ATTR_TRIGGER_ENTITY,
     DOMAIN,
+    EVENT_ITEM_DELETED,
     EVENT_ITEM_SKIPPED,
     LOGGER,
     SERVICE_COMPLETE_ITEM,
     SERVICE_CREATE_ITEM,
     SERVICE_DELETE_ITEM,
     SERVICE_GET_ITEMS,
+    SERVICE_HIDE_COMPLETED_ITEMS,
     SERVICE_SKIP_ITEM,
     SERVICE_UNCOMPLETE_ITEM,
     SERVICE_UPDATE_ITEM,
@@ -31,14 +33,16 @@ from .const import (
     ChoreType,
 )
 from .coordinator import ChoreCalendarCoordinator
-from .models import BaseChore, IntervalChore, ScheduledChore
+from .models import BaseChore, IntervalChore, OneshotChore, ScheduledChore
 from .store import ChoreStore
 
 # Service-specific field keys (not shared with sensor attributes).
+ATTR_BEFORE = "before"
 ATTR_CHORE_NAME = "chore_name"
 ATTR_COMPLETED_AT = "completed_at"
 ATTR_COMPLETED_BY = "completed_by"
 ATTR_ENTITY_ID = "entity_id"
+ATTR_KEEP_FOR = "keep_for"
 ATTR_KEEP_SKIP = "keep_skip"
 ATTR_STATUS = "status"
 ATTR_UNTIL = "until"
@@ -46,6 +50,7 @@ ATTR_UNTIL = "until"
 # Service field keys for schedule configuration.
 ATTR_SCHEDULED = "scheduled"
 ATTR_INTERVAL = "interval"
+ATTR_ONESHOT = "oneshot"
 ATTR_GRACE_PERIOD = "grace_period"
 
 SERVICE_CREATE_SCHEMA = vol.Schema(
@@ -56,6 +61,7 @@ SERVICE_CREATE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_ASSIGNED_TO, default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
         vol.Optional(ATTR_SCHEDULED): dict,
         vol.Optional(ATTR_INTERVAL): dict,
+        vol.Optional(ATTR_ONESHOT): dict,
         vol.Optional(ATTR_GRACE_PERIOD): dict,
     }
 )
@@ -69,6 +75,7 @@ SERVICE_UPDATE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_ASSIGNED_TO): vol.All(cv.ensure_list, [cv.entity_id]),
         vol.Optional(ATTR_SCHEDULED): dict,
         vol.Optional(ATTR_INTERVAL): dict,
+        vol.Optional(ATTR_ONESHOT): dict,
         vol.Optional(ATTR_GRACE_PERIOD): dict,
     }
 )
@@ -109,6 +116,14 @@ SERVICE_GET_ITEMS_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
         vol.Optional(ATTR_STATUS): vol.In([s.value for s in ChoreStatus]),
+    }
+)
+
+SERVICE_HIDE_COMPLETED_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Optional(ATTR_BEFORE): cv.datetime,
+        vol.Optional(ATTR_KEEP_FOR): dict,
     }
 )
 
@@ -224,34 +239,59 @@ def _duration_to_mins(dur: dict[str, Any]) -> int:
 
 
 def _infer_chore_type(data: dict[str, Any]) -> ChoreType:
-    """Infer chore type from the presence of ``scheduled`` vs ``interval``.
+    """Infer chore type from the presence of ``scheduled`` / ``interval`` / ``oneshot``.
 
-    Raises ServiceValidationError if both or neither are provided.
+    Raises ServiceValidationError if more than one or none are provided.
     """
-    has_scheduled = ATTR_SCHEDULED in data
-    has_interval = ATTR_INTERVAL in data
-    if has_scheduled and has_interval:
-        msg = "Cannot specify both 'scheduled' and 'interval'"
+    type_keys = [ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT]
+    present = [k for k in type_keys if k in data]
+    if len(present) > 1:
+        msg = f"Cannot specify more than one of {type_keys!r}; got {present!r}"
         raise ServiceValidationError(msg)
-    if not has_scheduled and not has_interval:
-        msg = "Either 'scheduled' or 'interval' must be provided"
+    if not present:
+        msg = f"One of {type_keys!r} must be provided"
         raise ServiceValidationError(msg)
-    return ChoreType.SCHEDULED if has_scheduled else ChoreType.INTERVAL
+    return {
+        ATTR_SCHEDULED: ChoreType.SCHEDULED,
+        ATTR_INTERVAL: ChoreType.INTERVAL,
+        ATTR_ONESHOT: ChoreType.ONESHOT,
+    }[present[0]]
 
 
-def _build_schedule_dict(data: dict[str, Any], chore_type: ChoreType) -> dict[str, Any]:
-    """Build an internal schedule dict from service call data."""
-    if chore_type == ChoreType.SCHEDULED:
+def _apply_schedule_overlays(
+    data: dict[str, Any],
+    schedule: dict[str, Any],
+    chore_type: ChoreType,
+) -> dict[str, Any]:
+    """Overlay schedule fields from a service call onto an existing schedule dict.
+
+    Used by both ``create_item`` (with an empty starting schedule) and
+    ``update_item`` (overlaying partial fields onto the chore's stored schedule).
+    Only the keys present in *data* are written — absent keys leave *schedule*
+    untouched, preserving stored values during a partial update.
+    """
+    if chore_type == ChoreType.SCHEDULED and ATTR_SCHEDULED in data:
         obj = data[ATTR_SCHEDULED]
-        schedule: dict[str, Any] = {"time": obj["time"]}
+        if "time" in obj:
+            schedule["time"] = obj["time"]
         if "active_days" in obj:
             schedule["active_days"] = obj["active_days"]
         if "early_window" in obj:
             schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
-    else:
-        schedule = {"interval_mins": _duration_to_mins(data[ATTR_INTERVAL])}
+    elif chore_type == ChoreType.INTERVAL and ATTR_INTERVAL in data:
+        schedule["interval_mins"] = _duration_to_mins(data[ATTR_INTERVAL])
+    elif chore_type == ChoreType.ONESHOT and ATTR_ONESHOT in data:
+        obj = data[ATTR_ONESHOT]
+        if "due_datetime" in obj:
+            # None is meaningful (explicit unscheduled) — preserve verbatim.
+            due = obj["due_datetime"]
+            schedule["due_datetime"] = due.isoformat() if isinstance(due, datetime) else due
+        if "early_window" in obj:
+            schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
+        if "persist" in obj:
+            schedule["persist"] = bool(obj["persist"])
 
-    # grace_period is a top-level field shared by both types.
+    # grace_period is a top-level field shared by all types.
     if ATTR_GRACE_PERIOD in data:
         schedule["grace_period_mins"] = _duration_to_mins(data[ATTR_GRACE_PERIOD])
     return schedule
@@ -260,7 +300,7 @@ def _build_schedule_dict(data: dict[str, Any], chore_type: ChoreType) -> dict[st
 def _build_chore_from_data(data: dict[str, Any]) -> BaseChore:
     """Build a chore model from service call data."""
     chore_type = _infer_chore_type(data)
-    schedule = _build_schedule_dict(data, chore_type)
+    schedule = _apply_schedule_overlays(data, {}, chore_type)
     base_kwargs: dict[str, Any] = {
         "uid": data["uid"],
         "chore_name": data[ATTR_CHORE_NAME],
@@ -270,7 +310,9 @@ def _build_chore_from_data(data: dict[str, Any]) -> BaseChore:
 
     if chore_type == ChoreType.SCHEDULED:
         return ScheduledChore.from_schedule(base_kwargs, schedule)
-    return IntervalChore.from_schedule(base_kwargs, schedule)
+    if chore_type == ChoreType.INTERVAL:
+        return IntervalChore.from_schedule(base_kwargs, schedule)
+    return OneshotChore.from_schedule(base_kwargs, schedule)
 
 
 async def _async_handle_create(call: ServiceCall) -> None:
@@ -297,7 +339,8 @@ async def _async_handle_create(call: ServiceCall) -> None:
 
     await store.async_create_chore(chore)
     await coordinator.async_refresh()
-    LOGGER.debug("Created chore %s (%s)", chore.chore_name, uid)
+    _notify_calendar_event_listeners(call.hass, store.entry_id)
+    LOGGER.info("created %s (%s)", chore.chore_name, uid)
 
 
 async def _async_handle_update(call: ServiceCall) -> None:
@@ -319,28 +362,34 @@ async def _async_handle_update(call: ServiceCall) -> None:
     if ATTR_ASSIGNED_TO in call.data:
         updated["assigned_to"] = list(call.data[ATTR_ASSIGNED_TO])
 
-    # Overlay schedule fields if any were provided.
-    has_schedule_fields = any(k in call.data for k in (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_GRACE_PERIOD))
+    # Overlay schedule fields if any were provided. update_item is type-locked:
+    # the type-specific sub-dicts are valid only for matching chore types so a
+    # silent no-op (e.g. interval_mins added to a scheduled chore's schedule and
+    # then ignored by ScheduledChore.from_schedule) doesn't masquerade as a
+    # successful update.
+    type_to_attr = {
+        ChoreType.SCHEDULED: ATTR_SCHEDULED,
+        ChoreType.INTERVAL: ATTR_INTERVAL,
+        ChoreType.ONESHOT: ATTR_ONESHOT,
+    }
+    allowed_attr = type_to_attr[existing.chore_type]
+    for attr in (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT):
+        if attr != allowed_attr and attr in call.data:
+            msg = (
+                f"Cannot update chore '{existing.chore_name}' with '{attr}' — "
+                f"chore type is '{existing.chore_type}'; use '{allowed_attr}'."
+            )
+            raise ServiceValidationError(msg)
+
+    has_schedule_fields = any(k in call.data for k in (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT, ATTR_GRACE_PERIOD))
     if has_schedule_fields:
-        schedule = dict(updated["schedule"])
-        if ATTR_SCHEDULED in call.data:
-            obj = call.data[ATTR_SCHEDULED]
-            if "time" in obj:
-                schedule["time"] = obj["time"]
-            if "active_days" in obj:
-                schedule["active_days"] = obj["active_days"]
-            if "early_window" in obj:
-                schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
-        if ATTR_INTERVAL in call.data:
-            schedule["interval_mins"] = _duration_to_mins(call.data[ATTR_INTERVAL])
-        if ATTR_GRACE_PERIOD in call.data:
-            schedule["grace_period_mins"] = _duration_to_mins(call.data[ATTR_GRACE_PERIOD])
-        updated["schedule"] = schedule
+        updated["schedule"] = _apply_schedule_overlays(call.data, dict(updated["schedule"]), existing.chore_type)
 
     chore = BaseChore.from_dict(updated)
     await store.async_update_chore(chore)
     await coordinator.async_refresh()
-    LOGGER.debug("Updated chore %s (%s)", existing.chore_name, uid)
+    _notify_calendar_event_listeners(call.hass, store.entry_id)
+    LOGGER.info("updated %s (%s)", existing.chore_name, uid)
 
 
 async def _async_handle_delete(call: ServiceCall) -> None:
@@ -355,7 +404,18 @@ async def _async_handle_delete(call: ServiceCall) -> None:
 
     await store.async_delete_chore(uid)
     await coordinator.async_refresh()
-    LOGGER.debug("Deleted chore %s (%s)", existing.chore_name, uid)
+    _notify_calendar_event_listeners(call.hass, store.entry_id)
+
+    call.hass.bus.async_fire(
+        EVENT_ITEM_DELETED,
+        {
+            "uid": existing.uid,
+            "chore_name": existing.chore_name,
+            "chore_type": str(existing.chore_type),
+            "entity_id": call.data[ATTR_ENTITY_ID],
+        },
+    )
+    LOGGER.info("deleted %s (%s)", existing.chore_name, uid)
 
 
 async def async_complete_chore(
@@ -369,9 +429,9 @@ async def async_complete_chore(
 ) -> None:
     """Record a completion for *uid* and refresh the coordinator.
 
-    Shared by the ``complete_item`` service handler and the todo entity's
-    ``needs_action`` → ``completed`` transition. Raises ServiceValidationError
-    if the chore is missing.
+    Shared by the ``complete_item`` service handler, the todo entity's
+    ``needs_action`` → ``completed`` transition, and the tag-scan listener.
+    Raises ServiceValidationError if the chore is missing.
     """
     existing = store.get_chore(uid)
     if existing is None:
@@ -382,7 +442,8 @@ async def async_complete_chore(
     existing.apply_completion(timestamp, completed_by, clear_skip=not keep_skip)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
-    LOGGER.debug("Completed chore %s (%s) at %s", existing.chore_name, uid, timestamp.isoformat())
+    _notify_calendar_event_listeners(coordinator.hass, store.entry_id)
+    LOGGER.info("completed %s (%s) at %s", existing.chore_name, uid, timestamp.isoformat())
 
 
 async def async_uncomplete_chore(
@@ -409,7 +470,8 @@ async def async_uncomplete_chore(
     coordinator.mark_uncompleted(uid)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
-    LOGGER.debug("Uncompleted chore %s (%s)", existing.chore_name, uid)
+    _notify_calendar_event_listeners(coordinator.hass, store.entry_id)
+    LOGGER.info("uncompleted %s (%s)", existing.chore_name, uid)
 
 
 async def _async_handle_complete(call: ServiceCall) -> None:
@@ -437,8 +499,12 @@ async def _async_handle_uncomplete(call: ServiceCall) -> None:
 async def _async_handle_skip(call: ServiceCall) -> None:
     """Handle skip_item service call.
 
-    Defers a chore's next occurrence by setting ``skipped_until``. Without an
-    explicit ``until``, falls back to the chore's type-specific default.
+    Defers a chore's next occurrence. With explicit ``until``, sets
+    ``skipped_until`` directly. Without it, delegates to the chore's
+    ``apply_default_skip`` for type-specific default behavior — which may
+    set ``skipped_until`` (scheduled/interval) or clear another anchor.
+    The event payload's ``skipped_until`` mirrors the operative value, or
+    ``None`` when default-skip cleared the anchor entirely.
     """
     store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
 
@@ -448,26 +514,182 @@ async def _async_handle_skip(call: ServiceCall) -> None:
         msg = f"Chore '{uid}' not found"
         raise ServiceValidationError(msg)
 
-    skipped_until = call.data.get(ATTR_UNTIL) or existing.compute_skipped_until_default(dt_util.now())
+    # Skipping a terminal-completed oneshot has no meaningful semantics —
+    # there's no "next occurrence" to defer. Reject explicitly rather than
+    # silently mutating fields the chore won't react to.
+    if isinstance(existing, OneshotChore) and existing.compute_status(dt_util.now()) == ChoreStatus.COMPLETED:
+        msg = f"Cannot skip completed oneshot chore '{existing.chore_name}'"
+        raise ServiceValidationError(msg)
 
-    existing.skipped_until = skipped_until
+    explicit_until: datetime | None = call.data.get(ATTR_UNTIL)
+    if explicit_until is not None:
+        existing.skipped_until = explicit_until
+        event_skipped_until: datetime | None = explicit_until
+    else:
+        event_skipped_until = existing.apply_default_skip(dt_util.now())
+
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
+    _notify_calendar_event_listeners(call.hass, store.entry_id)
 
     call.hass.bus.async_fire(
         EVENT_ITEM_SKIPPED,
         {
             "uid": existing.uid,
             "chore_name": existing.chore_name,
-            "skipped_until": skipped_until.isoformat(),
+            "skipped_until": event_skipped_until.isoformat() if event_skipped_until else None,
             "entity_id": call.data[ATTR_ENTITY_ID],
         },
     )
-    LOGGER.debug(
-        "Skipped chore %s (%s) until %s",
+    LOGGER.info(
+        "skipped %s (%s) until %s",
         existing.chore_name,
         uid,
-        skipped_until.isoformat(),
+        event_skipped_until.isoformat() if event_skipped_until else "(cleared)",
+    )
+
+
+async def async_apply_completed_cleared_at(
+    hass: HomeAssistant,
+    store: ChoreStore,
+    coordinator: ChoreCalendarCoordinator,
+    entity_id: str,
+    cleared_at: datetime,
+) -> None:
+    """Set the per-list completed-items cutoff and sweep persist=false oneshots.
+
+    Used by both the ``hide_completed_items`` service handler and the todo
+    entity's ``async_remove_completed_items``. After updating the cutoff,
+    deletes any terminal-completed oneshot whose ``last_completed`` precedes
+    the new cutoff and whose ``persist`` flag is False — these chores are
+    "done with" by user intent. Each deletion fires
+    ``chore_calendar_item_deleted`` with the supplied *entity_id* in the
+    payload.
+    """
+    await store.async_set_completed_cleared_at(cleared_at)
+    LOGGER.debug(
+        "completed_cleared_at set to %s for %s",
+        cleared_at.isoformat(),
+        entity_id,
+    )
+
+    now = dt_util.now()
+    swept = 0
+    for chore in list(store.get_all_chores().values()):
+        if not isinstance(chore, OneshotChore):
+            continue
+        if chore.persist:
+            continue
+        if chore.last_completed is None or chore.last_completed >= cleared_at:
+            continue
+        if chore.compute_status(now) != ChoreStatus.COMPLETED:
+            continue
+        # Eligible: terminal-completed, pre-cutoff, and not flagged to persist.
+        await store.async_delete_chore(chore.uid)
+        hass.bus.async_fire(
+            EVENT_ITEM_DELETED,
+            {
+                "uid": chore.uid,
+                "chore_name": chore.chore_name,
+                "chore_type": str(chore.chore_type),
+                "entity_id": entity_id,
+            },
+        )
+        LOGGER.info(
+            "deleted persist=false oneshot %s (%s)",
+            chore.chore_name,
+            chore.uid,
+        )
+        swept += 1
+
+    LOGGER.debug("persist=false sweep complete: %d chore(s) deleted", swept)
+    await coordinator.async_refresh()
+    _notify_calendar_event_listeners(hass, store.entry_id)
+
+
+def _notify_calendar_event_listeners(hass: HomeAssistant, entry_id: str) -> None:
+    """Push fresh events to the calendar panel subscribers for *entry_id*.
+
+    HA's calendar dashboard caches event lists client-side and does not
+    refetch on ``state_changed`` — CRUD actions on chores leave stale
+    events visible until the user navigates dates or reloads the browser.
+    ``CalendarEntity.async_update_event_listeners`` (added on HA dev,
+    post-2026.3.1) lets the integration push an invalidation.
+
+    Looks up the calendar entity for the given config entry (its unique_id
+    is the entry_id) and calls the listener-update method when present.
+    Silently no-ops when:
+
+    - The calendar entity isn't loaded for this entry.
+    - The HA version doesn't yet implement ``async_update_event_listeners``.
+    """
+    registry = er.async_get(hass)
+    calendar_entity_id = registry.async_get_entity_id("calendar", DOMAIN, entry_id)
+    if calendar_entity_id is None:
+        return
+
+    calendar_component = hass.data.get("calendar")
+    if calendar_component is None:
+        return
+    entity = calendar_component.get_entity(calendar_entity_id)
+    notify = getattr(entity, "async_update_event_listeners", None)
+    if notify is None:
+        return
+    notify()
+    LOGGER.debug(
+        "Pushed calendar event update to subscribers of %s",
+        calendar_entity_id,
+    )
+
+
+async def _async_handle_hide_completed(call: ServiceCall) -> None:
+    """Handle hide_completed_items service call.
+
+    Sets the per-list completed-items cutoff. Without args, cutoff = now.
+    With ``before``: cutoff = the given datetime (items completed before
+    that point are hidden). With ``keep_for``: cutoff = now - duration.
+    ``before`` and ``keep_for`` are mutually exclusive.
+    """
+    store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
+
+    has_before = ATTR_BEFORE in call.data
+    has_keep_for = ATTR_KEEP_FOR in call.data
+    if has_before and has_keep_for:
+        msg = "Cannot specify both 'before' and 'keep_for'"
+        raise ServiceValidationError(msg)
+
+    if has_before:
+        cleared_at: datetime = call.data[ATTR_BEFORE]
+        # Coerce naive datetimes (from YAML without a tz suffix) to local tz
+        # so storage and comparisons stay tz-aware.
+        if cleared_at.tzinfo is None:
+            cleared_at = cleared_at.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+        LOGGER.debug(
+            "hide_completed_items called with before=%s on %s",
+            cleared_at.isoformat(),
+            call.data[ATTR_ENTITY_ID],
+        )
+    elif has_keep_for:
+        cleared_at = dt_util.now() - timedelta(minutes=_duration_to_mins(call.data[ATTR_KEEP_FOR]))
+        LOGGER.debug(
+            "hide_completed_items called with keep_for=%s on %s (cutoff=%s)",
+            call.data[ATTR_KEEP_FOR],
+            call.data[ATTR_ENTITY_ID],
+            cleared_at.isoformat(),
+        )
+    else:
+        cleared_at = dt_util.now()
+        LOGGER.debug(
+            "hide_completed_items called with no args on %s (cutoff=now)",
+            call.data[ATTR_ENTITY_ID],
+        )
+
+    await async_apply_completed_cleared_at(
+        call.hass,
+        store,
+        coordinator,
+        call.data[ATTR_ENTITY_ID],
+        cleared_at,
     )
 
 
@@ -500,7 +722,21 @@ async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
             }
         )
 
-    return cast(ServiceResponse, {"items": items})
+    cleared_at = store.completed_cleared_at
+    LOGGER.debug(
+        "get_items returning %d item(s) for %s (status_filter=%s, cleared_at=%s)",
+        len(items),
+        call.data[ATTR_ENTITY_ID],
+        status_filter,
+        cleared_at.isoformat() if cleared_at else None,
+    )
+    return cast(
+        ServiceResponse,
+        {
+            "items": items,
+            "completed_cleared_at": cleared_at.isoformat() if cleared_at else None,
+        },
+    )
 
 
 async def async_register_services(hass: HomeAssistant) -> None:
@@ -519,6 +755,12 @@ async def async_register_services(hass: HomeAssistant) -> None:
         schema=SERVICE_UNCOMPLETE_SCHEMA,
     )
     hass.services.async_register(DOMAIN, SERVICE_SKIP_ITEM, _async_handle_skip, schema=SERVICE_SKIP_SCHEMA)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_HIDE_COMPLETED_ITEMS,
+        _async_handle_hide_completed,
+        schema=SERVICE_HIDE_COMPLETED_SCHEMA,
+    )
     hass.services.async_register(
         DOMAIN,
         SERVICE_GET_ITEMS,

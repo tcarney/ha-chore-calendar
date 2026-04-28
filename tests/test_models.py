@@ -503,15 +503,18 @@ class TestCompletionUndoSlot:
 class TestScheduledChoreSkip:
     """Test ScheduledChore skip behavior — skipped_until as operative anchor."""
 
-    def test_skipped_until_default_is_next_active_day(self):
-        """Default skipped_until is the next active day's period-due."""
+    def test_apply_default_skip_is_next_active_day(self):
+        """Default skip sets skipped_until to the next active day's period-due."""
         chore = _make_scheduled(active_days=["mon", "wed", "fri"])
         # 2026-03-30 is Monday — current period is Mon 08:00.
         now = datetime(2026, 3, 30, 10, 0, tzinfo=TZ)
         # Next active day after Monday is Wednesday (Apr 1) 08:00.
-        assert chore.compute_skipped_until_default(now) == datetime(2026, 4, 1, 8, 0, tzinfo=TZ)
+        result = chore.apply_default_skip(now)
+        expected = datetime(2026, 4, 1, 8, 0, tzinfo=TZ)
+        assert result == expected
+        assert chore.skipped_until == expected
 
-    def test_skipped_until_default_advances_past_now_for_overdue(self):
+    def test_apply_default_skip_advances_past_now_for_overdue(self):
         """For an overdue chore pinned in the past, default walks forward past now."""
         chore = _make_scheduled(
             last_completed=datetime(2026, 3, 28, 7, 0, tzinfo=TZ),  # Sat, 2 days ago
@@ -520,7 +523,10 @@ class TestScheduledChoreSkip:
         # Sun is also uncompleted; next active day after Sun is today Mon 08:00,
         # which is already in the past. Default must walk forward to Tue 08:00.
         now = datetime(2026, 3, 30, 14, 0, tzinfo=TZ)
-        assert chore.compute_skipped_until_default(now) == datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
+        result = chore.apply_default_skip(now)
+        expected = datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
+        assert result == expected
+        assert chore.skipped_until == expected
 
     def test_skip_from_overdue_transitions_to_completed(self):
         """Calling skip on an OVERDUE chore flips status to COMPLETED via skipped_until."""
@@ -530,7 +536,7 @@ class TestScheduledChoreSkip:
         now = datetime(2026, 3, 30, 14, 0, tzinfo=TZ)
         assert chore.compute_status(now) == ChoreStatus.OVERDUE
 
-        chore.skipped_until = chore.compute_skipped_until_default(now)
+        chore.apply_default_skip(now)
         assert chore.compute_status(now) == ChoreStatus.COMPLETED
         assert chore.compute_next_due(now) == datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
 
@@ -596,11 +602,14 @@ class TestScheduledChoreSkip:
 class TestIntervalChoreSkip:
     """Test IntervalChore skip behavior."""
 
-    def test_skipped_until_default_is_now_plus_interval(self):
-        """Default skipped_until is now + interval."""
+    def test_apply_default_skip_is_now_plus_interval(self):
+        """Default skip sets skipped_until to now + interval."""
         chore = _make_interval(interval_mins=4320)  # 3 days
         now = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
-        assert chore.compute_skipped_until_default(now) == datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        expected = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        result = chore.apply_default_skip(now)
+        assert result == expected
+        assert chore.skipped_until == expected
 
     def test_status_completed_before_skipped_until(self):
         """While skip is active and we haven't reached skipped_until, status is COMPLETED."""

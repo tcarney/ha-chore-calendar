@@ -8,7 +8,7 @@ A Home Assistant custom integration called **Chore Calendar** (domain: `chore_ca
 
 ### Integration Model (One List = One Config Entry)
 
-Each chore list is added through Settings → Integrations → "Chore Calendar". This matches how `local_calendar` and `local_todo` work — one config entry per list. Each list gets its own config entry, storage file, coordinator, calendar entity, and set of chore sensor entities. All entities are grouped under a `DeviceEntryType.SERVICE` device per list.
+Each chore list is added through Settings → Integrations → "Chore Calendar". This matches how `local_calendar` and `local_todo` work — one config entry per list. Each list gets its own config entry, storage file, coordinator, calendar entity, todo entity, and set of chore sensor entities. All entities are grouped under a `DeviceEntryType.SERVICE` device per list.
 
 ### Naming Convention
 
@@ -84,16 +84,17 @@ completed → due → overdue → (trigger) → completed
 - `overdue_at` = `due_at + grace_period`
 - Never-completed interval chores are always `due` (no pending state)
 
-**Oneshot Chores** (planned) — 4 states, same window as scheduled, no recurrence:
+**Oneshot Chores** — 4 states, same window math as scheduled, no built-in recurrence:
 
 ```text
-pending → due → overdue → (trigger) → completed [terminal]
+pending → due → overdue → (trigger) → completed [terminal for current occurrence]
 ```
 
-- Same `early_window` / `grace_period` window as scheduled chores
-- `pending_at` = `due_datetime - early_window`
-- `overdue_at` = `due_datetime + grace_period`
-- Once completed, stays completed permanently (or auto-deletes)
+- `pending_at` = `due_datetime - early_window`, `overdue_at` = `due_datetime + grace_period`
+- `due_datetime` is **optional** — `None` represents an unscheduled chore that reports `pending` (actionable but not requiring action) until a date is set via `update_item` or the chore is completed directly
+- Completion synthesizes `due_datetime` to the completion timestamp when the chore is unscheduled, ensuring `(last_completed=set, due_datetime=None)` reliably means "user explicitly unscheduled" (Path B/C) rather than "completed without a date." `previous_due_datetime` undo slot reverts the synthesis on uncomplete
+- `update_item` can rewrite `due_datetime` at any time, including on a completed oneshot — when `last_completed < new_pending_at` the chore re-enters the cycle. This enables ad-hoc and automation-driven workflows where an external script computes the next occurrence
+- Skip default clears `due_datetime` (leaves the chore unscheduled); skip with explicit `until` uses the standard `skipped_until` anchor; skipping a terminal-completed oneshot raises `ServiceValidationError`
 
 ### Completion Undo Slot
 
@@ -105,17 +106,36 @@ A parallel `previous_skipped_until` slot holds any `skipped_until` value that a 
 
 `skip_item` defers a chore's next occurrence by writing `skipped_until` on the chore. It does **not** touch `last_completed` — skipping is distinct from completing, preserving an accurate record of when the task was really done.
 
-- **`skipped_until` acts as the operative period anchor** for the existing state machines:
+- **`skipped_until` acts as the operative anchor** for scheduled and interval state machines:
   - *Scheduled*: `pending_at = skipped_until − early_window`, `overdue_at = skipped_until + grace_period`
   - *Interval*: `due_at = skipped_until`, `overdue_at = skipped_until + grace_period`
-- **No new status** — a skipped chore reports as `completed` while `now < pending_at` (scheduled) or `now < skipped_until` (interval). Once past that threshold, it transitions through `pending`/`due`/ etc. against the skipped anchor.
+  - *Oneshot*: same window math when `until` is provided (overrides `due_datetime`); when omitted, default skip clears `due_datetime` instead of advancing an anchor
+- **No new status** — a skipped chore reports as `completed` while `now < pending_at` (scheduled / oneshot with explicit `until`) or `now < skipped_until` (interval). Once past that threshold, it transitions through `pending`/`due`/ etc. against the skipped anchor.
 - **Stale-skip fallthrough**: once `now ≥ skipped_until + grace_period`, the skip is ignored and normal period logic resumes. The field is not eagerly cleared.
-- **Defaults when `until` is omitted**:
+- **Defaults when `until` is omitted** — handled type-specifically via `apply_default_skip`:
   - *Scheduled*: the next active day's period-due strictly after now. Walks forward past the pinned overdue period so the skip cannot land in the past.
   - *Interval*: `now + interval`.
+  - *Oneshot*: clears `due_datetime` (the chore enters the unscheduled `pending` state). Skipping a terminal-completed oneshot raises `ServiceValidationError`.
 - **`complete_item` clears the skip** by default. Pass `keep_skip: true` to preserve it — internally mapped to `apply_completion(clear_skip=False)`. The cleared value is saved to `previous_skipped_until` and restored by `uncomplete_item`.
-- **Fires `chore_calendar_item_skipped`** with `uid`, `chore_name`, `skipped_until`, and the list `entity_id`. Status transitions continue to fire `chore_calendar_status_changed`.
-- **Scope**: scheduled and interval only; oneshot skip behavior is defined alongside the oneshot chore type. List-level skip is deferred.
+- **Fires `chore_calendar_item_skipped`** with `uid`, `chore_name`, `skipped_until`, and the list `entity_id`. The `skipped_until` field is `null` when oneshot default-skip cleared the date (no operative anchor). Status transitions continue to fire `chore_calendar_status_changed`.
+- **Scope**: per-chore only; list-level skip is deferred.
+
+### Hide Completed Items
+
+`hide_completed_items` is a per-list visibility filter for completed items. The recurring-chore use case (where `last_completed` must be preserved for state computation) makes a true "delete completed" semantic infeasible — instead, a per-list cutoff (`completed_cleared_at`) hides items whose `last_completed` precedes it.
+
+- **Cutoff is set by `chore_calendar.hide_completed_items`** — accepts no args (cutoff = now), `before: <datetime>` (specific cutoff), or `keep_for: <duration>` (cutoff = now − duration). `before` and `keep_for` are mutually exclusive.
+- **Filtering** applies in `_make_completed_event` (calendar) and `todo_items` (todo). `last_completed` is never modified — `compute_status`, history, and per-chore sensors are unaffected. Items completed *after* the cutoff (next cycle of a recurring chore, or a re-completed oneshot) reappear naturally.
+- **Persist option**: `OneshotChore.persist` (default `false`) controls whether the chore is deleted on the cutoff sweep. With `persist=false`, terminal-completed oneshots whose `last_completed < cleared_at` are removed from storage and fire `chore_calendar_item_deleted`. With `persist=true`, they are merely hidden and remain reactivatable via `update_item`. Recurring chores ignore `persist` — they are always merely hidden.
+- **`get_items` exposes `completed_cleared_at`** at the response top level so the card can apply the filter client-side. The response composes with the card's existing `completed_period` filter as AND (whichever is more restrictive wins).
+- **Native `todo.remove_completed_items` is intentionally unavailable** — the todo entity does not advertise `DELETE_TODO_ITEM`. HA's bulk-clear path would route through `async_delete_todo_items` per-uid with no clean way to distinguish a "permanently delete this chore" intent from a "clear from completed view" intent, and the native card's "permanently deleted" warning would be misleading for recurring chores. The `chore_calendar.hide_completed_items` service is the supported path.
+
+### Deletion Event
+
+`chore_calendar_item_deleted` fires on every actual storage deletion. Payload: `uid`, `chore_name`, `chore_type`, list `entity_id`. Sources:
+
+- `chore_calendar.delete_item` — the explicit delete service.
+- The `persist=false` sweep during `hide_completed_items`.
 
 ### Storage Schema
 
@@ -125,6 +145,7 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
 {
   "version": 2,
   "data": {
+    "completed_cleared_at": null,
     "items": [
       {
         "uid": "01244b28-e604-11ee-a0a4-e45f0197c057",
@@ -170,7 +191,7 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
           "due_datetime": "2026-04-15T10:00:00-04:00",
           "early_window_mins": 10080,
           "grace_period_mins": 0,
-          "auto_delete": false
+          "persist": false
         },
         "trigger_tag_id": null,
         "assigned_to": ["person.tom"],
@@ -179,12 +200,15 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "last_completed_by": null,
         "previous_last_completed": null,
         "previous_last_completed_by": null,
-        "skipped_until": null
+        "skipped_until": null,
+        "previous_due_datetime": null
       }
     ]
   }
 }
 ```
+
+`completed_cleared_at` is a per-list field (alongside `items`) holding the cutoff set by `hide_completed_items`. New keys default to `null` for backward-compat — older stores that omit them load cleanly without a version bump.
 
 ## Lovelace Card
 
@@ -280,16 +304,18 @@ Response shape per item:
 interface ChoreItem {
   uid: string;
   chore_name: string;
-  chore_type: 'scheduled' | 'interval';
+  chore_type: 'scheduled' | 'interval' | 'oneshot';
   status: 'completed' | 'pending' | 'due' | 'overdue';
   next_due: string | null;       // ISO 8601
   last_completed: string | null; // ISO 8601
   last_completed_by: string | null;
   assigned_to: string[];
   trigger_entity: string | null;
-  schedule: string;              // Human-readable description
+  schedule: string | Record<string, unknown>;  // Type-specific dict; see Storage Schema
 }
 ```
+
+The full `get_items` response also includes `completed_cleared_at: string | null` at the top level (the per-list cutoff from `hide_completed_items`) so the card can apply the visibility filter client-side.
 
 ### Default Color Palette
 
