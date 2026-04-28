@@ -393,7 +393,8 @@ async def test_get_items_with_status_filter(hass, config_entry):
     """get_items filters by status when provided."""
     entity_id = await _setup_with_chore(hass, config_entry)
 
-    # The test_chore has no last_completed, so it's DUE.
+    # The test_chore has no last_completed — a never-completed interval
+    # reads as unscheduled PENDING.
     response = await hass.services.async_call(
         DOMAIN,
         "get_items",
@@ -407,7 +408,7 @@ async def test_get_items_with_status_filter(hass, config_entry):
     response = await hass.services.async_call(
         DOMAIN,
         "get_items",
-        {"entity_id": entity_id, "status": "due"},
+        {"entity_id": entity_id, "status": "pending"},
         blocking=True,
         return_response=True,
     )

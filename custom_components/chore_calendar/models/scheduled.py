@@ -26,9 +26,11 @@ class ScheduledChore(BaseChore):
 
         Initial-state convention (compare with IntervalChore / OneshotChore —
         each type handles "never completed" differently; see SPECS.md):
-        a never-completed scheduled chore reads as ``COMPLETED`` once past
-        the grace window, so a new chore created after its scheduled time
-        doesn't immediately nag — ``next_due`` advances to the next period.
+        a never-completed scheduled chore pins to the first active-day
+        period whose due time falls at or after ``created_at``. The chore
+        starts in ``PENDING`` toward that first period, advances through
+        ``DUE → OVERDUE``, and stays ``OVERDUE`` until first completion —
+        i.e. it does not silently roll forward past a missed initial cycle.
         """
         using_skip = self._skip_anchor_active(now)
         period_due = self.skipped_until if using_skip else self._find_current_period(now)
@@ -42,12 +44,6 @@ class ScheduledChore(BaseChore):
             return ChoreStatus.COMPLETED
 
         if self.last_completed and self.last_completed >= pending_at:
-            return ChoreStatus.COMPLETED
-
-        # Never completed: allow pending/due but not overdue.  A brand-new
-        # chore should not immediately nag — treat it as completed (no
-        # last_completed) so next_due advances to the following period.
-        if self.last_completed is None and now >= overdue_at:
             return ChoreStatus.COMPLETED
 
         if now >= overdue_at:
@@ -72,13 +68,9 @@ class ScheduledChore(BaseChore):
 
         is_completed = bool(self.last_completed and self.last_completed >= pending_at)
 
-        # Never completed and past the grace period — advance to next period
-        # instead of pinning (new chores should not stay stuck on a missed period).
-        if self.last_completed is None and now >= overdue_at:
-            return self._find_next_active_day(period_due)
-
         if not is_completed and now >= overdue_at:
-            # Chore is overdue — return the overdue period's due time.
+            # Chore is overdue — return the overdue period's due time so
+            # next_due stays pinned until the chore is completed.
             return period_due
 
         if now < period_due:
@@ -121,6 +113,11 @@ class ScheduledChore(BaseChore):
         if the previous period has been completed**.  This ensures an overdue
         chore stays pinned to the uncompleted period rather than silently
         advancing to the next one.
+
+        For a never-completed chore the anchor is ``created_at`` — but the
+        rule is asymmetric: the first valid period is the smallest active-day
+        period whose ``period_due`` is at or after ``created_at``. We never
+        consider periods that started before the chore existed.
         """
         today_sched = now.replace(
             hour=self.time.hour,
@@ -138,26 +135,49 @@ class ScheduledChore(BaseChore):
         else:
             candidate = self._find_previous_active_day(today_sched - timedelta(days=1))
 
-        # Walk back to find the earliest uncompleted period.
-        # If the chore has never been completed, find the first period after
-        # created_at. If it was completed, the completion anchors which period
-        # is "current" — only advance past periods that have been satisfied.
-        anchor = self.last_completed or self.created_at
-        if anchor is None:
+        if self.last_completed is not None:
+            # Walk backwards from candidate to find the oldest uncompleted period.
+            # The completion anchors which period is "current" — only advance
+            # past periods that have been satisfied.
+            period = candidate
+            for _ in range(365):
+                prev = self._find_previous_active_day(period - timedelta(days=1))
+                prev_pending = prev - self.pending_period
+                if self.last_completed >= prev_pending:
+                    break
+                period = prev
+            return period
+
+        if self.created_at is None:
+            # Degenerate case (every real chore has created_at) — fall back to
+            # the candidate so callers still get a usable anchor.
             return candidate
 
-        # Walk backwards from candidate to find the oldest uncompleted period.
-        period = candidate
-        for _ in range(365):
-            prev = self._find_previous_active_day(period - timedelta(days=1))
-            prev_pending = prev - self.pending_period
-            if anchor >= prev_pending:
-                # The anchor (last completion or creation) falls within or after
-                # this previous period's window — so *period* is the first
-                # uncompleted one.
-                break
-            period = prev
-        return period
+        # Never completed: pin to the first active-day period at or after
+        # created_at. If candidate is before that (e.g. the chore was just
+        # created and hasn't reached its first period_due yet), surface the
+        # upcoming period; otherwise the period stays pinned at the first
+        # one because none of the subsequent periods are completed.
+        first_valid = self._first_active_day_at_or_after(self.created_at)
+        if candidate < first_valid:
+            return first_valid
+        return first_valid
+
+    def _first_active_day_at_or_after(self, ts: datetime) -> datetime:
+        """Return the smallest active-day period_due greater than or equal to *ts*."""
+        candidate = ts.replace(
+            hour=self.time.hour,
+            minute=self.time.minute,
+            second=0,
+            microsecond=0,
+        )
+        if candidate < ts:
+            candidate += timedelta(days=1)
+        for _ in range(7):
+            if self._is_active_day(candidate):
+                return candidate
+            candidate += timedelta(days=1)
+        return candidate
 
     def _is_active_day(self, dt: datetime) -> bool:
         """Return True if *dt* falls on an active day (empty = all days active)."""

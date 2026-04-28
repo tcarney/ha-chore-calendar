@@ -121,14 +121,15 @@ async def test_todo_items_maps_due_to_needs_action(hass, config_entry):
     entity_id = await _setup_entry(hass, config_entry)
     runtime = config_entry.runtime_data
 
-    # Interval chore never completed is always DUE.
+    # Interval chore last completed exactly 7 days ago — at FROZEN_NOW it
+    # has just hit due_at and reads as DUE.
     chore = IntervalChore(
         uid="due-chore",
         chore_name="Take Out Trash",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=7),
         grace_period=timedelta(hours=1),
-        created_at=FROZEN_NOW,
+        last_completed=FROZEN_NOW - timedelta(days=7),
     )
     await runtime.store.async_create_chore(chore)
     await _refresh_at(hass, config_entry, FROZEN_NOW)
@@ -144,7 +145,7 @@ async def test_todo_items_maps_due_to_needs_action(hass, config_entry):
     assert items[0].summary == "Take Out Trash"
     assert items[0].status == TodoItemStatus.NEEDS_ACTION
     assert items[0].due == FROZEN_NOW
-    # A never-completed chore has no last_completed — completed must stay None.
+    # The actionable item must not surface the prior period's last_completed.
     assert items[0].completed is None
 
 
@@ -229,8 +230,9 @@ async def test_todo_items_includes_pending_chore(hass, config_entry):
     entity_id = await _setup_entry(hass, config_entry)
     runtime = config_entry.runtime_data
 
-    # Scheduled chore at 14:00 with 3h early window — at 12:00 it's PENDING
-    # (early window opens at 11:00; period_due is 14:00).
+    # Scheduled chore at 14:00 with 3h pending window — at 12:00 it's PENDING
+    # (window opens at 11:00; period_due is 14:00).
+    # Created earlier today so today's 14:00 is the first valid period.
     chore = ScheduledChore(
         uid="pending-chore",
         chore_name="Evening Chore",
@@ -238,7 +240,7 @@ async def test_todo_items_includes_pending_chore(hass, config_entry):
         time=time(14, 0),
         pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
-        created_at=FROZEN_NOW - timedelta(days=1),
+        created_at=FROZEN_NOW.replace(hour=9, minute=0),
     )
     await runtime.store.async_create_chore(chore)
     await _refresh_at(hass, config_entry, FROZEN_NOW)
@@ -263,14 +265,14 @@ async def test_todo_items_sort_order(hass, config_entry):
     entity_id = await _setup_entry(hass, config_entry)
     runtime = config_entry.runtime_data
 
-    # DUE interval (never completed) — due at created_at.
+    # DUE interval — last completed exactly 7 days ago, just hit due_at.
     due_chore = IntervalChore(
         uid="due",
         chore_name="Due Chore",
         chore_type=ChoreType.INTERVAL,
         interval=timedelta(days=7),
         grace_period=timedelta(hours=1),
-        created_at=FROZEN_NOW,  # due right now
+        last_completed=FROZEN_NOW - timedelta(days=7),
     )
     # OVERDUE interval — completed long ago, past grace period.
     overdue_chore = IntervalChore(
@@ -281,8 +283,9 @@ async def test_todo_items_sort_order(hass, config_entry):
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=3),
     )
-    # PENDING scheduled — period_due at 14:00, early window opens at 11:00,
-    # FROZEN_NOW is 12:00 → in the early window.
+    # PENDING scheduled — period_due at 14:00, pending window opens at 11:00,
+    # FROZEN_NOW is 12:00 → in the pending window. Created today so today's
+    # 14:00 is the first valid period.
     pending_chore = ScheduledChore(
         uid="pending",
         chore_name="Pending Chore",
@@ -290,7 +293,7 @@ async def test_todo_items_sort_order(hass, config_entry):
         time=time(14, 0),
         pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
-        created_at=FROZEN_NOW - timedelta(days=1),
+        created_at=FROZEN_NOW.replace(hour=9, minute=0),
     )
     # COMPLETED interval — recently completed, not yet due.
     completed_chore = IntervalChore(
@@ -432,8 +435,10 @@ async def test_update_completed_to_needs_action_reverts_completion(hass, config_
     assert updated is not None
     assert updated.last_completed is None
 
+    # Reverting the only completion leaves the chore unscheduled-PENDING
+    # (no anchor until the next first completion).
     assert len(events) == 1
-    assert events[0].data["to_status"] == "due"
+    assert events[0].data["to_status"] == "pending"
     assert events[0].data.get("uncomplete") is True
 
 
