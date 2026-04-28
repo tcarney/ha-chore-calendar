@@ -16,7 +16,7 @@ from custom_components.chore_calendar.const import (
     EVENT_ITEM_SKIPPED,
     ChoreType,
 )
-from custom_components.chore_calendar.models import IntervalChore, ScheduledChore
+from custom_components.chore_calendar.models import IntervalChore, OneshotChore, ScheduledChore
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
@@ -502,38 +502,72 @@ async def test_update_item_calendar_without_item_raises(hass, config_entry):
         )
 
 
-@pytest.mark.usefixtures("enable_custom_integrations")
-async def test_update_item_rejects_type_mismatch_interval_to_scheduled(hass, config_entry):
-    """update_item raises when the schedule sub-dict doesn't match the chore's type."""
-    entity_id = await _setup_with_chore(hass, config_entry)
-
-    # Pre-existing chore is INTERVAL — passing a 'scheduled' block should be rejected.
-    with pytest.raises(ServiceValidationError, match="type"):
-        await hass.services.async_call(
-            DOMAIN,
-            "update_item",
-            {
-                "entity_id": entity_id,
-                "item": "Test Chore",
-                "scheduled": {"time": "08:00:00"},
-            },
-            blocking=True,
+def _build_chore_of_type(chore_type: ChoreType, uid: str = TEST_UID):
+    """Construct a pre-existing chore of the requested type with test defaults."""
+    if chore_type == ChoreType.INTERVAL:
+        return IntervalChore(
+            uid=uid,
+            chore_name="Existing Chore",
+            chore_type=ChoreType.INTERVAL,
+            interval=timedelta(days=3),
         )
+    if chore_type == ChoreType.SCHEDULED:
+        return ScheduledChore(
+            uid=uid,
+            chore_name="Existing Chore",
+            chore_type=ChoreType.SCHEDULED,
+            time=dtime(8, 0),
+        )
+    return OneshotChore(
+        uid=uid,
+        chore_name="Existing Chore",
+        chore_type=ChoreType.ONESHOT,
+        due_datetime=datetime(2026, 4, 15, 12, 0, tzinfo=TZ),
+    )
+
+
+# Cross-type conversion is disallowed: passing a non-matching schedule
+# sub-dict to update_item raises ServiceValidationError. Cover all six
+# (existing_type, requested_type) pairs.
+_TYPE_MISMATCH_BLOCKS = {
+    ChoreType.SCHEDULED: ("scheduled", {"time": "08:00:00"}),
+    ChoreType.INTERVAL: ("interval", {"days": 1}),
+    ChoreType.ONESHOT: ("oneshot", {"due_datetime": "2026-04-15T12:00:00-05:00"}),
+}
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_update_item_rejects_type_mismatch_interval_to_oneshot(hass, config_entry):
-    """update_item raises when an interval chore is updated with a oneshot block."""
-    entity_id = await _setup_with_chore(hass, config_entry)
+@pytest.mark.parametrize(
+    ("existing_type", "requested_type"),
+    [(existing, requested) for existing in ChoreType for requested in ChoreType if existing != requested],
+)
+async def test_update_item_rejects_cross_type_conversion(hass, config_entry, existing_type, requested_type):
+    """update_item rejects every (existing_type, requested_type) cross-pair.
 
-    with pytest.raises(ServiceValidationError, match="type"):
+    Each pair has different semantics for how to handle last_completed,
+    previous_*, and the type-specific anchor fields. We disallow the
+    conversion entirely; users must delete + re-create to change type.
+    """
+    config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    chore = _build_chore_of_type(existing_type)
+    await config_entry.runtime_data.store.async_create_chore(chore)
+    await config_entry.runtime_data.coordinator.async_refresh()
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id("calendar", DOMAIN, config_entry.entry_id)
+    assert entity_id is not None
+
+    requested_attr, requested_payload = _TYPE_MISMATCH_BLOCKS[requested_type]
+
+    with pytest.raises(ServiceValidationError, match="delete and re-create"):
         await hass.services.async_call(
             DOMAIN,
             "update_item",
             {
                 "entity_id": entity_id,
-                "item": "Test Chore",
-                "oneshot": {"due_datetime": "2026-04-15T12:00:00-05:00"},
+                "item": "Existing Chore",
+                requested_attr: requested_payload,
             },
             blocking=True,
         )
