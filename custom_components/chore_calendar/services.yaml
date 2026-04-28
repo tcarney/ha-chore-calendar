@@ -51,9 +51,6 @@ create_item:
                       value: sat
                     - label: Sunday
                       value: sun
-            early_window:
-              selector:
-                duration:
     interval:
       selector:
         duration:
@@ -65,12 +62,12 @@ create_item:
             due_datetime:
               selector:
                 datetime:
-            early_window:
-              selector:
-                duration:
             persist:
               selector:
                 boolean:
+    pending_period:
+      selector:
+        duration:
     grace_period:
       selector:
         duration:
@@ -130,9 +127,6 @@ update_item:
                       value: sat
                     - label: Sunday
                       value: sun
-            early_window:
-              selector:
-                duration:
     interval:
       selector:
         duration:
@@ -144,12 +138,12 @@ update_item:
             due_datetime:
               selector:
                 datetime:
-            early_window:
-              selector:
-                duration:
             persist:
               selector:
                 boolean:
+    pending_period:
+      selector:
+        duration:
     grace_period:
       selector:
         duration:

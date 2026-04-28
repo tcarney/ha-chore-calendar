@@ -37,7 +37,6 @@ class ChoreType(StrEnum):
 
 # Attribute keys for sensor extra_state_attributes.
 ATTR_ASSIGNED_TO = "assigned_to"
-ATTR_CHORE_ID = "chore_id"  # Migration v1→v2: remove when dropping v1 support.
 ATTR_CHORE_TYPE = "chore_type"
 ATTR_UID = "uid"
 ATTR_LAST_COMPLETED = "last_completed"
@@ -65,9 +64,9 @@ EVENT_ITEM_SKIPPED = "chore_calendar_item_skipped"
 EVENT_STATUS_CHANGED = "chore_calendar_status_changed"
 
 # Default values.
-DEFAULT_EARLY_WINDOW_MINS = 180
+DEFAULT_PENDING_PERIOD_MINS = 180
 DEFAULT_GRACE_PERIOD_MINS = 60
 DEFAULT_UPDATE_INTERVAL = 60
 
 # Storage.
-STORAGE_VERSION = 2
+STORAGE_VERSION = 3

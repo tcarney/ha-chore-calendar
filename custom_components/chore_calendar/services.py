@@ -39,7 +39,7 @@ from .const import (
     ChoreType,
 )
 from .coordinator import ChoreCalendarCoordinator
-from .models import BaseChore, IntervalChore, OneshotChore, ScheduledChore
+from .models import BaseChore, OneshotChore
 from .store import ChoreStore
 
 # Service-specific field keys (not shared with sensor attributes).
@@ -57,6 +57,7 @@ ATTR_UNTIL = "until"
 ATTR_SCHEDULED = "scheduled"
 ATTR_INTERVAL = "interval"
 ATTR_ONESHOT = "oneshot"
+ATTR_PENDING_PERIOD = "pending_period"
 ATTR_GRACE_PERIOD = "grace_period"
 
 SERVICE_CREATE_SCHEMA = vol.Schema(
@@ -68,6 +69,7 @@ SERVICE_CREATE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_SCHEDULED): dict,
         vol.Optional(ATTR_INTERVAL): dict,
         vol.Optional(ATTR_ONESHOT): dict,
+        vol.Optional(ATTR_PENDING_PERIOD): dict,
         vol.Optional(ATTR_GRACE_PERIOD): dict,
     }
 )
@@ -82,6 +84,7 @@ SERVICE_UPDATE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_SCHEDULED): dict,
         vol.Optional(ATTR_INTERVAL): dict,
         vol.Optional(ATTR_ONESHOT): dict,
+        vol.Optional(ATTR_PENDING_PERIOD): dict,
         vol.Optional(ATTR_GRACE_PERIOD): dict,
     }
 )
@@ -267,26 +270,27 @@ def _infer_chore_type(data: dict[str, Any]) -> ChoreType:
     }[present[0]]
 
 
-def _apply_schedule_overlays(
+def _apply_overlays(
     data: dict[str, Any],
-    schedule: dict[str, Any],
+    chore_dict: dict[str, Any],
     chore_type: ChoreType,
 ) -> dict[str, Any]:
-    """Overlay schedule fields from a service call onto an existing schedule dict.
+    """Overlay service-call fields onto a storage-shaped chore dict.
 
-    Used by both ``create_item`` (with an empty starting schedule) and
-    ``update_item`` (overlaying partial fields onto the chore's stored schedule).
-    Only the keys present in *data* are written — absent keys leave *schedule*
+    Writes per-type schedule fields into ``chore_dict["schedule"]`` and
+    cross-type window fields (``pending_period_mins``, ``grace_period_mins``)
+    at the top level. Used by both ``create_item`` (empty starting dict) and
+    ``update_item`` (overlaying partial fields onto the stored dict). Only
+    keys present in *data* are written — absent keys leave *chore_dict*
     untouched, preserving stored values during a partial update.
     """
+    schedule = chore_dict.setdefault("schedule", {})
     if chore_type == ChoreType.SCHEDULED and ATTR_SCHEDULED in data:
         obj = data[ATTR_SCHEDULED]
         if "time" in obj:
             schedule["time"] = obj["time"]
         if "active_days" in obj:
             schedule["active_days"] = obj["active_days"]
-        if "early_window" in obj:
-            schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
     elif chore_type == ChoreType.INTERVAL and ATTR_INTERVAL in data:
         schedule["interval_mins"] = _duration_to_mins(data[ATTR_INTERVAL])
     elif chore_type == ChoreType.ONESHOT and ATTR_ONESHOT in data:
@@ -295,33 +299,28 @@ def _apply_schedule_overlays(
             # None is meaningful (explicit unscheduled) — preserve verbatim.
             due = obj["due_datetime"]
             schedule["due_datetime"] = due.isoformat() if isinstance(due, datetime) else due
-        if "early_window" in obj:
-            schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
         if "persist" in obj:
             schedule["persist"] = bool(obj["persist"])
 
-    # grace_period is a top-level field shared by all types.
+    if ATTR_PENDING_PERIOD in data:
+        chore_dict["pending_period_mins"] = _duration_to_mins(data[ATTR_PENDING_PERIOD])
     if ATTR_GRACE_PERIOD in data:
-        schedule["grace_period_mins"] = _duration_to_mins(data[ATTR_GRACE_PERIOD])
-    return schedule
+        chore_dict["grace_period_mins"] = _duration_to_mins(data[ATTR_GRACE_PERIOD])
+    return chore_dict
 
 
 def _build_chore_from_data(data: dict[str, Any]) -> BaseChore:
     """Build a chore model from service call data."""
     chore_type = _infer_chore_type(data)
-    schedule = _apply_schedule_overlays(data, {}, chore_type)
-    base_kwargs: dict[str, Any] = {
+    chore_dict: dict[str, Any] = {
         "uid": data["uid"],
         "chore_name": data[ATTR_CHORE_NAME],
-        "chore_type": chore_type,
+        "chore_type": str(chore_type),
+        "schedule": {},
         "assigned_to": list(data.get(ATTR_ASSIGNED_TO, [])),
     }
-
-    if chore_type == ChoreType.SCHEDULED:
-        return ScheduledChore.from_schedule(base_kwargs, schedule)
-    if chore_type == ChoreType.INTERVAL:
-        return IntervalChore.from_schedule(base_kwargs, schedule)
-    return OneshotChore.from_schedule(base_kwargs, schedule)
+    _apply_overlays(data, chore_dict, chore_type)
+    return BaseChore.from_dict(chore_dict)
 
 
 async def _async_handle_create(call: ServiceCall) -> None:
@@ -390,9 +389,10 @@ async def _async_handle_update(call: ServiceCall) -> None:
             )
             raise ServiceValidationError(msg)
 
-    has_schedule_fields = any(k in call.data for k in (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT, ATTR_GRACE_PERIOD))
-    if has_schedule_fields:
-        updated["schedule"] = _apply_schedule_overlays(call.data, dict(updated["schedule"]), existing.chore_type)
+    overlay_keys = (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT, ATTR_PENDING_PERIOD, ATTR_GRACE_PERIOD)
+    if any(k in call.data for k in overlay_keys):
+        updated["schedule"] = dict(updated["schedule"])
+        _apply_overlays(call.data, updated, existing.chore_type)
 
     chore = BaseChore.from_dict(updated)
     await store.async_update_chore(chore)

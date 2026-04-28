@@ -236,7 +236,7 @@ async def test_todo_items_includes_pending_chore(hass, config_entry):
         chore_name="Evening Chore",
         chore_type=ChoreType.SCHEDULED,
         time=time(14, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         created_at=FROZEN_NOW - timedelta(days=1),
     )
@@ -288,7 +288,7 @@ async def test_todo_items_sort_order(hass, config_entry):
         chore_name="Pending Chore",
         chore_type=ChoreType.SCHEDULED,
         time=time(14, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         created_at=FROZEN_NOW - timedelta(days=1),
     )

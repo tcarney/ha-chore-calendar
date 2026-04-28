@@ -54,7 +54,7 @@ async def test_coordinator_fires_event_on_status_change(hass):
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         last_completed=datetime(2026, 3, 30, 7, 0, tzinfo=TZ),
     )
@@ -143,7 +143,7 @@ async def test_coordinator_uncomplete_marker_on_event(hass):
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         last_completed=datetime(2026, 3, 30, 7, 0, tzinfo=TZ),
     )

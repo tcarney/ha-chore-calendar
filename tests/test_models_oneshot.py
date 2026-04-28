@@ -13,7 +13,7 @@ TZ = timezone(timedelta(hours=-5))
 def _make_oneshot(
     *,
     due_datetime: datetime | None = None,
-    early_window_mins: int = 180,
+    pending_period_mins: int = 180,
     grace_period_mins: int = 60,
     last_completed: datetime | None = None,
     created_at: datetime | None = None,
@@ -24,7 +24,7 @@ def _make_oneshot(
         chore_name="File Taxes",
         chore_type=ChoreType.ONESHOT,
         due_datetime=due_datetime,
-        early_window=timedelta(minutes=early_window_mins),
+        pending_period=timedelta(minutes=pending_period_mins),
         grace_period=timedelta(minutes=grace_period_mins),
         last_completed=last_completed,
         created_at=created_at,
@@ -45,16 +45,16 @@ class TestComputeStatus:
         now = datetime(2026, 4, 15, 10, 0, tzinfo=TZ)
         assert chore.compute_status(now) == ChoreStatus.PENDING
 
-    def test_pending_before_early_window(self):
+    def test_pending_before_pending_window(self):
         """Before pending_at — PENDING."""
         due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
         chore = _make_oneshot(due_datetime=due)
-        # 4 hours before due, early_window = 3h → still pending.
+        # 4 hours before due, pending_period = 3h → still pending (anchor is unscheduled-PENDING semantics).
         now = datetime(2026, 4, 15, 8, 0, tzinfo=TZ)
         assert chore.compute_status(now) == ChoreStatus.PENDING
 
-    def test_pending_inside_early_window(self):
-        """Inside early window but before period_due — PENDING."""
+    def test_pending_inside_pending_window(self):
+        """Inside pending window but before period_due — PENDING."""
         due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
         chore = _make_oneshot(due_datetime=due)
         # 1 hour before due, inside 3h early window.
@@ -195,13 +195,13 @@ class TestIsInCompletionWindow:
         chore = _make_oneshot()
         assert chore.is_in_completion_window(datetime(2026, 4, 15, 10, 0, tzinfo=TZ)) is False
 
-    def test_inside_early_window(self):
+    def test_inside_pending_window(self):
         due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
         chore = _make_oneshot(due_datetime=due)
         # 1h before due, inside 3h window.
         assert chore.is_in_completion_window(due - timedelta(hours=1)) is True
 
-    def test_before_early_window(self):
+    def test_before_pending_window(self):
         due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
         chore = _make_oneshot(due_datetime=due)
         # 4h before due, before window opens.
@@ -409,7 +409,7 @@ class TestStorageRoundTrip:
         assert restored.due_datetime == due
         assert restored.last_completed == completed
         assert restored.previous_due_datetime == chore.previous_due_datetime
-        assert restored.early_window == chore.early_window
+        assert restored.pending_period == chore.pending_period
         assert restored.grace_period == chore.grace_period
 
     def test_round_trip_unscheduled(self):

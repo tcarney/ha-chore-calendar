@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from typing import Any, Self
 
-from custom_components.chore_calendar.const import DEFAULT_EARLY_WINDOW_MINS, DEFAULT_GRACE_PERIOD_MINS, ChoreStatus
+from custom_components.chore_calendar.const import ChoreStatus
 
 from .base import BaseChore
 
@@ -20,7 +20,6 @@ class ScheduledChore(BaseChore):
 
     time: time = field(default_factory=lambda: time(8, 0))
     active_days: list[str] = field(default_factory=list)
-    early_window: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_EARLY_WINDOW_MINS))
 
     def compute_status(self, now: datetime) -> ChoreStatus:
         """Compute scheduled chore status using the blueprint state machine.
@@ -34,7 +33,7 @@ class ScheduledChore(BaseChore):
         using_skip = self._skip_anchor_active(now)
         period_due = self.skipped_until if using_skip else self._find_current_period(now)
         assert period_due is not None  # using_skip implies skipped_until set
-        pending_at = period_due - self.early_window
+        pending_at = period_due - self.pending_period
         overdue_at = period_due + self.grace_period
 
         # Skip anchor may place now well before pending_at — the normal path
@@ -69,7 +68,7 @@ class ScheduledChore(BaseChore):
 
         period_due = self._find_current_period(now)
         overdue_at = period_due + self.grace_period
-        pending_at = period_due - self.early_window
+        pending_at = period_due - self.pending_period
 
         is_completed = bool(self.last_completed and self.last_completed >= pending_at)
 
@@ -96,9 +95,9 @@ class ScheduledChore(BaseChore):
         return (period_due, period_due + self.grace_period)
 
     def is_in_completion_window(self, timestamp: datetime) -> bool:
-        """Check if *timestamp* falls after the current period's early window opens."""
+        """Check if *timestamp* falls after the current period's pending window opens."""
         period_due = self._find_current_period(timestamp)
-        pending_at = period_due - self.early_window
+        pending_at = period_due - self.pending_period
         return timestamp >= pending_at
 
     def apply_default_skip(self, now: datetime) -> datetime | None:
@@ -118,7 +117,7 @@ class ScheduledChore(BaseChore):
     def _find_current_period(self, now: datetime) -> datetime:
         """Find the period_due for the period that *now* falls into.
 
-        The period rolls forward when we enter the early window, **but only
+        The period rolls forward when we enter the pending window, **but only
         if the previous period has been completed**.  This ensures an overdue
         chore stays pinned to the uncompleted period rather than silently
         advancing to the next one.
@@ -129,7 +128,7 @@ class ScheduledChore(BaseChore):
             second=0,
             microsecond=0,
         )
-        today_pending = today_sched - self.early_window
+        today_pending = today_sched - self.pending_period
 
         if now >= today_pending:
             if self._is_active_day(today_sched):
@@ -151,7 +150,7 @@ class ScheduledChore(BaseChore):
         period = candidate
         for _ in range(365):
             prev = self._find_previous_active_day(period - timedelta(days=1))
-            prev_pending = prev - self.early_window
+            prev_pending = prev - self.pending_period
             if anchor >= prev_pending:
                 # The anchor (last completion or creation) falls within or after
                 # this previous period's window — so *period* is the first
@@ -203,13 +202,11 @@ class ScheduledChore(BaseChore):
         return {
             "time": self.time.isoformat(),
             "active_days": list(self.active_days),
-            "early_window_mins": int(self.early_window.total_seconds() // 60),
-            "grace_period_mins": int(self.grace_period.total_seconds() // 60),
         }
 
     def schedule_description(self) -> dict[str, Any]:
         """Display empty ``active_days`` as the full week so the sensor reads "every day"."""
-        data = self._schedule_to_dict()
+        data = super().schedule_description()
         if not data["active_days"]:
             data["active_days"] = list(_DAY_NAMES)
         return data
@@ -223,6 +220,4 @@ class ScheduledChore(BaseChore):
             **base,
             time=sched_time,
             active_days=list(schedule.get("active_days", [])),
-            early_window=timedelta(minutes=schedule.get("early_window_mins", DEFAULT_EARLY_WINDOW_MINS)),
-            grace_period=timedelta(minutes=schedule.get("grace_period_mins", DEFAULT_GRACE_PERIOD_MINS)),
         )

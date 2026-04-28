@@ -170,8 +170,8 @@ async def test_create_scheduled_item(hass, config_entry):
             "scheduled": {
                 "time": "08:00:00",
                 "active_days": ["mon", "tue", "wed", "thu", "fri"],
-                "early_window": {"hours": 3},
             },
+            "pending_period": {"hours": 3},
             "grace_period": {"hours": 1},
             "trigger_entity": "tag.morning_med",
             "assigned_to": ["person.alice"],
@@ -783,7 +783,7 @@ async def _add_scheduled_chore(hass, entry: MockConfigEntry) -> str:
         chore_type=ChoreType.SCHEDULED,
         time=dtime(8, 0),
         active_days=[],
-        early_window=timedelta(minutes=180),
+        pending_period=timedelta(minutes=180),
         grace_period=timedelta(minutes=60),
     )
     await entry.runtime_data.store.async_create_chore(chore)

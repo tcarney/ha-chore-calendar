@@ -7,7 +7,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from custom_components.chore_calendar.const import DEFAULT_GRACE_PERIOD_MINS, ChoreStatus, ChoreType
+from custom_components.chore_calendar.const import (
+    DEFAULT_GRACE_PERIOD_MINS,
+    DEFAULT_PENDING_PERIOD_MINS,
+    ChoreStatus,
+    ChoreType,
+)
 from homeassistant.util import dt as dt_util
 
 if TYPE_CHECKING:
@@ -32,6 +37,9 @@ class BaseChore(abc.ABC):
     previous_last_completed_by: str | None = None
     skipped_until: datetime | None = None
     previous_skipped_until: datetime | None = None
+    # Window before the operative due time during which a chore reads as
+    # PENDING (upcoming, completable early). Shared by all chore types.
+    pending_period: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_PENDING_PERIOD_MINS))
     # Window after the operative due time during which a chore stays DUE
     # before flipping to OVERDUE. Shared by all chore types.
     grace_period: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_GRACE_PERIOD_MINS))
@@ -117,11 +125,16 @@ class BaseChore(abc.ABC):
     def schedule_description(self) -> dict[str, Any]:
         """Return a human-friendly schedule dict for sensor attributes.
 
-        Defaults to ``_schedule_to_dict`` since the storage and display shapes
-        match for most types. Subclasses override only when the display shape
-        diverges (e.g. ScheduledChore expanding empty ``active_days``).
+        Combines per-type ``_schedule_to_dict`` output with the cross-type
+        ``pending_period_mins`` / ``grace_period_mins`` window fields so the
+        sensor's ``schedule`` attribute presents a single unified view.
+        Subclasses extend ``_schedule_to_dict`` for type-specific shape;
+        the windows are added here uniformly.
         """
-        return self._schedule_to_dict()
+        data = self._schedule_to_dict()
+        data["pending_period_mins"] = int(self.pending_period.total_seconds() // 60)
+        data["grace_period_mins"] = int(self.grace_period.total_seconds() // 60)
+        return data
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the chore to a storage-compatible dict."""
@@ -130,6 +143,8 @@ class BaseChore(abc.ABC):
             "chore_name": self.chore_name,
             "chore_type": str(self.chore_type),
             "schedule": self._schedule_to_dict(),
+            "pending_period_mins": int(self.pending_period.total_seconds() // 60),
+            "grace_period_mins": int(self.grace_period.total_seconds() // 60),
             "trigger_tag_id": self.trigger_tag_id,
             "assigned_to": list(self.assigned_to),
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -183,8 +198,7 @@ def _extract_base_kwargs(data: dict[str, Any], chore_type: ChoreType) -> dict[st
     skipped_until_raw = data.get("skipped_until")
     previous_skipped_until_raw = data.get("previous_skipped_until")
     return {
-        # Migration v1→v2: remove "chore_id" fallback when dropping v1 support.
-        "uid": data.get("uid") or data["chore_id"],
+        "uid": data["uid"],
         "chore_name": data["chore_name"],
         "chore_type": chore_type,
         "trigger_tag_id": data.get("trigger_tag_id"),
@@ -200,4 +214,6 @@ def _extract_base_kwargs(data: dict[str, Any], chore_type: ChoreType) -> dict[st
         "previous_skipped_until": (
             dt_util.parse_datetime(previous_skipped_until_raw) if previous_skipped_until_raw else None
         ),
+        "pending_period": timedelta(minutes=data.get("pending_period_mins", DEFAULT_PENDING_PERIOD_MINS)),
+        "grace_period": timedelta(minutes=data.get("grace_period_mins", DEFAULT_GRACE_PERIOD_MINS)),
     }

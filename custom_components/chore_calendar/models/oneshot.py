@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Self
 
-from custom_components.chore_calendar.const import DEFAULT_EARLY_WINDOW_MINS, DEFAULT_GRACE_PERIOD_MINS, ChoreStatus
+from custom_components.chore_calendar.const import ChoreStatus
 from homeassistant.util import dt as dt_util
 
 from .base import BaseChore
@@ -28,7 +28,6 @@ class OneshotChore(BaseChore):
     """
 
     due_datetime: datetime | None = None
-    early_window: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_EARLY_WINDOW_MINS))
     # When False (default), a terminal-completed oneshot is deleted from
     # storage on the next hide_completed_items / todo.remove_completed_items
     # sweep. When True, the chore stays in storage and can be reactivated
@@ -57,7 +56,7 @@ class OneshotChore(BaseChore):
         operative_due = self.skipped_until if using_skip else self.due_datetime
         assert operative_due is not None  # using_skip implies skipped_until set
 
-        pending_at = operative_due - self.early_window
+        pending_at = operative_due - self.pending_period
         overdue_at = operative_due + self.grace_period
 
         # Skip anchor may place now well before pending_at — pre-skip window
@@ -80,7 +79,7 @@ class OneshotChore(BaseChore):
             return None
         if self._skip_anchor_active(now):
             return self.skipped_until
-        pending_at = self.due_datetime - self.early_window
+        pending_at = self.due_datetime - self.pending_period
         if self.last_completed is not None and self.last_completed >= pending_at:
             return None
         return self.due_datetime
@@ -92,7 +91,7 @@ class OneshotChore(BaseChore):
         if self._skip_anchor_active(now):
             assert self.skipped_until is not None
             return (self.skipped_until, self.skipped_until + self.grace_period)
-        pending_at = self.due_datetime - self.early_window
+        pending_at = self.due_datetime - self.pending_period
         if self.last_completed is not None and self.last_completed >= pending_at:
             return None
         return (self.due_datetime, self.due_datetime + self.grace_period)
@@ -105,7 +104,7 @@ class OneshotChore(BaseChore):
         """
         if self.due_datetime is None:
             return False
-        pending_at = self.due_datetime - self.early_window
+        pending_at = self.due_datetime - self.pending_period
         return timestamp >= pending_at
 
     def apply_completion(
@@ -155,8 +154,6 @@ class OneshotChore(BaseChore):
         """Serialize oneshot-specific schedule fields."""
         return {
             "due_datetime": self.due_datetime.isoformat() if self.due_datetime else None,
-            "early_window_mins": int(self.early_window.total_seconds() // 60),
-            "grace_period_mins": int(self.grace_period.total_seconds() // 60),
             "persist": self.persist,
         }
 
@@ -177,7 +174,5 @@ class OneshotChore(BaseChore):
         return cls(
             **base,
             due_datetime=due_datetime,
-            early_window=timedelta(minutes=schedule.get("early_window_mins", DEFAULT_EARLY_WINDOW_MINS)),
-            grace_period=timedelta(minutes=schedule.get("grace_period_mins", DEFAULT_GRACE_PERIOD_MINS)),
             persist=bool(schedule.get("persist", False)),
         )

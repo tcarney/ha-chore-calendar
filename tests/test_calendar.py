@@ -89,7 +89,7 @@ async def test_event_property_returns_soonest_due(hass, config_entry):
         chore_name="Early Chore",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
     )
     chore_late = ScheduledChore(
@@ -97,7 +97,7 @@ async def test_event_property_returns_soonest_due(hass, config_entry):
         chore_name="Late Chore",
         chore_type=ChoreType.SCHEDULED,
         time=time(10, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
     )
     await runtime.store.async_create_chore(chore_early)
@@ -127,7 +127,7 @@ async def test_event_property_shows_next_due_when_completed(hass, config_entry):
         chore_name="Done Chore",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         last_completed=frozen,  # Completed in this period.
     )
@@ -223,7 +223,7 @@ async def test_get_events_returns_due_event(hass, config_entry):
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
     )
     await runtime.store.async_create_chore(chore)
@@ -257,7 +257,7 @@ async def test_get_events_returns_completed_event(hass, config_entry):
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         last_completed=completed_at,
     )
@@ -294,7 +294,7 @@ async def test_get_events_shows_next_due_for_completed_chore(hass, config_entry)
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         last_completed=completed_at,
     )
@@ -331,7 +331,7 @@ async def test_get_events_includes_old_completed(hass, config_entry):
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         last_completed=old_completed,
     )
@@ -363,7 +363,7 @@ async def test_get_events_filters_by_date_range(hass, config_entry):
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
     )
     await runtime.store.async_create_chore(chore)
@@ -410,7 +410,7 @@ async def test_get_events_sorted_by_start(hass, config_entry):
         chore_name="Late",
         chore_type=ChoreType.SCHEDULED,
         time=time(10, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
     )
     chore_early = ScheduledChore(
@@ -418,7 +418,7 @@ async def test_get_events_sorted_by_start(hass, config_entry):
         chore_name="Early",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
     )
     # Add late first, early second — events should still be sorted.
