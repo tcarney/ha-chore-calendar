@@ -157,7 +157,7 @@ Assigning a `tag.*` entity to a chore enables NFC tap-to-complete. When the tag 
 
 If multiple chores share the same tag, only the chore whose completion window matches the scan time is completed.
 
-When a chore is created with a `trigger_entity`, the tag's last-scanned timestamp is used to seed `last_completed` — this allows migration from existing tag-based systems without losing the most recent completion.
+When a chore is created with a `trigger_entity`, the tag's last-scanned timestamp is used to seed `last_completed` — this allows migration from existing tag-based systems without losing the most recent completion. Note that the chore's initial status will reflect the seeded `last_completed` (typically `completed` for a recently-scanned tag), not the standard never-completed `pending`.
 
 ## Services
 

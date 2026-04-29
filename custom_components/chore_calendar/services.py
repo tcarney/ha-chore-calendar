@@ -328,7 +328,10 @@ async def _async_handle_create(call: ServiceCall) -> None:
     chore.created_at = dt_util.now()
 
     # Seed last_completed from the tag's last-scanned time so existing tag
-    # systems transfer state into chore calendar on creation.
+    # systems transfer state into chore calendar on creation. Side effect:
+    # the chore's initial status reflects the seeded last_completed (typically
+    # `completed`) rather than the standard never-completed `pending`. That's
+    # intentional for the migration use case but worth flagging — see README.
     last_scanned = _resolve_tag_last_scanned(call.hass, call.data.get(ATTR_TRIGGER_ENTITY))
     if last_scanned is not None:
         chore.last_completed = last_scanned
