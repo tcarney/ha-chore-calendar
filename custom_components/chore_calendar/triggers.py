@@ -63,8 +63,8 @@ async def _async_complete_chores(
 
     Routing through ``async_complete_chore`` keeps tag-scan completions
     consistent with the ``complete_item`` service: the undo slot is populated
-    so a subsequent ``uncomplete_item`` can revert to the prior state, the
-    OneshotChore synthetic-due rule fires, and calendar event listeners are
+    so a subsequent ``uncomplete_item`` can revert to the prior state, a
+    OneshotChore is marked ``terminal``, and calendar event listeners are
     notified so dashboards refresh promptly.
     """
     for chore in chores:

@@ -29,6 +29,12 @@ class _ChoreCalendarStore(Store[dict[str, Any]]):
         rename ``early_window_mins`` to ``pending_period_mins``. Interval
         items had no ``early_window_mins`` previously — inject the new 3h
         default explicitly so the stored value matches the new behavior.
+
+        v3 also introduced the top-level ``terminal`` flag and dropped
+        ``previous_due_datetime`` from oneshot items. Both are handled at
+        load time by ``BaseChore.from_dict`` (terminal is backfilled from
+        the completion-vs-pending-window relationship; the dropped field is
+        ignored), so no work is needed here.
         """
         if old_major_version < 3:
             for item in old_data.get("items", []):

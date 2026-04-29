@@ -177,6 +177,7 @@ class TestComputeNextDue:
         due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
         completed = datetime(2026, 4, 15, 11, 30, tzinfo=TZ)
         chore = _make_oneshot(due_datetime=due, last_completed=completed)
+        chore.terminal = True
         assert chore.compute_next_due(completed + timedelta(hours=1)) is None
 
     def test_skip_anchor_returns_skipped_until(self):
@@ -204,6 +205,7 @@ class TestComputeDueRange:
         due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
         completed = datetime(2026, 4, 15, 11, 30, tzinfo=TZ)
         chore = _make_oneshot(due_datetime=due, last_completed=completed)
+        chore.terminal = True
         assert chore.compute_due_range(completed + timedelta(hours=1)) is None
 
 
@@ -267,36 +269,37 @@ class TestReschedule:
 
 
 # ---------------------------------------------------------------------------
-# Path A — create unscheduled, complete directly (synthetic due_datetime)
+# Path A — create unscheduled, complete directly (terminal flag)
 # ---------------------------------------------------------------------------
 
 
 class TestPathA:
     """create unscheduled → complete → uncomplete."""
 
-    def test_complete_synthesizes_due_datetime(self):
-        """Path A: complete an unscheduled oneshot → due_datetime synthesized to completion timestamp."""
+    def test_complete_unscheduled_sets_terminal(self):
+        """Path A: complete an unscheduled oneshot → terminal=True, due_datetime stays None."""
         chore = _make_oneshot()
         assert chore.due_datetime is None
+        assert chore.terminal is False
 
         timestamp = datetime(2026, 4, 15, 14, 0, tzinfo=TZ)
         chore.apply_completion(timestamp, "person.alice")
 
         assert chore.last_completed == timestamp
-        assert chore.due_datetime == timestamp  # synthesized
-        assert chore.previous_due_datetime is None  # was None before completion
+        assert chore.due_datetime is None  # not synthesized
+        assert chore.terminal is True
         assert chore.compute_status(timestamp) == ChoreStatus.COMPLETED
 
     def test_uncomplete_restores_unscheduled(self):
-        """Uncomplete reverts both last_completed and the synthetic due_datetime."""
+        """Uncomplete clears terminal and reverts last_completed."""
         chore = _make_oneshot()
         timestamp = datetime(2026, 4, 15, 14, 0, tzinfo=TZ)
         chore.apply_completion(timestamp, "person.alice")
         chore.revert_completion()
 
         assert chore.last_completed is None
-        assert chore.due_datetime is None  # synthetic value reverted
-        assert chore.previous_due_datetime is None
+        assert chore.due_datetime is None
+        assert chore.terminal is False
         assert chore.compute_status(timestamp + timedelta(hours=1)) == ChoreStatus.PENDING
 
     def test_complete_scheduled_oneshot_preserves_due(self):
@@ -307,17 +310,17 @@ class TestPathA:
         chore.apply_completion(completion, None)
 
         assert chore.due_datetime == original_due  # unchanged
-        assert chore.previous_due_datetime == original_due  # saved for revert
+        assert chore.terminal is True
 
-    def test_uncomplete_scheduled_oneshot_restores_original_due(self):
-        """Uncomplete after a normal scheduled-oneshot completion restores due_datetime."""
+    def test_uncomplete_scheduled_oneshot_clears_terminal(self):
+        """Uncomplete after a normal scheduled-oneshot completion clears terminal."""
         original_due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
         chore = _make_oneshot(due_datetime=original_due)
         chore.apply_completion(datetime(2026, 4, 15, 11, 45, tzinfo=TZ), None)
         chore.revert_completion()
 
         assert chore.due_datetime == original_due
-        assert chore.previous_due_datetime is None
+        assert chore.terminal is False
 
 
 # ---------------------------------------------------------------------------
@@ -329,14 +332,21 @@ class TestPathB:
     """complete a scheduled oneshot → update_item clears due_datetime → PENDING."""
 
     def test_clear_after_complete_reports_pending(self):
-        """After clearing due_datetime on a completed oneshot, status is PENDING."""
+        """After clearing due_datetime on a completed oneshot, status is PENDING.
+
+        update_item that touches due_datetime (set or clear) re-enters the
+        cycle, which the service layer expresses as ``terminal=False``. We
+        simulate that here.
+        """
         original_due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
         chore = _make_oneshot(due_datetime=original_due)
         chore.apply_completion(datetime(2026, 4, 15, 11, 45, tzinfo=TZ), None)
         assert chore.compute_status(datetime(2026, 4, 15, 12, 30, tzinfo=TZ)) == ChoreStatus.COMPLETED
 
-        # Simulate update_item clearing due_datetime.
+        # Simulate update_item clearing due_datetime — service layer pairs
+        # the field change with a terminal reset.
         chore.due_datetime = None
+        chore.terminal = False
 
         # last_completed is set, due_datetime is None → user explicitly
         # unscheduled. Should report PENDING (not COMPLETED).
@@ -347,7 +357,8 @@ class TestPathB:
         """After Path B clears the date, setting a new future due_datetime reactivates."""
         chore = _make_oneshot(due_datetime=datetime(2026, 4, 15, 12, 0, tzinfo=TZ))
         chore.apply_completion(datetime(2026, 4, 15, 11, 45, tzinfo=TZ), None)
-        chore.due_datetime = None  # Path B clear
+        chore.due_datetime = None  # Path B clear (service layer would also clear terminal)
+        chore.terminal = False
 
         # Set a new due far enough in the future.
         new_due = datetime(2026, 6, 15, 12, 0, tzinfo=TZ)
@@ -374,11 +385,16 @@ class TestPathC:
         assert chore.skipped_until is None  # not touched
 
     def test_apply_default_skip_after_reschedule(self):
-        """Path C: complete → reschedule → skip-default → unscheduled PENDING."""
+        """Path C: complete → reschedule → skip-default → unscheduled PENDING.
+
+        Reschedule re-enters the cycle (service layer clears ``terminal``);
+        skip-default then clears ``due_datetime``.
+        """
         chore = _make_oneshot(due_datetime=datetime(2026, 4, 15, 12, 0, tzinfo=TZ))
         chore.apply_completion(datetime(2026, 4, 15, 11, 45, tzinfo=TZ), None)
         # Reschedule to a future date (re-entering the cycle).
         chore.due_datetime = datetime(2026, 6, 15, 12, 0, tzinfo=TZ)
+        chore.terminal = False
         # last_completed remains from prior occurrence.
         assert chore.last_completed is not None
 
@@ -415,46 +431,71 @@ class TestExplicitSkip:
 
 
 class TestStorageRoundTrip:
-    """to_dict / from_dict preserves all fields including previous_due_datetime."""
+    """to_dict / from_dict preserves all fields including the terminal flag."""
 
     def test_round_trip_with_due_datetime(self):
         due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
         completed = datetime(2026, 4, 15, 11, 45, tzinfo=TZ)
         chore = _make_oneshot(due_datetime=due, last_completed=completed)
-        chore.previous_due_datetime = datetime(2026, 3, 1, 9, 0, tzinfo=TZ)
+        chore.terminal = True
 
         restored = BaseChore.from_dict(chore.to_dict())
 
         assert isinstance(restored, OneshotChore)
         assert restored.due_datetime == due
         assert restored.last_completed == completed
-        assert restored.previous_due_datetime == chore.previous_due_datetime
+        assert restored.terminal is True
         assert restored.pending_period == chore.pending_period
         assert restored.grace_period == chore.grace_period
 
     def test_round_trip_unscheduled(self):
-        """Unscheduled oneshot serializes due_datetime as None."""
+        """Unscheduled oneshot serializes due_datetime as None and terminal as False."""
         chore = _make_oneshot()
         data = chore.to_dict()
         assert data["schedule"]["due_datetime"] is None
-        assert data["previous_due_datetime"] is None
+        assert data["terminal"] is False
 
         restored = BaseChore.from_dict(data)
         assert isinstance(restored, OneshotChore)
         assert restored.due_datetime is None
-        assert restored.previous_due_datetime is None
+        assert restored.terminal is False
 
     def test_round_trip_after_path_a_completion(self):
-        """Path A: complete unscheduled oneshot, round-trip preserves synthetic due_datetime."""
+        """Path A: complete unscheduled oneshot, round-trip preserves terminal flag."""
         chore = _make_oneshot()
         timestamp = datetime(2026, 4, 15, 14, 0, tzinfo=TZ)
         chore.apply_completion(timestamp, "person.alice")
 
         restored = BaseChore.from_dict(chore.to_dict())
         assert isinstance(restored, OneshotChore)
-        assert restored.due_datetime == timestamp
+        assert restored.due_datetime is None  # not synthesized
         assert restored.last_completed == timestamp
-        assert restored.previous_due_datetime is None
+        assert restored.terminal is True
+
+    def test_legacy_backfill_terminal_from_completion_window(self):
+        """Stores written before the terminal flag existed get backfilled on load.
+
+        A oneshot with last_completed inside the current cycle's pending
+        window was terminal under the old (computed) model, so it should
+        come back terminal=True. One outside that window stays False.
+        """
+        due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
+        # Completion inside pending window (pending_at = 09:00) → terminal.
+        completed_in = datetime(2026, 4, 15, 11, 30, tzinfo=TZ)
+        chore_in = _make_oneshot(due_datetime=due, last_completed=completed_in)
+        legacy_in = chore_in.to_dict()
+        legacy_in.pop("terminal", None)  # simulate pre-flag store
+        restored_in = BaseChore.from_dict(legacy_in)
+        assert restored_in.terminal is True
+
+        # Completion well before pending window — Path B/C "unscheduled with
+        # history" semantic; the flag should not be backfilled True.
+        completed_out = datetime(2026, 3, 1, 9, 0, tzinfo=TZ)
+        chore_out = _make_oneshot(due_datetime=due, last_completed=completed_out)
+        legacy_out = chore_out.to_dict()
+        legacy_out.pop("terminal", None)
+        restored_out = BaseChore.from_dict(legacy_out)
+        assert restored_out.terminal is False
 
 
 class TestPersistField:

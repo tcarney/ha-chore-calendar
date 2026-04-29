@@ -386,6 +386,18 @@ async def _async_handle_update(call: ServiceCall) -> None:
         updated["schedule"] = dict(updated["schedule"])
         _apply_overlays(call.data, updated, existing.chore_type)
 
+    # A oneshot reschedule (any change to due_datetime, including clearing
+    # it for Path B) re-enters the cycle — clear the terminal flag so the
+    # chore picks up window-math against the new anchor instead of staying
+    # COMPLETED via the short-circuit.
+    if (
+        existing.chore_type == ChoreType.ONESHOT
+        and ATTR_ONESHOT in call.data
+        and isinstance(call.data[ATTR_ONESHOT], dict)
+        and "due_datetime" in call.data[ATTR_ONESHOT]
+    ):
+        updated["terminal"] = False
+
     chore = BaseChore.from_dict(updated)
     await store.async_update_chore(chore)
     await coordinator.async_refresh()

@@ -96,8 +96,8 @@ pending → due → overdue → (trigger) → completed [terminal for current oc
 
 - `pending_at` = `due_datetime - pending_period`, `overdue_at` = `due_datetime + grace_period`
 - `due_datetime` is **optional** — `None` represents an unscheduled chore that reports `pending` (actionable but not requiring action) until a date is set via `update_item` or the chore is completed directly
-- Completion synthesizes `due_datetime` to the completion timestamp when the chore is unscheduled, ensuring `(last_completed=set, due_datetime=None)` reliably means "user explicitly unscheduled" (Path B/C) rather than "completed without a date." `previous_due_datetime` undo slot reverts the synthesis on uncomplete
-- `update_item` can rewrite `due_datetime` at any time, including on a completed oneshot — when `last_completed < new_pending_at` the chore re-enters the cycle. This enables ad-hoc and automation-driven workflows where an external script computes the next occurrence
+- Completion sets the cross-type `terminal` flag rather than mutating `due_datetime`. `compute_status` short-circuits to `completed` while `terminal=True`, and `compute_due_range` / `compute_next_due` return `None`. This keeps `due_datetime` historically accurate (a never-scheduled completion stays `None`; a normally-scheduled completion keeps the original date) and gives the state machine a single explicit signal for "current occurrence is satisfied"
+- `update_item` can rewrite `due_datetime` at any time, including on a completed oneshot — any change to `due_datetime` clears `terminal`, re-entering the cycle and letting the window math evaluate against the new anchor. This enables ad-hoc and automation-driven workflows where an external script computes the next occurrence
 - Skip default clears `due_datetime` (leaves the chore unscheduled); skip with explicit `until` uses the standard `skipped_until` anchor; skipping a terminal-completed oneshot raises `ServiceValidationError`
 
 **Cross-type conversion**: `update_item` rejects per-type sub-dicts that don't match the existing chore's type. Each pair (oneshot ↔ scheduled, scheduled ↔ interval, etc.) has different semantics for `last_completed` and the type-specific anchor fields, so type changes require `delete_item` + `create_item` rather than guessing a migration.
@@ -163,6 +163,7 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         },
         "pending_period_mins": 180,
         "grace_period_mins": 60,
+        "terminal": false,
         "trigger_tag_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
         "assigned_to": ["person.claire"],
         "created_at": "2026-03-01T10:00:00+00:00",
@@ -181,6 +182,7 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         },
         "pending_period_mins": 180,
         "grace_period_mins": 20160,
+        "terminal": false,
         "trigger_tag_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
         "assigned_to": [],
         "created_at": "2026-01-01T12:00:00+00:00",
@@ -200,6 +202,7 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         },
         "pending_period_mins": 10080,
         "grace_period_mins": 0,
+        "terminal": false,
         "trigger_tag_id": null,
         "assigned_to": ["person.tom"],
         "created_at": "2026-03-15T09:00:00+00:00",
@@ -207,8 +210,7 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "last_completed_by": null,
         "previous_last_completed": null,
         "previous_last_completed_by": null,
-        "skipped_until": null,
-        "previous_due_datetime": null
+        "skipped_until": null
       }
     ]
   }
@@ -218,6 +220,8 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
 `completed_cleared_at` is a per-list field (alongside `items`) holding the cutoff set by `hide_completed_items`. New keys default to `null` for backward-compat — older stores that omit them load cleanly without a version bump.
 
 `pending_period_mins` and `grace_period_mins` are top-level item fields (not nested in `schedule`) since both windows apply uniformly across chore types. The v2→v3 migration lifts both keys out of the per-type `schedule` dict; interval items that lacked `early_window_mins` in v2 get the 3h default (`pending_period_mins: 180`) injected explicitly.
+
+`terminal` is a top-level item field (default `false`) introduced in v3 alongside the period promotion. It encodes "current occurrence is satisfied and won't roll forward" — set by `apply_completion` for `OneshotChore` today, reserved for `ScheduledChore` once the recurrence-model RRULE work lands. Stores written before the flag existed are backfilled at load time: a oneshot whose `last_completed` falls inside the current cycle's pending window comes back `terminal=true`. The legacy `previous_due_datetime` slot (used by an earlier "synthesize due_datetime on completion" rule) was dropped at the same time and is ignored on load.
 
 ## Lovelace Card
 
