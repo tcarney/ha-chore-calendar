@@ -27,7 +27,6 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 CARD_JS = "chore-calendar-card.js"
 CARD_URL_PATH = f"/{DOMAIN}/{CARD_JS}"
-_RESOURCE_TRACKER = f"{DOMAIN}_lovelace_resource_id"
 
 
 class ChoreCalendarData(NamedTuple):
@@ -109,7 +108,6 @@ async def _async_register_card_resource(hass: HomeAssistant, resource_url: str) 
         return
 
     data = await resources.async_create_item({CONF_RESOURCE_TYPE_WS: "module", CONF_URL: resource_url})
-    hass.data[_RESOURCE_TRACKER] = data[CONF_ID]
     _LOGGER.debug("Registered card as Lovelace resource (ID %s)", data[CONF_ID])
 
 
