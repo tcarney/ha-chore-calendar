@@ -17,7 +17,6 @@ from .actions import (
     async_apply_completed_cleared_at,
     async_complete_chore,
     async_uncomplete_chore,
-    notify_calendar_event_listeners,
     resolve_tag_entity_id,
 )
 from .const import (
@@ -337,7 +336,6 @@ async def _async_handle_create(call: ServiceCall) -> None:
 
     await store.async_create_chore(chore)
     await coordinator.async_refresh()
-    notify_calendar_event_listeners(call.hass, store.entry_id)
     LOGGER.info("created %s (%s)", chore.chore_name, uid)
 
 
@@ -401,7 +399,6 @@ async def _async_handle_update(call: ServiceCall) -> None:
     chore = BaseChore.from_dict(updated)
     await store.async_update_chore(chore)
     await coordinator.async_refresh()
-    notify_calendar_event_listeners(call.hass, store.entry_id)
     LOGGER.info("updated %s (%s)", existing.chore_name, uid)
 
 
@@ -417,7 +414,6 @@ async def _async_handle_delete(call: ServiceCall) -> None:
 
     await store.async_delete_chore(uid)
     await coordinator.async_refresh()
-    notify_calendar_event_listeners(call.hass, store.entry_id)
 
     call.hass.bus.async_fire(
         EVENT_ITEM_DELETED,
@@ -487,7 +483,6 @@ async def _async_handle_skip(call: ServiceCall) -> None:
 
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
-    notify_calendar_event_listeners(call.hass, store.entry_id)
 
     call.hass.bus.async_fire(
         EVENT_ITEM_SKIPPED,
