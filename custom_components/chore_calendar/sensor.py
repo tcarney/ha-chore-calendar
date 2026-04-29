@@ -12,6 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util, slugify as slugify_util
 
+from .actions import resolve_tag_entity_id
 from .const import (
     ATTR_ASSIGNED_TO,
     ATTR_CHORE_TYPE,
@@ -171,20 +172,13 @@ class ChoreSensorEntity(CoordinatorEntity[ChoreCalendarCoordinator], SensorEntit
         return {
             ATTR_UID: chore.uid,
             ATTR_CHORE_TYPE: str(chore.chore_type),
-            ATTR_TRIGGER_ENTITY: self._resolve_trigger_entity(chore),
+            ATTR_TRIGGER_ENTITY: resolve_tag_entity_id(self.hass, chore.trigger_tag_id),
             ATTR_LAST_COMPLETED: chore.last_completed.isoformat() if chore.last_completed else None,
             ATTR_LAST_COMPLETED_BY: chore.last_completed_by,
             ATTR_NEXT_DUE: next_due.isoformat() if next_due else None,
             ATTR_ASSIGNED_TO: list(chore.assigned_to),
             ATTR_SCHEDULE: chore.schedule_description(),
         }
-
-    def _resolve_trigger_entity(self, chore: BaseChore) -> str | None:
-        """Resolve trigger_tag_id to its current entity_id for display."""
-        if not chore.trigger_tag_id:
-            return None
-        registry = er.async_get(self.hass)
-        return registry.async_get_entity_id("tag", "tag", chore.trigger_tag_id)
 
     def _get_chore(self) -> BaseChore | None:
         """Get the chore from coordinator data."""

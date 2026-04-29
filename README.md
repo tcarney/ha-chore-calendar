@@ -4,16 +4,15 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 
 ## Features
 
-- **Integration-based setup**: Create chore lists through Settings > Integrations — no YAML required
 - **Service-driven management**: Create, update, delete, and complete chores via service calls
-- **Sensor entities**: One sensor per chore tracking its current status (pending, due, overdue, completed)
 - **Calendar entity**: Read-only calendar per list showing upcoming and recently completed chores
-- **Todo entity**: One todo list per chore list, surfacing actionable chores (pending/due/overdue) through HA's native todo UI and Assist voice; toggling items routes through `complete_item` / `uncomplete_item`
+- **Todo entity**: One todo list per chore list, surfacing chores through HA's native todo UI and Assist pipelines
+- **Sensor entities**: One sensor per chore tracking its current status and attributes
 - **Custom Lovelace card**: Built-in timeline card with per-entity filtering, colors, detail dialog, and configurable actions
 - **Tag scan auto-completion**: Assign NFC tags to chores for tap-to-complete; shared tags automatically resolve to the correct chore based on completion windows
 - **Flexible scheduling**: Scheduled (specific days/times), interval-based, and oneshot (one-time tasks with optional due date) chore types
-- **Skip occurrences**: Defer a chore's next occurrence without touching its completion history, with an explicit `until` datetime or a type-specific default
-- **Status events**: Fires `chore_calendar_status_changed`, `chore_calendar_item_skipped`, and `chore_calendar_item_deleted` events for use in automations
+- **Skip occurrences**: Defer a chore's next occurrence without touching its completion history, with an explicit datetime or a type-specific default
+- **Status events**: Fires events on status change, chore skipped, and chore deleted for use in automations
 - **Persistent storage**: Chore data stored locally — no external API or cloud dependency
 
 ## Quick Start
@@ -49,7 +48,7 @@ Or use the one-click button:
 
 ### Add a Chore
 
-Use the `chore_calendar.create_item` service to add chores to a list. See [Chore Types and Options](#chore-types-and-options) for all available options and [Add Chores](#add-chores) for more examples.
+Use the `chore_calendar.create_item` service to add chores to a list. See [Chores](#chores) for all available options and [Add Chores](#add-chores) for more examples.
 
 ```yaml
 action: chore_calendar.create_item
@@ -70,42 +69,18 @@ entities:
   - calendar.daily_chores
 ```
 
-## Chore Types and Options
+## Chores
 
-### Scheduled Chores
+Chores are defined by a common four-status cycle, with different [chore types](#chore-types) available for varying behavior.
 
-Recur at a fixed time on specific days. Status cycle: **pending** → **due** → **overdue** → **completed**.
+| Status | Meaning |
+| --- | --- |
+| `pending` | Actionable but not yet due. Also reported by an unscheduled chore (no due date set yet). |
+| `due` | The chore is due now and waiting to be completed |
+| `overdue` | The grace period has passed without completion |
+| `completed` | The chore has been completed for the current period |
 
-| Option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `time` | yes | — | Time of day the chore is due (e.g. `"08:00:00"`) |
-| `active_days` | no | all days | Days the chore is active: `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun` |
-| `early_window` | no | 3 hours | How early the chore can be completed before it's due (duration) |
-
-### Interval Chores
-
-Recur on a fixed interval from the last completion. Status cycle: **due** → **overdue** → **completed** (no pending state).
-
-| Option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `interval` | yes | — | Time between occurrences (duration, e.g. `days: 90`) |
-
-### Oneshot Chores
-
-Non-recurring tasks with an optional due datetime. Status cycle: **pending** → **due** → **overdue** → **completed** (terminal for the current occurrence). Unlike scheduled and interval chores, a oneshot has no built-in cadence — its `due_datetime` comes from the create/update call, an automation, or an external script.
-
-| Option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `due_datetime` | no | — | When the chore is due. Omit to create an unscheduled chore that can be rescheduled later via `update_item`. |
-| `early_window` | no | 3 hours | How early the chore can be completed before it's due (duration) |
-| `persist` | no | `false` | When `false`, the chore is deleted on the next `hide_completed_items` call once completed. When `true`, the chore stays in storage so it can be reactivated via `update_item` with a new `due_datetime`. |
-
-Behaviors specific to oneshot:
-
-- **Optional due date**: a oneshot created without `due_datetime` reports `pending` until a date is set or the chore is completed directly. Useful for ad-hoc todo-style items ("Buy milk") and "someday" tasks.
-- **Reschedule via update_item**: writing a new `due_datetime` to a completed oneshot reactivates it through the standard pending/due/overdue cycle. Closer values (within the early window of `last_completed`) keep the chore completed — guards against accidental reactivation by past dates.
-- **Skip default clears the date**: `skip_item` with no `until` on a oneshot clears `due_datetime` (the chore enters the unscheduled pending state). Use `update_item` to reschedule. `skip_item` with explicit `until` works the same as scheduled/interval.
-- **Cleanup behavior**: terminal-completed oneshots with `persist: false` are deleted on the next `hide_completed_items` call. Set `persist: true` for chores that recur irregularly via external scripts.
+Newly created chores always start in `pending` and progress through the cycle from there. Once `overdue`, the chore stays pinned to its uncompleted period — the status or due date does not advance until the chore is completed.
 
 ### Common Options
 
@@ -114,30 +89,71 @@ These apply to all chore types:
 | Option | Required | Default | Description |
 | --- | --- | --- | --- |
 | `chore_name` | yes | — | Display name for the chore |
-| `grace_period` | no | 1 hour | How long after the due time before the chore becomes overdue (duration) |
+| `pending_period` | no | 3 hours | How long before the due time the chore reads as `pending` (upcoming, completable early) |
+| `grace_period` | no | 1 hour | How long after the due time before the chore becomes `overdue` |
 | `trigger_entity` | no | — | A `tag.*` entity for NFC tap-to-complete (see [Tag Triggers](#tag-triggers)) |
 | `assigned_to` | no | — | List of `person.*` entities assigned to the chore (informational, shown in card and events) |
 
 Duration values use the standard Home Assistant format: `hours: 3`, `days: 14`, `minutes: 30`, etc.
 
-### Chore Statuses
+Set `pending_period: 0` to skip the `pending` state entirely — the chore goes straight from `completed` to `due`. Useful for interval chores where an early window doesn't make sense (e.g. "every 90 days").
 
-Each chore sensor reports one of four statuses:
+A chore with no prior completion stays in `pending` until its first cycle becomes due. Once any completion is on record, the chore stays `completed` between cycles and only re-enters `pending` when its next `pending_at` arrives. For oneshot chores, `pending_period` also defines the minimum forward leap required to reactivate a completed chore via reschedule (a new `due_datetime` whose `pending_at` is at or before `last_completed` keeps the chore `completed`).
 
-| Status | Meaning |
+### Common Attributes
+
+The chore sensor's state is the chore's current status. Additional attributes are exposed alongside it:
+
+| Attribute | Description |
 | --- | --- |
-| **completed** | The chore has been completed for the current period |
-| **pending** | The early window has opened but the chore is not yet due (scheduled and oneshot); also reported by an unscheduled oneshot (no due date set) |
-| **due** | The chore is due now and waiting to be completed |
-| **overdue** | The grace period has passed without completion |
+| `uid` | Stable UUID assigned at creation. Used as the `item` argument when targeting a specific chore via the calendar entity in service calls. |
+| `chore_type` | The chore type set at creation by which sub-dict is passed; not changeable via `update_item`. |
+| `next_due` | When the chore is next due (ISO 8601). `null` for unscheduled chores. Stays pinned to the uncompleted period while `overdue`. |
+| `last_completed` | When the chore was last completed (ISO 8601), or `null` if never completed. |
+| `last_completed_by` | The `person.*` entity that completed the chore, or `null`. Populated via the optional `completed_by` parameter on `chore_calendar.complete_item`; shown in the card detail dialog and included in status events. |
 
-Overdue chores stay pinned to their uncompleted period — the next due time does not advance until the chore is completed. Newly created chores start in pending or due state but will not go overdue until they have been completed at least once.
+### Chore Types
 
-The `complete_item` service accepts an optional `completed_by` parameter (`person.*` entity) to record who completed the chore. This is shown in the card detail dialog and included in status events.
+#### Scheduled Chores
+
+Recur at a fixed time on specific days.
+
+| Option | Required | Default | Description |
+| --- | --- | --- | --- |
+| `time` | yes | — | Time of day the chore is due (e.g. `"08:00:00"`) |
+| `active_days` | no | all days | Days the chore is active: `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun` |
+
+A never-completed scheduled chore pins to the first active-day scheduled time at or after `created_at`. Creating a chore past today's scheduled time pins to the next active day's period (so the chore reads `pending`, never immediately `due`). If that first cycle is missed, the chore stays `overdue` until completed — it does not silently roll forward to a later period.
+
+#### Interval Chores
+
+Recur on a fixed interval from the last completion.
+
+| Option | Required | Default | Description |
+| --- | --- | --- | --- |
+| `interval` | yes | — | Time between occurrences (duration, e.g. `days: 90`) |
+
+A never-completed interval chore reports `pending` with no `next_due` until the first completion anchors the cycle. Tag-scan auto-completion still works in this state — the first scan establishes the cycle.
+
+#### Oneshot Chores
+
+Non-recurring tasks with an optional due datetime. Unlike scheduled and interval chores, a oneshot has no built-in cadence. The status will not cycle from `completed` to `pending` automatically. This is useful for chores where the due date is defined by an external source, such as an automation or script.
+
+| Option | Required | Default | Description |
+| --- | --- | --- | --- |
+| `due_datetime` | no | — | When the chore is due. Omit to create an unscheduled chore that can be rescheduled later via `update_item`. |
+| `persist` | no | `false` | When `false`, the chore is deleted on the next `hide_completed_items` call once completed. When `true`, the chore stays in storage so it can be reactivated via `update_item` with a new `due_datetime`. |
+
+Behaviors specific to oneshot:
+
+- **Optional due date**: a oneshot created without `due_datetime` reports `pending` until a date is set or the chore is completed directly. Useful for ad-hoc todo-style items ("Buy milk") and "someday" tasks.
+- **Reschedule via update_item**: writing a new `due_datetime` to a completed oneshot reactivates it through the standard pending/due/overdue cycle. Closer values (within the pending window of `last_completed`) keep the chore completed — guards against accidental reactivation by past dates.
+- **Skip default clears the date**: `skip_item` with no `until` on a oneshot clears `due_datetime` (the chore enters the unscheduled pending state). Use `update_item` to reschedule. `skip_item` with explicit `until` works the same as scheduled/interval.
+- **Cleanup behavior**: terminal-completed oneshots with `persist: false` are deleted on the next `hide_completed_items` call. Set `persist: true` for chores that recur irregularly via external scripts.
 
 ### Tag Triggers
 
-Assigning a `tag.*` entity to a chore enables NFC tap-to-complete. When the tag is scanned, the integration checks whether the chore is currently in its completion window (early window through overdue) and auto-completes it.
+Assigning a `tag.*` entity to a chore enables NFC tap-to-complete. When the tag is scanned, the integration checks whether the chore is currently in its completion window (pending window through overdue) and auto-completes it.
 
 If multiple chores share the same tag, only the chore whose completion window matches the scan time is completed.
 
@@ -170,15 +186,15 @@ data:
   grace_period:
     days: 14
 
-# Oneshot chore — single deadline with a 7-day early window
+# Oneshot chore — single deadline with a 7-day pending window
 action: chore_calendar.create_item
 data:
   entity_id: calendar.daily_chores
   chore_name: "File Taxes"
   oneshot:
     due_datetime: "2026-04-15T10:00:00-04:00"
-    early_window:
-      days: 7
+  pending_period:
+    days: 7
 
 # Unscheduled oneshot — ad-hoc todo, scheduled later via update_item
 action: chore_calendar.create_item
@@ -223,7 +239,7 @@ data:
 
 ### Skip a Chore
 
-Defer a chore's next occurrence without recording a completion. `last_completed` is untouched — skipping does not count as doing the chore. While the skip is in force, the chore's status reports as `completed` and `next_due` becomes `skipped_until`; the normal state machine (early window, grace period) runs around the deferred datetime.
+Defer a chore's next occurrence without recording a completion. `last_completed` is untouched — skipping does not count as doing the chore. While the skip is in force, the chore's status reports as `completed` and `next_due` becomes `skipped_until`; the normal state machine (pending window, grace period) runs around the deferred datetime.
 
 Provide `until` to pick the exact resume datetime, or omit it to use the type-specific default:
 
@@ -271,8 +287,6 @@ The resulting `chore_calendar_status_changed` event carries `uncomplete: true` s
 ### Hide Completed Items
 
 Set a per-list cutoff for hiding completed items from the calendar and todo entities. Items completed *before* the cutoff are hidden but their `last_completed` timestamps are preserved (recurring chores still compute state correctly; the next cycle reappears naturally). Terminal-completed oneshot chores with `persist: false` are deleted from storage during this call — fires `chore_calendar_item_deleted` for each.
-
-The native `todo.remove_completed_items` action is intentionally not exposed (see [SPECS.md](SPECS.md) under *Hide Completed Items*) — call this service directly instead.
 
 ```yaml
 # Hide all completed items as of now

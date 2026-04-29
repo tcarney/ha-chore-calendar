@@ -89,7 +89,7 @@ async def test_event_property_returns_soonest_due(hass, config_entry):
         chore_name="Early Chore",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
     )
     chore_late = ScheduledChore(
@@ -97,7 +97,7 @@ async def test_event_property_returns_soonest_due(hass, config_entry):
         chore_name="Late Chore",
         chore_type=ChoreType.SCHEDULED,
         time=time(10, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
     )
     await runtime.store.async_create_chore(chore_early)
@@ -127,7 +127,7 @@ async def test_event_property_shows_next_due_when_completed(hass, config_entry):
         chore_name="Done Chore",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         last_completed=frozen,  # Completed in this period.
     )
@@ -147,13 +147,12 @@ async def test_event_property_shows_next_due_when_completed(hass, config_entry):
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_event_property_skips_interval_no_anchor(hass, config_entry):
-    """Interval chore with no anchor has no drawable event but stays actionable.
+    """Never-completed interval chore is unscheduled — no event, state ``off``.
 
-    ``compute_due_range`` returns ``None`` for an interval chore with neither
-    ``created_at`` nor ``last_completed`` (nothing to anchor the window to), so
-    ``_make_due_event`` produces no event — the ``message`` attribute is ``None``.
-    Per ``IntervalChore.compute_status`` a never-completed interval chore is
-    always ``DUE``, so the state override still reports ``on``.
+    ``compute_due_range`` returns ``None`` for a never-completed interval
+    chore (no anchor until first completion), so ``_make_due_event``
+    produces no event. The chore reads as PENDING, so the state override
+    leaves the entity ``off``.
     """
     entity_id = await _setup_entry(hass, config_entry)
     runtime = config_entry.runtime_data
@@ -174,13 +173,13 @@ async def test_event_property_skips_interval_no_anchor(hass, config_entry):
         state = hass.states.get(entity_id)
 
     assert state is not None
-    assert state.state == "on"
+    assert state.state == "off"
     assert state.attributes.get("message") is None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_event_property_interval_with_created_at(hass, config_entry):
-    """Interval chore with created_at shows a due event starting at created_at."""
+    """Never-completed interval chore ignores created_at — still unscheduled, no event."""
     entity_id = await _setup_entry(hass, config_entry)
     runtime = config_entry.runtime_data
 
@@ -195,16 +194,15 @@ async def test_event_property_interval_with_created_at(hass, config_entry):
     )
     await runtime.store.async_create_chore(chore)
 
-    # Freeze within the due window (created_at to created_at + grace_period).
     frozen = datetime(2026, 3, 27, 18, 0, tzinfo=TZ)
     with patch("homeassistant.util.dt.now", return_value=frozen):
         await runtime.coordinator.async_refresh()
         await hass.async_block_till_done()
         state = hass.states.get(entity_id)
 
-    # Chore is DUE at this time → state "on" via the override.
-    assert state.state == "on"
-    assert state.attributes.get("message") == "With Created"
+    # No anchor until first completion → no event, state ``off``.
+    assert state.state == "off"
+    assert state.attributes.get("message") is None
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +221,7 @@ async def test_get_events_returns_due_event(hass, config_entry):
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
     )
     await runtime.store.async_create_chore(chore)
@@ -257,7 +255,7 @@ async def test_get_events_returns_completed_event(hass, config_entry):
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         last_completed=completed_at,
     )
@@ -294,7 +292,7 @@ async def test_get_events_shows_next_due_for_completed_chore(hass, config_entry)
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         last_completed=completed_at,
     )
@@ -331,7 +329,7 @@ async def test_get_events_includes_old_completed(hass, config_entry):
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         last_completed=old_completed,
     )
@@ -363,7 +361,7 @@ async def test_get_events_filters_by_date_range(hass, config_entry):
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
     )
     await runtime.store.async_create_chore(chore)
@@ -410,7 +408,7 @@ async def test_get_events_sorted_by_start(hass, config_entry):
         chore_name="Late",
         chore_type=ChoreType.SCHEDULED,
         time=time(10, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
     )
     chore_early = ScheduledChore(
@@ -418,7 +416,7 @@ async def test_get_events_sorted_by_start(hass, config_entry):
         chore_name="Early",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
     )
     # Add late first, early second — events should still be sorted.

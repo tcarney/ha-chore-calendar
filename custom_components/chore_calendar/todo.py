@@ -27,13 +27,13 @@ from homeassistant.components.todo import TodoItem, TodoListEntity
 from homeassistant.components.todo.const import TodoItemStatus, TodoListEntityFeature
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
+from . import chore_list_device_info
 from .actions import async_complete_chore, async_uncomplete_chore
-from .const import DOMAIN, ChoreStatus
+from .const import ChoreStatus
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore
 
@@ -78,15 +78,10 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_todo"
         self._attr_name = None  # Use device name as entity name.
-        # Mirror the calendar entity's DeviceInfo so the device exists with a
-        # name regardless of platform setup order — the todo platform sets up
-        # before calendar, so relying on calendar to seed the device name would
-        # leave this entity with a fallback slug for its object_id.
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
-            entry_type=DeviceEntryType.SERVICE,
-        )
+        # Seed the device with name + entry_type — the todo platform sets up
+        # before calendar, so leaving the seeding to calendar would leave
+        # this entity with a fallback slug for its object_id.
+        self._attr_device_info = chore_list_device_info(entry)
 
     @property
     def todo_items(self) -> list[TodoItem] | None:

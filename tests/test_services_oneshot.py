@@ -67,8 +67,8 @@ async def test_create_oneshot_with_due_datetime(hass, config_entry):
             "chore_name": "File Taxes",
             "oneshot": {
                 "due_datetime": due.isoformat(),
-                "early_window": {"days": 7},
             },
+            "pending_period": {"days": 7},
             "grace_period": {"hours": 1},
         },
         blocking=True,
@@ -79,7 +79,7 @@ async def test_create_oneshot_with_due_datetime(hass, config_entry):
     assert chore is not None
     assert chore.chore_type == ChoreType.ONESHOT
     assert chore.due_datetime == due
-    assert chore.early_window == timedelta(days=7)
+    assert chore.pending_period == timedelta(days=7)
     assert chore.grace_period == timedelta(hours=1)
 
 
@@ -254,6 +254,7 @@ async def test_skip_default_on_oneshot_clears_due_and_emits_null(hass, config_en
         {"entity_id": entity_id, "item": "Skippable"},
         blocking=True,
     )
+    await hass.async_block_till_done()
 
     chore = _find_oneshot(config_entry.runtime_data.store, "Skippable")
     assert chore is not None

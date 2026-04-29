@@ -119,7 +119,7 @@ async def test_tag_scan_completes_overdue_chore(hass):
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         trigger_tag_id=TAG_UUID,
         last_completed=datetime(2026, 3, 29, 8, 0, tzinfo=TZ),
@@ -151,7 +151,7 @@ async def test_tag_scan_skips_completed_chore(hass):
         chore_name="Medicine",
         chore_type=ChoreType.SCHEDULED,
         time=time(8, 0),
-        early_window=timedelta(hours=3),
+        pending_period=timedelta(hours=3),
         grace_period=timedelta(hours=1),
         trigger_tag_id=TAG_UUID,
         last_completed=completed_time,
@@ -170,6 +170,71 @@ async def test_tag_scan_skips_completed_chore(hass):
     # last_completed should be unchanged.
     updated = store.get_chore("med")
     assert updated.last_completed == completed_time
+
+    unsub()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_tag_scan_skips_interval_in_completed_phase(hass):
+    """A previously-completed interval chore well before pending_at is not auto-completed."""
+    store, coordinator = await _setup(hass)
+
+    chore = IntervalChore(
+        uid="water_filter",
+        chore_name="Water Filter",
+        chore_type=ChoreType.INTERVAL,
+        interval=timedelta(days=30),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(days=7),
+        trigger_tag_id=TAG_UUID,
+        last_completed=datetime(2026, 3, 1, 12, 0, tzinfo=TZ),
+    )
+    await store.async_create_chore(chore)
+    await coordinator.async_refresh()
+
+    unsub = async_setup_tag_listener(hass, store, coordinator)
+
+    # Scan 5 days into a 30-day interval — well before pending_at (Mar 31 09:00).
+    frozen = datetime(2026, 3, 6, 12, 0, tzinfo=TZ)
+    with patch("homeassistant.util.dt.now", return_value=frozen):
+        hass.bus.async_fire(EVENT_TAG_SCANNED, {"tag_id": TAG_UUID})
+        await hass.async_block_till_done()
+
+    # last_completed should be unchanged — the cycle hasn't entered its pending window.
+    updated = store.get_chore("water_filter")
+    assert updated.last_completed == datetime(2026, 3, 1, 12, 0, tzinfo=TZ)
+
+    unsub()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_tag_scan_completes_interval_in_pending_window(hass):
+    """An interval chore inside its pending window is auto-completed by tag scan."""
+    store, coordinator = await _setup(hass)
+
+    chore = IntervalChore(
+        uid="water_filter",
+        chore_name="Water Filter",
+        chore_type=ChoreType.INTERVAL,
+        interval=timedelta(days=30),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(days=7),
+        trigger_tag_id=TAG_UUID,
+        last_completed=datetime(2026, 3, 1, 12, 0, tzinfo=TZ),
+    )
+    await store.async_create_chore(chore)
+    await coordinator.async_refresh()
+
+    unsub = async_setup_tag_listener(hass, store, coordinator)
+
+    # due_at = Mar 31 12:00; pending_at = Mar 31 09:00. Scan inside the window.
+    frozen = datetime(2026, 3, 31, 10, 0, tzinfo=TZ)
+    with patch("homeassistant.util.dt.now", return_value=frozen):
+        hass.bus.async_fire(EVENT_TAG_SCANNED, {"tag_id": TAG_UUID})
+        await hass.async_block_till_done()
+
+    updated = store.get_chore("water_filter")
+    assert updated.last_completed == frozen
 
     unsub()
 

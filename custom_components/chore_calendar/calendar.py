@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, LOGGER, ChoreStatus
+from . import chore_list_device_info
+from .const import LOGGER, ChoreStatus
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore
 
@@ -97,11 +97,7 @@ class ChoreCalendarListEntity(CoordinatorEntity[ChoreCalendarCoordinator], Calen
         super().__init__(coordinator)
         self._attr_unique_id = entry.entry_id
         self._attr_name = None  # Use device name as entity name.
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
-            entry_type=DeviceEntryType.SERVICE,
-        )
+        self._attr_device_info = chore_list_device_info(entry)
 
     @property
     def event(self) -> CalendarEvent | None:

@@ -18,6 +18,7 @@ from .actions import (
     async_complete_chore,
     async_uncomplete_chore,
     notify_calendar_event_listeners,
+    resolve_tag_entity_id,
 )
 from .const import (
     ATTR_ASSIGNED_TO,
@@ -39,7 +40,7 @@ from .const import (
     ChoreType,
 )
 from .coordinator import ChoreCalendarCoordinator
-from .models import BaseChore, IntervalChore, OneshotChore, ScheduledChore
+from .models import BaseChore, OneshotChore
 from .store import ChoreStore
 
 # Service-specific field keys (not shared with sensor attributes).
@@ -57,6 +58,7 @@ ATTR_UNTIL = "until"
 ATTR_SCHEDULED = "scheduled"
 ATTR_INTERVAL = "interval"
 ATTR_ONESHOT = "oneshot"
+ATTR_PENDING_PERIOD = "pending_period"
 ATTR_GRACE_PERIOD = "grace_period"
 
 SERVICE_CREATE_SCHEMA = vol.Schema(
@@ -68,6 +70,7 @@ SERVICE_CREATE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_SCHEDULED): dict,
         vol.Optional(ATTR_INTERVAL): dict,
         vol.Optional(ATTR_ONESHOT): dict,
+        vol.Optional(ATTR_PENDING_PERIOD): dict,
         vol.Optional(ATTR_GRACE_PERIOD): dict,
     }
 )
@@ -82,6 +85,7 @@ SERVICE_UPDATE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_SCHEDULED): dict,
         vol.Optional(ATTR_INTERVAL): dict,
         vol.Optional(ATTR_ONESHOT): dict,
+        vol.Optional(ATTR_PENDING_PERIOD): dict,
         vol.Optional(ATTR_GRACE_PERIOD): dict,
     }
 )
@@ -231,17 +235,6 @@ def _resolve_tag_last_scanned(hass: HomeAssistant, trigger_entity: str | None) -
     return dt_util.parse_datetime(state.state)
 
 
-def _resolve_tag_entity_id(hass: HomeAssistant, trigger_tag_id: str | None) -> str | None:
-    """Resolve a tag UUID back to its entity_id for display.
-
-    Returns the entity_id (e.g. ``tag.morning_medicine``) or None.
-    """
-    if not trigger_tag_id:
-        return None
-    registry = er.async_get(hass)
-    return registry.async_get_entity_id("tag", "tag", trigger_tag_id)
-
-
 def _duration_to_mins(dur: dict[str, Any]) -> int:
     """Convert an HA duration dict to total minutes."""
     return int(dur.get("days", 0)) * 1440 + int(dur.get("hours", 0)) * 60 + int(dur.get("minutes", 0))
@@ -267,26 +260,27 @@ def _infer_chore_type(data: dict[str, Any]) -> ChoreType:
     }[present[0]]
 
 
-def _apply_schedule_overlays(
+def _apply_overlays(
     data: dict[str, Any],
-    schedule: dict[str, Any],
+    chore_dict: dict[str, Any],
     chore_type: ChoreType,
 ) -> dict[str, Any]:
-    """Overlay schedule fields from a service call onto an existing schedule dict.
+    """Overlay service-call fields onto a storage-shaped chore dict.
 
-    Used by both ``create_item`` (with an empty starting schedule) and
-    ``update_item`` (overlaying partial fields onto the chore's stored schedule).
-    Only the keys present in *data* are written — absent keys leave *schedule*
+    Writes per-type schedule fields into ``chore_dict["schedule"]`` and
+    cross-type window fields (``pending_period_mins``, ``grace_period_mins``)
+    at the top level. Used by both ``create_item`` (empty starting dict) and
+    ``update_item`` (overlaying partial fields onto the stored dict). Only
+    keys present in *data* are written — absent keys leave *chore_dict*
     untouched, preserving stored values during a partial update.
     """
+    schedule = chore_dict.setdefault("schedule", {})
     if chore_type == ChoreType.SCHEDULED and ATTR_SCHEDULED in data:
         obj = data[ATTR_SCHEDULED]
         if "time" in obj:
             schedule["time"] = obj["time"]
         if "active_days" in obj:
             schedule["active_days"] = obj["active_days"]
-        if "early_window" in obj:
-            schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
     elif chore_type == ChoreType.INTERVAL and ATTR_INTERVAL in data:
         schedule["interval_mins"] = _duration_to_mins(data[ATTR_INTERVAL])
     elif chore_type == ChoreType.ONESHOT and ATTR_ONESHOT in data:
@@ -295,33 +289,28 @@ def _apply_schedule_overlays(
             # None is meaningful (explicit unscheduled) — preserve verbatim.
             due = obj["due_datetime"]
             schedule["due_datetime"] = due.isoformat() if isinstance(due, datetime) else due
-        if "early_window" in obj:
-            schedule["early_window_mins"] = _duration_to_mins(obj["early_window"])
         if "persist" in obj:
             schedule["persist"] = bool(obj["persist"])
 
-    # grace_period is a top-level field shared by all types.
+    if ATTR_PENDING_PERIOD in data:
+        chore_dict["pending_period_mins"] = _duration_to_mins(data[ATTR_PENDING_PERIOD])
     if ATTR_GRACE_PERIOD in data:
-        schedule["grace_period_mins"] = _duration_to_mins(data[ATTR_GRACE_PERIOD])
-    return schedule
+        chore_dict["grace_period_mins"] = _duration_to_mins(data[ATTR_GRACE_PERIOD])
+    return chore_dict
 
 
 def _build_chore_from_data(data: dict[str, Any]) -> BaseChore:
     """Build a chore model from service call data."""
     chore_type = _infer_chore_type(data)
-    schedule = _apply_schedule_overlays(data, {}, chore_type)
-    base_kwargs: dict[str, Any] = {
+    chore_dict: dict[str, Any] = {
         "uid": data["uid"],
         "chore_name": data[ATTR_CHORE_NAME],
-        "chore_type": chore_type,
+        "chore_type": str(chore_type),
+        "schedule": {},
         "assigned_to": list(data.get(ATTR_ASSIGNED_TO, [])),
     }
-
-    if chore_type == ChoreType.SCHEDULED:
-        return ScheduledChore.from_schedule(base_kwargs, schedule)
-    if chore_type == ChoreType.INTERVAL:
-        return IntervalChore.from_schedule(base_kwargs, schedule)
-    return OneshotChore.from_schedule(base_kwargs, schedule)
+    _apply_overlays(data, chore_dict, chore_type)
+    return BaseChore.from_dict(chore_dict)
 
 
 async def _async_handle_create(call: ServiceCall) -> None:
@@ -371,11 +360,12 @@ async def _async_handle_update(call: ServiceCall) -> None:
     if ATTR_ASSIGNED_TO in call.data:
         updated["assigned_to"] = list(call.data[ATTR_ASSIGNED_TO])
 
-    # Overlay schedule fields if any were provided. update_item is type-locked:
-    # the type-specific sub-dicts are valid only for matching chore types so a
-    # silent no-op (e.g. interval_mins added to a scheduled chore's schedule and
-    # then ignored by ScheduledChore.from_schedule) doesn't masquerade as a
-    # successful update.
+    # update_item is type-locked: passing a per-type sub-dict that doesn't
+    # match the chore's existing type is rejected. Cross-type conversion is
+    # not supported because each pair (oneshot ↔ scheduled, scheduled ↔ interval,
+    # ...) has different semantics for what to do with last_completed,
+    # previous_*, and the type-specific anchor fields. Delete and re-create
+    # the chore to change its type.
     type_to_attr = {
         ChoreType.SCHEDULED: ATTR_SCHEDULED,
         ChoreType.INTERVAL: ATTR_INTERVAL,
@@ -386,13 +376,27 @@ async def _async_handle_update(call: ServiceCall) -> None:
         if attr != allowed_attr and attr in call.data:
             msg = (
                 f"Cannot update chore '{existing.chore_name}' with '{attr}' — "
-                f"chore type is '{existing.chore_type}'; use '{allowed_attr}'."
+                f"chore type is '{existing.chore_type}'. Use '{allowed_attr}' for "
+                f"type-matching updates, or delete and re-create the chore to change its type."
             )
             raise ServiceValidationError(msg)
 
-    has_schedule_fields = any(k in call.data for k in (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT, ATTR_GRACE_PERIOD))
-    if has_schedule_fields:
-        updated["schedule"] = _apply_schedule_overlays(call.data, dict(updated["schedule"]), existing.chore_type)
+    overlay_keys = (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT, ATTR_PENDING_PERIOD, ATTR_GRACE_PERIOD)
+    if any(k in call.data for k in overlay_keys):
+        updated["schedule"] = dict(updated["schedule"])
+        _apply_overlays(call.data, updated, existing.chore_type)
+
+    # A oneshot reschedule (any change to due_datetime, including clearing
+    # it for Path B) re-enters the cycle — clear the terminal flag so the
+    # chore picks up window-math against the new anchor instead of staying
+    # COMPLETED via the short-circuit.
+    if (
+        existing.chore_type == ChoreType.ONESHOT
+        and ATTR_ONESHOT in call.data
+        and isinstance(call.data[ATTR_ONESHOT], dict)
+        and "due_datetime" in call.data[ATTR_ONESHOT]
+    ):
+        updated["terminal"] = False
 
     chore = BaseChore.from_dict(updated)
     await store.async_update_chore(chore)
@@ -577,7 +581,7 @@ async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
                 "last_completed": chore.last_completed.isoformat() if chore.last_completed else None,
                 "last_completed_by": chore.last_completed_by,
                 "assigned_to": list(chore.assigned_to),
-                "trigger_entity": _resolve_tag_entity_id(call.hass, chore.trigger_tag_id),
+                "trigger_entity": resolve_tag_entity_id(call.hass, chore.trigger_tag_id),
                 "schedule": chore.schedule_description(),
             }
         )

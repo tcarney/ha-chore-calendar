@@ -52,10 +52,6 @@
         "active_days": {
           "name": "Active days",
           "description": "Days of the week this chore is active. Leave empty for every day."
-        },
-        "early_window": {
-          "name": "Early completion window",
-          "description": "How long before the scheduled time a completion will count. Default: 3 hours."
         }
       }
     },
@@ -64,10 +60,6 @@
         "due_datetime": {
           "name": "Due datetime",
           "description": "When this chore is due. Omit to create an unscheduled chore that can be rescheduled later."
-        },
-        "early_window": {
-          "name": "Early completion window",
-          "description": "How long before the due time a completion will count. Default: 3 hours."
         },
         "persist": {
           "name": "Persist after completion",
@@ -117,6 +109,10 @@
           "name": "Oneshot",
           "description": "Configure a non-recurring chore with a specific due datetime (or no date for an unscheduled item)."
         },
+        "pending_period": {
+          "name": "Pending period",
+          "description": "How long before the due time the chore reads as pending (upcoming, completable early). Default: 3 hours."
+        },
         "grace_period": {
           "name": "Grace period",
           "description": "How long after the due time before the chore is considered overdue. Default: 1 hour."
@@ -157,7 +153,11 @@
         },
         "oneshot": {
           "name": "Oneshot",
-          "description": "Update a oneshot chore's due datetime or early window. Set due datetime to null to clear it."
+          "description": "Update a oneshot chore's due datetime. Set due datetime to null to clear it."
+        },
+        "pending_period": {
+          "name": "Pending period",
+          "description": "How long before the due time the chore reads as pending."
         },
         "grace_period": {
           "name": "Grace period",

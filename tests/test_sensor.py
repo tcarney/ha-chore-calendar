@@ -62,11 +62,11 @@ async def test_sensor_created_for_existing_chore(hass, config_entry):
     # Entity ID should have the device name prefix + slugified chore name.
     assert entity_id == "sensor.daily_chores_change_water_filter"
 
-    # Check state.
+    # Check state. A never-completed interval chore is unscheduled-PENDING.
     with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
         state = hass.states.get(entity_id)
     assert state is not None
-    assert state.state == "due"
+    assert state.state == "pending"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

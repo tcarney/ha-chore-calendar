@@ -38,9 +38,7 @@ def async_setup_tag_listener(
         matching = [
             chore
             for chore in store.get_all_chores().values()
-            if chore.trigger_tag_id == tag_id
-            and chore.compute_status(now) != ChoreStatus.COMPLETED
-            and chore.is_in_completion_window(now)
+            if chore.trigger_tag_id == tag_id and chore.compute_status(now) != ChoreStatus.COMPLETED
         ]
 
         if not matching:
@@ -65,8 +63,8 @@ async def _async_complete_chores(
 
     Routing through ``async_complete_chore`` keeps tag-scan completions
     consistent with the ``complete_item`` service: the undo slot is populated
-    so a subsequent ``uncomplete_item`` can revert to the prior state, the
-    OneshotChore synthetic-due rule fires, and calendar event listeners are
+    so a subsequent ``uncomplete_item`` can revert to the prior state, a
+    OneshotChore is marked ``terminal``, and calendar event listeners are
     notified so dashboards refresh promptly.
     """
     for chore in chores:

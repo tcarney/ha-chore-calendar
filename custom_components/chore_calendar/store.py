@@ -4,27 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
-from uuid import uuid4
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, STORAGE_VERSION
+from .const import DEFAULT_PENDING_PERIOD_MINS, DOMAIN, STORAGE_VERSION
 from .models import BaseChore
 
 
 class _ChoreCalendarStore(Store[dict[str, Any]]):
-    """Storage subclass with version migration support.
-
-    Migration v1→v2: remove this subclass when dropping v1 support.
-    Use plain ``Store`` in ``ChoreStore.__init__`` instead.
-    """
-
-    def __init__(self, hass: HomeAssistant, key: str) -> None:
-        """Initialize with the current storage version."""
-        super().__init__(hass, STORAGE_VERSION, key)
-        self._slug_to_uid: dict[str, str] = {}
+    """Storage subclass with version migration support."""
 
     async def _async_migrate_func(
         self,
@@ -32,28 +22,29 @@ class _ChoreCalendarStore(Store[dict[str, Any]]):
         old_minor_version: int,
         old_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """Migrate storage data from older versions."""
-        if old_major_version == 1:
-            old_chores: dict[str, Any] = old_data.get("chores", {})
-            items: list[dict[str, Any]] = []
-            for old_slug, chore_data in old_chores.items():
-                new_uid = str(uuid4())
-                chore_data["uid"] = new_uid
-                chore_data.pop("chore_id", None)
-                items.append(chore_data)
-                self._slug_to_uid[old_slug] = new_uid
-            old_data.pop("chores", None)
-            old_data["items"] = items
-        return old_data
+        """Migrate storage data from older versions.
 
-    @property
-    def slug_to_uid_map(self) -> dict[str, str]:
-        """Return the slug→uid mapping produced by a v1→v2 migration.
+        v2 → v3: lift ``early_window_mins`` and ``grace_period_mins`` out of
+        each item's per-type ``schedule`` dict into top-level keys, and
+        rename ``early_window_mins`` to ``pending_period_mins``. Interval
+        items had no ``early_window_mins`` previously — inject the new 3h
+        default explicitly so the stored value matches the new behavior.
 
-        Empty if no migration was needed. Migration v1→v2: remove when
-        dropping v1 support.
+        v3 also introduced the top-level ``terminal`` flag and dropped
+        ``previous_due_datetime`` from oneshot items. Both are handled at
+        load time by ``BaseChore.from_dict`` (terminal is backfilled from
+        the completion-vs-pending-window relationship; the dropped field is
+        ignored), so no work is needed here.
         """
-        return self._slug_to_uid
+        if old_major_version < 3:
+            for item in old_data.get("items", []):
+                schedule = item.get("schedule", {})
+                pending_mins = schedule.pop("early_window_mins", DEFAULT_PENDING_PERIOD_MINS)
+                grace_mins = schedule.pop("grace_period_mins", None)
+                item["pending_period_mins"] = pending_mins
+                if grace_mins is not None:
+                    item["grace_period_mins"] = grace_mins
+        return old_data
 
 
 class ChoreStore:
@@ -61,9 +52,7 @@ class ChoreStore:
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         """Initialize the store."""
-        # Migration v1→v2: replace _ChoreCalendarStore with plain Store
-        # when dropping v1 support.
-        self._store = _ChoreCalendarStore(hass, f"{DOMAIN}.{entry_id}")
+        self._store = _ChoreCalendarStore(hass, STORAGE_VERSION, f"{DOMAIN}.{entry_id}")
         self._chores: dict[str, BaseChore] = {}
         # Surface the config entry id so shared helpers (e.g. the calendar
         # event-listener notifier in services.py) can resolve to the
@@ -106,14 +95,6 @@ class ChoreStore:
         """Set the cutoff and persist."""
         self._completed_cleared_at = value
         await self.async_save()
-
-    @property
-    def slug_to_uid_map(self) -> dict[str, str]:
-        """Return the slug→uid mapping from a v1→v2 migration.
-
-        Migration v1→v2: remove when dropping v1 support.
-        """
-        return self._store.slug_to_uid_map
 
     def get_all_chores(self) -> dict[str, BaseChore]:
         """Return a copy of the in-memory chores dict."""
