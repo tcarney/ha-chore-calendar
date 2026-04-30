@@ -17,7 +17,6 @@ from .actions import (
     async_apply_completed_cleared_at,
     async_complete_chore,
     async_uncomplete_chore,
-    notify_calendar_event_listeners,
     resolve_tag_entity_id,
 )
 from .const import (
@@ -329,7 +328,10 @@ async def _async_handle_create(call: ServiceCall) -> None:
     chore.created_at = dt_util.now()
 
     # Seed last_completed from the tag's last-scanned time so existing tag
-    # systems transfer state into chore calendar on creation.
+    # systems transfer state into chore calendar on creation. Side effect:
+    # the chore's initial status reflects the seeded last_completed (typically
+    # `completed`) rather than the standard never-completed `pending`. That's
+    # intentional for the migration use case but worth flagging — see README.
     last_scanned = _resolve_tag_last_scanned(call.hass, call.data.get(ATTR_TRIGGER_ENTITY))
     if last_scanned is not None:
         chore.last_completed = last_scanned
@@ -337,7 +339,6 @@ async def _async_handle_create(call: ServiceCall) -> None:
 
     await store.async_create_chore(chore)
     await coordinator.async_refresh()
-    notify_calendar_event_listeners(call.hass, store.entry_id)
     LOGGER.info("created %s (%s)", chore.chore_name, uid)
 
 
@@ -401,7 +402,6 @@ async def _async_handle_update(call: ServiceCall) -> None:
     chore = BaseChore.from_dict(updated)
     await store.async_update_chore(chore)
     await coordinator.async_refresh()
-    notify_calendar_event_listeners(call.hass, store.entry_id)
     LOGGER.info("updated %s (%s)", existing.chore_name, uid)
 
 
@@ -417,7 +417,6 @@ async def _async_handle_delete(call: ServiceCall) -> None:
 
     await store.async_delete_chore(uid)
     await coordinator.async_refresh()
-    notify_calendar_event_listeners(call.hass, store.entry_id)
 
     call.hass.bus.async_fire(
         EVENT_ITEM_DELETED,
@@ -487,7 +486,6 @@ async def _async_handle_skip(call: ServiceCall) -> None:
 
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
-    notify_calendar_event_listeners(call.hass, store.entry_id)
 
     call.hass.bus.async_fire(
         EVENT_ITEM_SKIPPED,

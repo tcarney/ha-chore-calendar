@@ -2,10 +2,9 @@
 
 These are the building blocks the ``services.py`` handlers, the ``todo``
 platform, and the tag-scan listener all reuse — completion, uncompletion,
-the per-list completed-items sweep, and the calendar-listener invalidation
-hook. Keeping them in their own module breaks an awkward
-``platforms → services`` dependency edge and lets ``services.py`` focus on
-service-handler glue.
+and the per-list completed-items sweep. Keeping them in their own module
+breaks an awkward ``platforms → services`` dependency edge and lets
+``services.py`` focus on service-handler glue.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, EVENT_ITEM_DELETED, LOGGER, ChoreStatus
+from .const import EVENT_ITEM_DELETED, LOGGER, ChoreStatus
 from .models import OneshotChore
 
 if TYPE_CHECKING:
@@ -50,7 +49,6 @@ async def async_complete_chore(
     existing.apply_completion(timestamp, completed_by, clear_skip=not keep_skip)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
-    notify_calendar_event_listeners(coordinator.hass, store.entry_id)
     LOGGER.info("completed %s (%s) at %s", existing.chore_name, uid, timestamp.isoformat())
 
 
@@ -78,7 +76,6 @@ async def async_uncomplete_chore(
     coordinator.mark_uncompleted(uid)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
-    notify_calendar_event_listeners(coordinator.hass, store.entry_id)
     LOGGER.info("uncompleted %s (%s)", existing.chore_name, uid)
 
 
@@ -137,42 +134,6 @@ async def async_apply_completed_cleared_at(
 
     LOGGER.debug("persist=false sweep complete: %d chore(s) deleted", swept)
     await coordinator.async_refresh()
-    notify_calendar_event_listeners(hass, store.entry_id)
-
-
-def notify_calendar_event_listeners(hass: HomeAssistant, entry_id: str) -> None:
-    """Push fresh events to the calendar panel subscribers for *entry_id*.
-
-    HA's calendar dashboard caches event lists client-side and does not
-    refetch on ``state_changed`` — CRUD actions on chores leave stale
-    events visible until the user navigates dates or reloads the browser.
-    ``CalendarEntity.async_update_event_listeners`` (added on HA dev,
-    post-2026.3.1) lets the integration push an invalidation.
-
-    Looks up the calendar entity for the given config entry (its unique_id
-    is the entry_id) and calls the listener-update method when present.
-    Silently no-ops when:
-
-    - The calendar entity isn't loaded for this entry.
-    - The HA version doesn't yet implement ``async_update_event_listeners``.
-    """
-    registry = er.async_get(hass)
-    calendar_entity_id = registry.async_get_entity_id("calendar", DOMAIN, entry_id)
-    if calendar_entity_id is None:
-        return
-
-    calendar_component = hass.data.get("calendar")
-    if calendar_component is None:
-        return
-    entity = calendar_component.get_entity(calendar_entity_id)
-    notify = getattr(entity, "async_update_event_listeners", None)
-    if notify is None:
-        return
-    notify()
-    LOGGER.debug(
-        "Pushed calendar event update to subscribers of %s",
-        calendar_entity_id,
-    )
 
 
 def resolve_tag_entity_id(hass: HomeAssistant, trigger_tag_id: str | None) -> str | None:
