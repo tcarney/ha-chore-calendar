@@ -123,7 +123,7 @@ A parallel `previous_skipped_until` slot holds any `skipped_until` value that a 
   - *Interval*: `now + interval`.
   - *Oneshot*: clears `due_datetime` (the chore enters the unscheduled `pending` state). Skipping a terminal-completed oneshot raises `ServiceValidationError`.
 - **`complete_item` clears the skip** by default. Pass `keep_skip: true` to preserve it — internally mapped to `apply_completion(clear_skip=False)`. The cleared value is saved to `previous_skipped_until` and restored by `uncomplete_item`.
-- **Fires `chore_calendar_item_skipped`** with `uid`, `chore_name`, `skipped_until`, and the list `entity_id`. The `skipped_until` field is `null` when oneshot default-skip cleared the date (no operative anchor). Status transitions continue to fire `chore_calendar_status_changed`.
+- **Surfaces via `chore_calendar_status_changed`** with `source=skip` on the resulting transition (e.g. `due → completed` when `skipped_until` lands inside the skip-anchor's pending window). Skipping a chore already in `completed` (e.g. early-completed scheduled chore deferring its next cycle further) doesn't fire the event because the transition is `completed → completed`; the chore's `skipped_until` is still observable via the sensor's `state_changed`.
 - **Scope**: per-chore only; list-level skip is deferred.
 
 ### Hide Completed Items
@@ -136,9 +136,26 @@ A parallel `previous_skipped_until` slot holds any `skipped_until` value that a 
 - **`get_items` exposes `completed_cleared_at`** at the response top level so the card can apply the filter client-side. The response composes with the card's existing `completed_period` filter as AND (whichever is more restrictive wins).
 - **Native `todo.remove_completed_items` is intentionally unavailable** — the todo entity does not advertise `DELETE_TODO_ITEM`. HA's bulk-clear path would route through `async_delete_todo_items` per-uid with no clean way to distinguish a "permanently delete this chore" intent from a "clear from completed view" intent, and the native card's "permanently deleted" warning would be misleading for recurring chores. The `chore_calendar.hide_completed_items` service is the supported path.
 
-### Deletion Event
+### Events Vocabulary
 
-`chore_calendar_item_deleted` fires on every actual storage deletion. Payload: `uid`, `chore_name`, `chore_type`, list `entity_id`. Sources:
+Three events make up the public automation surface; lifecycle CRUD pairs (created/deleted) are dedicated events, status transitions are unified under `_status_changed` with a `source` field describing the cause.
+
+**`chore_calendar_status_changed`** — fires whenever a chore's status transitions. Payload: `uid`, `chore_name`, `entity_id`, `from_status`, `to_status`, `next_due`, `assigned_to`, `source`. The required `source` field is one of:
+
+| `source`     | When fired                                                                                  |
+|--------------|---------------------------------------------------------------------------------------------|
+| `schedule`   | Coordinator tick crossed a threshold (default — natural progression).                       |
+| `complete`   | `complete_item` service or todo entity `needs_action → completed` toggle.                   |
+| `uncomplete` | `uncomplete_item` service or todo entity `completed → needs_action` toggle.                 |
+| `skip`       | `skip_item` service.                                                                        |
+| `update`     | `update_item` whose field change flipped the operative anchor enough to change status.      |
+| `tag`        | `tag_scanned` listener auto-completion.                                                     |
+
+The coordinator stores per-uid source overrides in `_pending_sources`, populated by service handlers via `mark_source(uid, source)` and consumed exactly once per refresh tick. Pending sources are dropped after each tick whether or not a transition fired, so a service action that doesn't flip status doesn't bleed its source into a later natural transition.
+
+**`chore_calendar_item_created`** — fires from `create_item` after the chore is persisted and the coordinator has refreshed. Payload: `uid`, `chore_name`, `chore_type`, `entity_id`, `status`, `next_due`, `assigned_to`. `status` reflects the chore at creation; tag-seeded creation surfaces `completed` rather than the standard `pending` because the seeded `last_completed` lands inside the current cycle's pending window.
+
+**`chore_calendar_item_deleted`** — fires on every actual storage deletion. Payload: `uid`, `chore_name`, `chore_type`, `entity_id`. Sources:
 
 - `chore_calendar.delete_item` — the explicit delete service.
 - The `persist=false` sweep during `hide_completed_items`.
@@ -165,10 +182,10 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "grace_period_mins": 60,
         "terminal": false,
         "trigger_tag_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-        "assigned_to": ["person.claire"],
+        "assigned_to": ["person.alice"],
         "created_at": "2026-03-01T10:00:00+00:00",
         "last_completed": "2026-03-22T07:52:00+00:00",
-        "last_completed_by": "person.claire",
+        "last_completed_by": "person.alice",
         "previous_last_completed": null,
         "previous_last_completed_by": null,
         "skipped_until": null

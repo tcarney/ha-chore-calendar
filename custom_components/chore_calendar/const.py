@@ -35,6 +35,22 @@ class ChoreType(StrEnum):
     SCHEDULED = "scheduled"
 
 
+class ChoreEventSource(StrEnum):
+    """Why a ``chore_calendar_status_changed`` event fired.
+
+    Surfaced as the required ``source`` field on the event payload so
+    automations can distinguish service-driven transitions from natural
+    schedule progression.
+    """
+
+    SCHEDULE = "schedule"  # coordinator tick crossed a threshold (default)
+    COMPLETE = "complete"  # complete_item service or todo entity toggle
+    UNCOMPLETE = "uncomplete"  # uncomplete_item service or todo entity toggle
+    SKIP = "skip"  # skip_item service
+    UPDATE = "update"  # update_item changed a field that flipped status
+    TAG = "tag"  # tag_scanned listener auto-completion
+
+
 # Attribute keys for sensor extra_state_attributes.
 ATTR_ASSIGNED_TO = "assigned_to"
 ATTR_CHORE_TYPE = "chore_type"
@@ -59,8 +75,8 @@ SERVICE_UNCOMPLETE_ITEM = "uncomplete_item"
 SERVICE_UPDATE_ITEM = "update_item"
 
 # Event names.
+EVENT_ITEM_CREATED = "chore_calendar_item_created"
 EVENT_ITEM_DELETED = "chore_calendar_item_deleted"
-EVENT_ITEM_SKIPPED = "chore_calendar_item_skipped"
 EVENT_STATUS_CHANGED = "chore_calendar_status_changed"
 
 # Default values.

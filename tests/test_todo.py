@@ -8,7 +8,13 @@ from unittest.mock import patch
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.chore_calendar.const import CONF_LIST_NAME, DOMAIN, EVENT_STATUS_CHANGED, ChoreType
+from custom_components.chore_calendar.const import (
+    CONF_LIST_NAME,
+    DOMAIN,
+    EVENT_STATUS_CHANGED,
+    ChoreEventSource,
+    ChoreType,
+)
 from custom_components.chore_calendar.models import IntervalChore, ScheduledChore
 from homeassistant.components.todo import TodoItemStatus, TodoListEntityFeature
 from homeassistant.config_entries import ConfigEntryState
@@ -439,7 +445,7 @@ async def test_update_completed_to_needs_action_reverts_completion(hass, config_
     # (no anchor until the next first completion).
     assert len(events) == 1
     assert events[0].data["to_status"] == "pending"
-    assert events[0].data.get("uncomplete") is True
+    assert events[0].data["source"] == ChoreEventSource.UNCOMPLETE
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

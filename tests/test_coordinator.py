@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from custom_components.chore_calendar.const import EVENT_STATUS_CHANGED, ChoreType
+from custom_components.chore_calendar.const import EVENT_STATUS_CHANGED, ChoreEventSource, ChoreType
 from custom_components.chore_calendar.coordinator import ChoreCalendarCoordinator
 from custom_components.chore_calendar.models import IntervalChore, ScheduledChore
 from custom_components.chore_calendar.store import ChoreStore
@@ -133,8 +133,8 @@ async def test_coordinator_cleans_up_deleted_chores(hass):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_coordinator_uncomplete_marker_on_event(hass):
-    """Events fired after mark_uncompleted include uncomplete=True."""
+async def test_coordinator_source_marker_consumed_once(hass):
+    """A pending source is consumed exactly once and falls back to schedule."""
     store = ChoreStore(hass, "test")
     await store.async_load()
 
@@ -153,12 +153,12 @@ async def test_coordinator_uncomplete_marker_on_event(hass):
     with patch("homeassistant.util.dt.now", return_value=datetime(2026, 3, 30, 7, 30, tzinfo=TZ)):
         coordinator = await _setup_coordinator(hass, store)
 
-    # Simulate an uncomplete: clear last_completed and flag the uid.
+    # Simulate an uncomplete: revert and tag the uid with source=uncomplete.
     stored = store.get_chore("medicine")
     assert stored is not None
     stored.revert_completion()
     await store.async_update_chore(stored)
-    coordinator.mark_uncompleted("medicine")
+    coordinator.mark_source("medicine", ChoreEventSource.UNCOMPLETE)
 
     events: list = []
     hass.bus.async_listen(EVENT_STATUS_CHANGED, events.append)
@@ -169,12 +169,12 @@ async def test_coordinator_uncomplete_marker_on_event(hass):
 
     assert len(events) == 1
     assert events[0].data["uid"] == "medicine"
-    assert events[0].data.get("uncomplete") is True
+    assert events[0].data["source"] == ChoreEventSource.UNCOMPLETE
 
-    # Marker is consumed — a subsequent natural transition does not carry it.
+    # Marker is consumed — a subsequent natural transition falls back to "schedule".
     events.clear()
     with patch("homeassistant.util.dt.now", return_value=datetime(2026, 3, 31, 8, 30, tzinfo=TZ)):
         await coordinator.async_refresh()
     await hass.async_block_till_done()
 
-    assert "uncomplete" not in events[0].data
+    assert events[0].data["source"] == ChoreEventSource.SCHEDULE

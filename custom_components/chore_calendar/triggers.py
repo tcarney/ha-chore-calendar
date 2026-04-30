@@ -8,7 +8,7 @@ from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 
 from .actions import async_complete_chore
-from .const import LOGGER, ChoreStatus
+from .const import LOGGER, ChoreEventSource, ChoreStatus
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore
 from .store import ChoreStore
@@ -68,5 +68,5 @@ async def _async_complete_chores(
     notified so dashboards refresh promptly.
     """
     for chore in chores:
-        await async_complete_chore(store, coordinator, chore.uid, completed_at=now)
+        await async_complete_chore(store, coordinator, chore.uid, completed_at=now, source=ChoreEventSource.TAG)
         LOGGER.info("Auto-completed chore %s (%s) via tag scan", chore.chore_name, chore.uid)

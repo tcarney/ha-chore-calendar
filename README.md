@@ -12,7 +12,7 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 - **Tag scan auto-completion**: Assign NFC tags to chores for tap-to-complete; shared tags automatically resolve to the correct chore based on completion windows
 - **Flexible scheduling**: Scheduled (specific days/times), interval-based, and oneshot (one-time tasks with optional due date) chore types
 - **Skip occurrences**: Defer a chore's next occurrence without touching its completion history, with an explicit datetime or a type-specific default
-- **Status events**: Fires events on status change, chore skipped, and chore deleted for use in automations
+- **Status events**: Fires events on chore created, status change, and chore deleted for use in automations
 - **Persistent storage**: Chore data stored locally — no external API or cloud dependency
 
 ## Quick Start
@@ -282,7 +282,7 @@ data:
   item: "Morning Medicine"
 ```
 
-The resulting `chore_calendar_status_changed` event carries `uncomplete: true` so automations can distinguish an undo from natural period transitions.
+The resulting `chore_calendar_status_changed` event carries `source: uncomplete` so automations can distinguish an undo from natural period transitions. See [Automation Events](#chore_calendar_status_changed) for the full source vocabulary.
 
 ### Hide Completed Items
 
@@ -451,36 +451,53 @@ All options are configurable through the visual editor — no YAML required. Eac
 
 ### `chore_calendar_status_changed`
 
-Fired on status transitions, useful for notifications or automations:
+Fired on status transitions. The required `source` field describes *why* the status changed, so automations can distinguish service-driven actions from natural schedule progression.
 
 ```yaml
 event_type: chore_calendar_status_changed
 data:
   uid: "01244b28-e604-11ee-a0a4-e45f0197c057"
   chore_name: "Morning Medicine"
+  entity_id: "calendar.daily_chores"
   from_status: "pending"
   to_status: "due"
   next_due: "2026-03-23T08:00:00-04:00"
-  assigned_to: ["person.claire"]
-  list_entity: "calendar.daily_chores"
+  assigned_to: ["person.alice"]
+  source: "schedule"
 ```
 
-### `chore_calendar_item_skipped`
+| `source`     | When fired                                                                                  |
+|--------------|---------------------------------------------------------------------------------------------|
+| `schedule`   | Coordinator tick crossed a threshold (default — natural progression).                       |
+| `complete`   | `complete_item` service or todo entity `needs_action → completed` toggle.                   |
+| `uncomplete` | `uncomplete_item` service or todo entity `completed → needs_action` toggle.                 |
+| `skip`       | `skip_item` service.                                                                        |
+| `update`     | `update_item` whose field change flipped the operative anchor enough to change status.      |
+| `tag`        | `tag_scanned` listener auto-completion.                                                     |
 
-Fired when `skip_item` is called — distinguishes an intentional deferral from natural status transitions.
+A skip whose pre- and post- status are both `completed` (e.g. early-completed scheduled chore deferring its next cycle further) doesn't fire this event because there's no transition. The chore's `skipped_until` attribute on its sensor is still observable via HA's standard `state_changed`.
+
+### `chore_calendar_item_created`
+
+Fired when a chore is added to storage via `create_item`. Mirrors `chore_calendar_item_deleted` so automations can react to the full CRUD lifecycle.
 
 ```yaml
-event_type: chore_calendar_item_skipped
+event_type: chore_calendar_item_created
 data:
   uid: "01244b28-e604-11ee-a0a4-e45f0197c057"
   chore_name: "Morning Medicine"
-  skipped_until: "2026-04-28T09:00:00-04:00"
-  entity_id: "sensor.daily_chores_morning_medicine"
+  chore_type: "scheduled"
+  entity_id: "calendar.daily_chores"
+  status: "pending"
+  next_due: "2026-03-23T08:00:00-04:00"
+  assigned_to: ["person.alice"]
 ```
+
+`status` reflects the chore's state at creation. It's typically `pending`, but a chore created with a `trigger_entity` whose tag was recently scanned will report `completed` because the seeded `last_completed` timestamp lands inside the current cycle's pending window (see [Tag Triggers](#tag-triggers)).
 
 ### `chore_calendar_item_deleted`
 
-Fired when a chore is removed from storage via `delete_item`. Useful for cleanup automations or external sync.
+Fired when a chore is removed from storage via `delete_item`, or swept by `hide_completed_items` for terminal-completed `persist=false` oneshots. Useful for cleanup automations or external sync.
 
 ```yaml
 event_type: chore_calendar_item_deleted
