@@ -24,7 +24,7 @@ import "./components/chore-row";
 import "./components/chore-detail-dialog";
 import "./chore-calendar-card-editor";
 
-import { version } from "../package.json";
+import { version } from "../../custom_components/chore_calendar/manifest.json";
 
 const DOMAIN = "chore_calendar";
 

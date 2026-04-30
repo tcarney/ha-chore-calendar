@@ -2,23 +2,34 @@
 
 # script/card/check-staged: Pre-commit hook to verify card build is fresh
 #
-# If card/src/ files are staged, checks that the built JS in www/ is also
-# staged. Prevents committing source changes without rebuilding.
+# If card/src/ files are staged, rebuilds the card and verifies the committed
+# www/chore-calendar-card.js matches. Prevents committing source changes
+# without rebuilding, while allowing src refactors that produce identical
+# output.
 #
 # Usage (called by pre-commit):
 #   ./script/card/check-staged
 
 set -euo pipefail
 
-# Only check if card source files are being committed.
-if ! git diff --cached --name-only | grep -q "^card/src/"; then
+# Only check if card source files or the integration manifest (which the
+# card reads its version from at build time) are being committed.
+if ! git diff --cached --name-only | grep -qE "^(card/src/|custom_components/chore_calendar/manifest\.json$)"; then
     exit 0
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$SCRIPT_DIR/.."
+
 WWW="custom_components/chore_calendar/www/chore-calendar-card.js"
 
-if ! git diff --cached --name-only | grep -q "^${WWW}$"; then
-    echo "card/src/ changed but www/chore-calendar-card.js is not staged."
+# Rebuild from current source and confirm the working-tree output is clean
+# (i.e., either matches what is already committed/staged, or matches what is
+# newly staged for this commit).
+./script/card/build >/dev/null
+
+if ! git diff --quiet -- "$WWW"; then
+    echo "Built card differs from staged ${WWW}."
     echo "Run: ./script/card/build && git add ${WWW}"
     exit 1
 fi
