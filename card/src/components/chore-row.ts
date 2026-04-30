@@ -81,8 +81,7 @@ export class ChoreRow extends LitElement {
 
   protected render() {
     const now = new Date();
-    const locale = this.hass?.language ?? "en";
-    const timeText = getTimeText(this.item, now, locale);
+    const timeText = getTimeText(this.item, now);
 
     return html`
       <div

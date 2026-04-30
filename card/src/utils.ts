@@ -205,11 +205,7 @@ export function formatCompletedTime(
  * Get the secondary time text for a chore row.
  * Matches the blueprint pattern: "Overdue by X", "Due", "in X", "✓ time".
  */
-export function getTimeText(
-  item: EnrichedChoreItem,
-  now: Date,
-  locale: string,
-): string {
+export function getTimeText(item: EnrichedChoreItem, now: Date): string {
   switch (item.status) {
     case "overdue":
       if (item.next_due) {
