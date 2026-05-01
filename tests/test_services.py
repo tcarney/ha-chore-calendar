@@ -12,8 +12,10 @@ import voluptuous as vol
 from custom_components.chore_calendar.const import (
     CONF_LIST_NAME,
     DOMAIN,
+    EVENT_ITEM_CREATED,
     EVENT_ITEM_DELETED,
-    EVENT_ITEM_SKIPPED,
+    EVENT_STATUS_CHANGED,
+    ChoreEventSource,
     ChoreType,
 )
 from custom_components.chore_calendar.models import IntervalChore, OneshotChore, ScheduledChore
@@ -898,20 +900,27 @@ async def test_skip_item_invalid_datetime_raises(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_skip_item_fires_event(hass, config_entry):
-    """skip_item fires chore_calendar_item_skipped with the expected payload."""
+async def test_skip_item_fires_status_changed_with_source(hass, config_entry):
+    """skip_item fires chore_calendar_status_changed with source=skip.
+
+    The fixture chore is a never-completed interval (initial PENDING). A
+    far-future ``until`` makes the skip anchor active and lands the chore
+    well before its pending window — transitioning to COMPLETED, which is
+    what surfaces the status_changed event with source=skip.
+    """
     entity_id = await _setup_with_chore(hass, config_entry)
 
     events = []
-    hass.bus.async_listen(EVENT_ITEM_SKIPPED, events.append)
+    hass.bus.async_listen(EVENT_STATUS_CHANGED, events.append)
 
+    far_future = "2099-01-15T08:00:00-05:00"
     await hass.services.async_call(
         DOMAIN,
         "skip_item",
         {
             "entity_id": entity_id,
             "item": TEST_UID,
-            "until": "2026-04-10T08:00:00-05:00",
+            "until": far_future,
         },
         blocking=True,
     )
@@ -921,8 +930,10 @@ async def test_skip_item_fires_event(hass, config_entry):
     data = events[0].data
     assert data["uid"] == TEST_UID
     assert data["chore_name"] == "Test Chore"
-    assert data["skipped_until"] == "2026-04-10T08:00:00-05:00"
     assert data["entity_id"] == entity_id
+    assert data["source"] == ChoreEventSource.SKIP
+    assert data["from_status"] == "pending"
+    assert data["to_status"] == "completed"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -1017,3 +1028,208 @@ async def test_uncomplete_item_restores_skip(hass, config_entry):
     chore = config_entry.runtime_data.store.get_chore(TEST_UID)
     assert chore.skipped_until == datetime(2026, 4, 10, 8, 0, tzinfo=TZ)
     assert chore.previous_skipped_until is None
+
+
+# ---------------------------------------------------------------------------
+# Events vocabulary — chore_calendar_item_created and source on _status_changed
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_item_fires_item_created(hass, config_entry):
+    """create_item fires chore_calendar_item_created with the documented shape."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    events: list = []
+    hass.bus.async_listen(EVENT_ITEM_CREATED, events.append)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "New Chore",
+            "interval": {"days": 1},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert len(events) == 1
+    data = events[0].data
+    assert data["chore_name"] == "New Chore"
+    assert data["chore_type"] == "interval"
+    assert data["entity_id"] == entity_id
+    # Never-completed interval reads pending at creation.
+    assert data["status"] == "pending"
+    assert data["next_due"] is None
+    assert data["assigned_to"] == []
+    assert isinstance(data["uid"], str)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_item_with_tag_seed_emits_completed_status(hass, config_entry):
+    """A chore created with a recently-scanned tag fires _item_created with status=completed."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    # Register a tag.* entity with a recent scan timestamp as its state.
+    registry = er.async_get(hass)
+    tag_entry = registry.async_get_or_create("tag", "tag", "feed-cat-tag-uuid")
+    tag_entity_id = tag_entry.entity_id
+    recent_scan = (datetime.now(tz=TZ) - timedelta(minutes=5)).isoformat()
+    hass.states.async_set(tag_entity_id, recent_scan)
+
+    events: list = []
+    hass.bus.async_listen(EVENT_ITEM_CREATED, events.append)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Feed Cat",
+            "trigger_entity": tag_entity_id,
+            "interval": {"days": 1},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert len(events) == 1
+    data = events[0].data
+    assert data["chore_name"] == "Feed Cat"
+    # Tag-seed put last_completed inside the current cycle's pending window —
+    # the chore reports completed at creation rather than the standard pending.
+    assert data["status"] == "completed"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_complete_item_status_changed_carries_source_complete(hass, config_entry):
+    """complete_item via service tags the resulting status_changed with source=complete."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    # First completion anchors the cycle; the chore stays PENDING (initial)
+    # until then, so the transition is PENDING → COMPLETED.
+    events: list = []
+    hass.bus.async_listen(EVENT_STATUS_CHANGED, events.append)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": TEST_UID},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    transitions = [e for e in events if e.data["uid"] == TEST_UID]
+    assert len(transitions) == 1
+    assert transitions[0].data["source"] == ChoreEventSource.COMPLETE
+    assert transitions[0].data["entity_id"] == entity_id
+    assert transitions[0].data["to_status"] == "completed"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_item_status_changed_carries_source_update(hass, config_entry):
+    """update_item that flips status tags the event with source=update.
+
+    Driven via a oneshot reschedule: a chore created with a far-future
+    ``due_datetime`` reads PENDING; rewriting to a past datetime flips it
+    to OVERDUE on the next refresh.
+    """
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    # Create a oneshot scheduled in the far future — initial status PENDING.
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Future Oneshot",
+            "oneshot": {"due_datetime": "2099-12-31T08:00:00-05:00"},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    chore = _find_chore_by_name(config_entry.runtime_data.store, "Future Oneshot")
+    assert chore is not None
+
+    events: list = []
+    hass.bus.async_listen(EVENT_STATUS_CHANGED, events.append)
+
+    # Reschedule into the past — pushes the chore through pending_at,
+    # due_at, and overdue_at all at once → OVERDUE.
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": chore.uid,
+            "oneshot": {"due_datetime": "2025-01-01T08:00:00-05:00"},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    transitions = [e for e in events if e.data["uid"] == chore.uid]
+    assert len(transitions) == 1
+    assert transitions[0].data["source"] == ChoreEventSource.UPDATE
+    assert transitions[0].data["from_status"] == "pending"
+    assert transitions[0].data["to_status"] == "overdue"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_item_no_transition_no_event(hass, config_entry):
+    """update_item that doesn't change status fires no event."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    events: list = []
+    hass.bus.async_listen(EVENT_STATUS_CHANGED, events.append)
+
+    # Rename only — chore stays in its current status (PENDING).
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": TEST_UID, "chore_name": "Renamed Chore"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert [e for e in events if e.data["uid"] == TEST_UID] == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_of_completed_chore_is_silent(hass, config_entry):
+    """Skipping a chore already in COMPLETED fires no status_changed event.
+
+    This is the documented edge case: the deferral takes effect (skipped_until
+    is set on the chore and observable via the sensor's state_changed) but
+    the domain-level status_changed event doesn't fire because the transition
+    is COMPLETED → COMPLETED.
+    """
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    # Complete first so the chore is in COMPLETED.
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": TEST_UID},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    events: list = []
+    hass.bus.async_listen(EVENT_STATUS_CHANGED, events.append)
+
+    # Far-future skip — would land the chore well before its skip-anchor
+    # pending window, but completed stays completed either way.
+    await hass.services.async_call(
+        DOMAIN,
+        "skip_item",
+        {"entity_id": entity_id, "item": TEST_UID, "until": "2099-01-15T08:00:00-05:00"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    chore = config_entry.runtime_data.store.get_chore(TEST_UID)
+    assert chore.skipped_until == datetime(2099, 1, 15, 8, 0, tzinfo=TZ)
+    assert [e for e in events if e.data["uid"] == TEST_UID] == []

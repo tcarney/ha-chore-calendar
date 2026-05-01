@@ -7,7 +7,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.chore_calendar.const import CONF_LIST_NAME, DOMAIN, EVENT_ITEM_SKIPPED, ChoreType
+from custom_components.chore_calendar.const import (
+    CONF_LIST_NAME,
+    DOMAIN,
+    EVENT_STATUS_CHANGED,
+    ChoreEventSource,
+    ChoreType,
+)
 from custom_components.chore_calendar.models import OneshotChore
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.exceptions import ServiceValidationError
@@ -229,8 +235,14 @@ async def test_update_oneshot_clears_due_datetime(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_skip_default_on_oneshot_clears_due_and_emits_null(hass, config_entry):
-    """skip_item without 'until' on a oneshot clears due_datetime, event has skipped_until=None."""
+async def test_skip_default_on_oneshot_clears_due_and_fires_source_skip(hass, config_entry):
+    """skip_item without 'until' on a oneshot clears due_datetime; status_changed has source=skip.
+
+    The created oneshot is OVERDUE at test time (real-now is well past
+    ``due_datetime``). Default-skip clears due_datetime → status flips to
+    PENDING (unscheduled), surfacing as ``status_changed`` with
+    ``source=skip``.
+    """
     entity_id = await _setup(hass, config_entry)
     due = datetime(2026, 4, 15, 12, 0, tzinfo=TZ)
 
@@ -246,7 +258,7 @@ async def test_skip_default_on_oneshot_clears_due_and_emits_null(hass, config_en
     )
 
     events: list = []
-    hass.bus.async_listen(EVENT_ITEM_SKIPPED, events.append)
+    hass.bus.async_listen(EVENT_STATUS_CHANGED, events.append)
 
     await hass.services.async_call(
         DOMAIN,
@@ -259,8 +271,13 @@ async def test_skip_default_on_oneshot_clears_due_and_emits_null(hass, config_en
     chore = _find_oneshot(config_entry.runtime_data.store, "Skippable")
     assert chore is not None
     assert chore.due_datetime is None  # cleared by Path C default-skip
-    assert len(events) == 1
-    assert events[0].data["skipped_until"] is None
+
+    skip_events = [e for e in events if e.data["uid"] == chore.uid]
+    assert len(skip_events) == 1
+    data = skip_events[0].data
+    assert data["source"] == ChoreEventSource.SKIP
+    assert data["entity_id"] == entity_id
+    assert data["to_status"] == "pending"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

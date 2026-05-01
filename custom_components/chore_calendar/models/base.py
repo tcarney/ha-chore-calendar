@@ -165,12 +165,14 @@ class BaseChore(abc.ABC):
 
     @abc.abstractmethod
     def apply_default_skip(self, now: datetime) -> datetime | None:
-        """Apply type-specific default-skip behavior; return the event payload value.
+        """Apply type-specific default-skip behavior; return the operative anchor.
 
         Most types defer the next occurrence by setting ``skipped_until``; the
         returned value mirrors that. Some types (e.g. ``OneshotChore``) clear
         a different anchor instead and return ``None`` to signal "no operative
-        anchor" in the ``chore_calendar_item_skipped`` event payload.
+        anchor". Used by the skip handler for logging only — the resulting
+        status transition surfaces via ``chore_calendar_status_changed`` with
+        ``source=skip``.
         """
 
     def apply_completion(

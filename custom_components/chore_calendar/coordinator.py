@@ -9,7 +9,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from .const import DEFAULT_UPDATE_INTERVAL, DOMAIN, EVENT_STATUS_CHANGED, LOGGER, ChoreStatus
+from .const import DEFAULT_UPDATE_INTERVAL, DOMAIN, EVENT_STATUS_CHANGED, LOGGER, ChoreEventSource, ChoreStatus
 from .models import BaseChore
 from .store import ChoreStore
 
@@ -27,14 +27,26 @@ class ChoreCalendarCoordinator(DataUpdateCoordinator[dict[str, BaseChore]]):
         )
         self.store = store
         self._previous_statuses: dict[str, ChoreStatus] = {}
-        # UIDs flagged by an uncomplete_item call. Consumed on the next refresh
-        # so the resulting status-changed event carries an "uncomplete": True
-        # marker — letting automations distinguish undo from natural transitions.
-        self._pending_uncomplete_uids: set[str] = set()
+        # uid → source override for the next status transition fired for that
+        # uid. Consumed once per refresh; absent uids default to ``SCHEDULE``.
+        # Pending sources are dropped after each tick whether or not a
+        # transition fired, so a service action that doesn't flip status
+        # doesn't bleed its source into a later natural transition.
+        self._pending_sources: dict[str, ChoreEventSource] = {}
 
-    def mark_uncompleted(self, uid: str) -> None:
-        """Flag *uid* so its next status transition event is marked as an undo."""
-        self._pending_uncomplete_uids.add(uid)
+    def mark_source(self, uid: str, source: ChoreEventSource) -> None:
+        """Tag the next status_changed event for *uid* with *source*.
+
+        Service handlers and helpers call this before ``async_refresh()`` so
+        the resulting payload carries the right cause. The default ``SCHEDULE``
+        source covers natural transitions on the periodic tick.
+        """
+        self._pending_sources[uid] = source
+
+    def _resolve_calendar_entity_id(self) -> str | None:
+        """Resolve this list's calendar entity_id, or None if not registered."""
+        registry = er.async_get(self.hass)
+        return registry.async_get_entity_id("calendar", DOMAIN, self.store.entry_id)
 
     async def _async_update_data(self) -> dict[str, BaseChore]:
         """Evaluate all chore statuses, fire events on transitions, and push the calendar listener invalidation.
@@ -48,33 +60,35 @@ class ChoreCalendarCoordinator(DataUpdateCoordinator[dict[str, BaseChore]]):
         """
         chores = self.store.get_all_chores()
         now = dt_util.now()
+        calendar_entity_id = self._resolve_calendar_entity_id()
 
         for uid, chore in chores.items():
             current_status = chore.compute_status(now)
             previous_status = self._previous_statuses.get(uid)
-            is_uncomplete = uid in self._pending_uncomplete_uids
+            source = self._pending_sources.pop(uid, ChoreEventSource.SCHEDULE)
 
             if previous_status is not None and current_status != previous_status:
                 next_due = chore.compute_next_due(now)
                 payload = {
                     "uid": chore.uid,
                     "chore_name": chore.chore_name,
+                    "entity_id": calendar_entity_id,
                     "from_status": str(previous_status),
                     "to_status": str(current_status),
                     "next_due": next_due.isoformat() if next_due else None,
                     "assigned_to": list(chore.assigned_to),
+                    "source": str(source),
                 }
-                if is_uncomplete:
-                    payload["uncomplete"] = True
                 self.hass.bus.async_fire(EVENT_STATUS_CHANGED, payload)
 
             self._previous_statuses[uid] = current_status
-            self._pending_uncomplete_uids.discard(uid)
 
-        # Clean up statuses for deleted chores.
+        # Clean up statuses + any orphan pending sources for deleted chores.
         deleted = self._previous_statuses.keys() - chores.keys()
         for uid in deleted:
             del self._previous_statuses[uid]
+        for uid in self._pending_sources.keys() - chores.keys():
+            del self._pending_sources[uid]
 
         self._notify_event_listeners()
         return chores
@@ -93,8 +107,7 @@ class ChoreCalendarCoordinator(DataUpdateCoordinator[dict[str, BaseChore]]):
         - The calendar entity isn't loaded for this entry.
         - The HA version doesn't yet implement ``async_update_event_listeners``.
         """
-        registry = er.async_get(self.hass)
-        calendar_entity_id = registry.async_get_entity_id("calendar", DOMAIN, self.store.entry_id)
+        calendar_entity_id = self._resolve_calendar_entity_id()
         if calendar_entity_id is None:
             return
 

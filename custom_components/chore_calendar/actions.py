@@ -17,7 +17,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
-from .const import EVENT_ITEM_DELETED, LOGGER, ChoreStatus
+from .const import EVENT_ITEM_DELETED, LOGGER, ChoreEventSource, ChoreStatus
 from .models import OneshotChore
 
 if TYPE_CHECKING:
@@ -33,12 +33,15 @@ async def async_complete_chore(
     completed_at: datetime | None = None,
     completed_by: str | None = None,
     keep_skip: bool = False,
+    source: ChoreEventSource = ChoreEventSource.COMPLETE,
 ) -> None:
     """Record a completion for *uid* and refresh the coordinator.
 
     Shared by the ``complete_item`` service handler, the todo entity's
     ``needs_action`` → ``completed`` transition, and the tag-scan listener.
-    Raises ServiceValidationError if the chore is missing.
+    The tag-scan path passes ``source=TAG`` so the resulting status_changed
+    event distinguishes auto-completion from explicit user action. Raises
+    ServiceValidationError if the chore is missing.
     """
     existing = store.get_chore(uid)
     if existing is None:
@@ -47,6 +50,7 @@ async def async_complete_chore(
 
     timestamp = completed_at if completed_at is not None else dt_util.now()
     existing.apply_completion(timestamp, completed_by, clear_skip=not keep_skip)
+    coordinator.mark_source(uid, source)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
     LOGGER.info("completed %s (%s) at %s", existing.chore_name, uid, timestamp.isoformat())
@@ -73,7 +77,7 @@ async def async_uncomplete_chore(
         raise ServiceValidationError(msg)
 
     existing.revert_completion()
-    coordinator.mark_uncompleted(uid)
+    coordinator.mark_source(uid, ChoreEventSource.UNCOMPLETE)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
     LOGGER.info("uncompleted %s (%s)", existing.chore_name, uid)

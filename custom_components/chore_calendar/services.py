@@ -24,8 +24,8 @@ from .const import (
     ATTR_ITEM,
     ATTR_TRIGGER_ENTITY,
     DOMAIN,
+    EVENT_ITEM_CREATED,
     EVENT_ITEM_DELETED,
-    EVENT_ITEM_SKIPPED,
     LOGGER,
     SERVICE_COMPLETE_ITEM,
     SERVICE_CREATE_ITEM,
@@ -35,6 +35,7 @@ from .const import (
     SERVICE_SKIP_ITEM,
     SERVICE_UNCOMPLETE_ITEM,
     SERVICE_UPDATE_ITEM,
+    ChoreEventSource,
     ChoreStatus,
     ChoreType,
 )
@@ -339,6 +340,21 @@ async def _async_handle_create(call: ServiceCall) -> None:
 
     await store.async_create_chore(chore)
     await coordinator.async_refresh()
+
+    now = dt_util.now()
+    next_due = chore.compute_next_due(now)
+    call.hass.bus.async_fire(
+        EVENT_ITEM_CREATED,
+        {
+            "uid": chore.uid,
+            "chore_name": chore.chore_name,
+            "chore_type": str(chore.chore_type),
+            "entity_id": call.data[ATTR_ENTITY_ID],
+            "status": str(chore.compute_status(now)),
+            "next_due": next_due.isoformat() if next_due else None,
+            "assigned_to": list(chore.assigned_to),
+        },
+    )
     LOGGER.info("created %s (%s)", chore.chore_name, uid)
 
 
@@ -400,6 +416,7 @@ async def _async_handle_update(call: ServiceCall) -> None:
         updated["terminal"] = False
 
     chore = BaseChore.from_dict(updated)
+    coordinator.mark_source(uid, ChoreEventSource.UPDATE)
     await store.async_update_chore(chore)
     await coordinator.async_refresh()
     LOGGER.info("updated %s (%s)", existing.chore_name, uid)
@@ -459,8 +476,12 @@ async def _async_handle_skip(call: ServiceCall) -> None:
     ``skipped_until`` directly. Without it, delegates to the chore's
     ``apply_default_skip`` for type-specific default behavior — which may
     set ``skipped_until`` (scheduled/interval) or clear another anchor.
-    The event payload's ``skipped_until`` mirrors the operative value, or
-    ``None`` when default-skip cleared the anchor entirely.
+
+    The skip surfaces via ``chore_calendar_status_changed`` with
+    ``source=skip``. Skipping an already-``completed`` chore (e.g. an
+    early-completed scheduled chore deferring its next cycle) doesn't
+    transition status, so no event fires; the chore's ``skipped_until``
+    attribute on the sensor is still observable via ``state_changed``.
     """
     store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
 
@@ -480,27 +501,19 @@ async def _async_handle_skip(call: ServiceCall) -> None:
     explicit_until: datetime | None = call.data.get(ATTR_UNTIL)
     if explicit_until is not None:
         existing.skipped_until = explicit_until
-        event_skipped_until: datetime | None = explicit_until
+        operative_anchor: datetime | None = explicit_until
     else:
-        event_skipped_until = existing.apply_default_skip(dt_util.now())
+        operative_anchor = existing.apply_default_skip(dt_util.now())
 
+    coordinator.mark_source(uid, ChoreEventSource.SKIP)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
 
-    call.hass.bus.async_fire(
-        EVENT_ITEM_SKIPPED,
-        {
-            "uid": existing.uid,
-            "chore_name": existing.chore_name,
-            "skipped_until": event_skipped_until.isoformat() if event_skipped_until else None,
-            "entity_id": call.data[ATTR_ENTITY_ID],
-        },
-    )
     LOGGER.info(
         "skipped %s (%s) until %s",
         existing.chore_name,
         uid,
-        event_skipped_until.isoformat() if event_skipped_until else "(cleared)",
+        operative_anchor.isoformat() if operative_anchor else "(cleared)",
     )
 
 
