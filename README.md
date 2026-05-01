@@ -1,4 +1,4 @@
-# Chore Calendar
+# <img src="custom_components/chore_calendar/brand/icon.png" alt="" height="42" valign="top"> Chore Calendar
 
 A Home Assistant custom integration for managing recurring household chores. Each chore list is added through Settings > Integrations, with chores managed via service calls. Provides per-chore sensor entities, a per-list calendar entity, and a per-list todo entity.
 
