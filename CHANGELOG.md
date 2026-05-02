@@ -2,7 +2,7 @@
 
 # Changelog
 
-## 0.9.0 (2026-04-29)
+## 0.9.0 (2026-05-01)
 
 
 ### Features
@@ -12,9 +12,20 @@
 * Add `entity_id` field on `chore_calendar_status_changed`.
 
 
+### Bug Fixes
+
+* Drop unsupported keys (`iot_class`, `render_readme`) from `hacs.json` so the HACS validator accepts the integration.
+
+
 ### Build System
 
 * Source card version from the integration manifest at build time, keeping the two in lockstep.
+
+
+### Continuous Integration
+
+* Add release-please automation that opens release PRs from conventional commits, auto-bumps `manifest.json`, and maintains this changelog.
+* Add `validate` workflow running hassfest and HACS validation on push, PR, and a daily schedule.
 
 ## 0.8.0 (2026-04-29)
 
