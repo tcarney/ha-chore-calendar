@@ -1,6 +1,7 @@
 name: release-please
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - "main"
@@ -14,7 +15,7 @@ jobs:
     runs-on: "ubuntu-latest"
     steps:
       - name: Run release-please
-        uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json
