@@ -646,6 +646,28 @@ class TestScheduledChoreSkip:
         result = chore.compute_due_range(now)
         assert result == (skipped, datetime(2026, 4, 2, 9, 0, tzinfo=TZ))
 
+    def test_overdue_after_skip_anchors_on_skipped_until(self):
+        """A skipped scheduled chore that goes overdue stays anchored on skipped_until.
+
+        Regression: previously the skip anchor was dropped at
+        ``skipped_until + grace_period``, which let the operative anchor
+        snap back to the pinned overdue period (anchored on a stale
+        ``last_completed``). ``compute_next_due`` then reported that older
+        period and the card's "overdue by" jumped backward in time.
+        """
+        chore = _make_scheduled(
+            last_completed=datetime(2026, 3, 25, 8, 30, tzinfo=TZ),
+        )
+        # Skip moves due to Apr 2 08:00 (skip target later than the
+        # pinned overdue period from last_completed).
+        skipped = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        chore.skipped_until = skipped
+        # One minute past skipped_until + grace (1 hour default).
+        now = datetime(2026, 4, 2, 9, 1, tzinfo=TZ)
+
+        assert chore.compute_status(now) == ChoreStatus.OVERDUE
+        assert chore.compute_next_due(now) == skipped
+
 
 class TestIntervalChoreSkip:
     """Test IntervalChore skip behavior."""
@@ -708,6 +730,27 @@ class TestIntervalChoreSkip:
         now = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
         result = chore.compute_due_range(now)
         assert result == (skipped, datetime(2026, 4, 3, 12, 0, tzinfo=TZ))
+
+    def test_overdue_after_skip_anchors_on_skipped_until(self):
+        """A skipped interval chore that goes overdue stays anchored on skipped_until.
+
+        Regression: previously the skip anchor was dropped at
+        ``skipped_until + grace_period``, which let the operative anchor
+        snap back to ``last_completed + interval`` (often weeks earlier).
+        ``compute_next_due`` then reported a stale value and the card's
+        "overdue by" jumped to that gap instead of starting at zero.
+        """
+        chore = _make_interval(
+            last_completed=datetime(2026, 3, 20, 12, 0, tzinfo=TZ),
+        )
+        # Skip moves due to 3/30 12:00 (well past last_completed + interval = 3/23).
+        skipped = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
+        chore.skipped_until = skipped
+        # One minute past skipped_until + grace (1 day default).
+        now = datetime(2026, 3, 31, 12, 1, tzinfo=TZ)
+
+        assert chore.compute_status(now) == ChoreStatus.OVERDUE
+        assert chore.compute_next_due(now) == skipped
 
 
 class TestSkipUndoInteraction:
