@@ -273,6 +273,27 @@ export class ChoreCalendarCard extends LitElement {
       font-size: 14px;
     }
 
+    .placeholder {
+      margin-bottom: 5px;
+    }
+
+    .placeholder-card {
+      background: var(--card-background-color, var(--ha-card-background, white));
+      border-radius: 0 5px 5px 0;
+      border-left: 5px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      overflow: hidden;
+    }
+
+    .placeholder-row {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      gap: 12px;
+      font-size: 14px;
+      color: var(--secondary-text-color);
+      font-style: italic;
+    }
+
     .loading {
       padding: 32px 0;
       text-align: center;
@@ -324,20 +345,30 @@ export class ChoreCalendarCard extends LitElement {
   }
 
   private _renderSections() {
-    if (this._items.length === 0) {
-      return html`<div class="empty">No chores to show</div>`;
-    }
-
     const groups = groupByStatus(this._items);
     const hideCompleted = !!this._config.hide_completed;
     const hideSections = !!this._config.hide_section_headers;
 
-    return html`
-      ${SECTION_ORDER.map((status) => {
-        const items = groups.get(status);
-        if (!items || items.length === 0) return nothing;
-        if (status === "completed" && hideCompleted) return nothing;
+    const visibleSections = SECTION_ORDER.filter((status) => {
+      const items = groups.get(status);
+      if (!items || items.length === 0) return false;
+      if (status === "completed" && hideCompleted) return false;
+      return true;
+    });
 
+    if (visibleSections.length === 0) {
+      return html`
+        <div class="placeholder">
+          <div class="placeholder-card">
+            <div class="placeholder-row">No chores</div>
+          </div>
+        </div>
+      `;
+    }
+
+    return html`
+      ${visibleSections.map((status) => {
+        const items = groups.get(status)!;
         return html`
           ${!hideSections
             ? html`<div class="section-header ${status}">
