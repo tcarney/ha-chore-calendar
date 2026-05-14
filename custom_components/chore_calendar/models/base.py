@@ -218,10 +218,26 @@ class BaseChore(abc.ABC):
     def _skip_anchor_active(self, now: datetime) -> bool:
         """Return True while ``skipped_until`` should override the type's normal anchor.
 
-        Active from the moment ``skipped_until`` is set until ``skipped_until + grace_period``,
-        matching the same DUE/OVERDUE window each type applies to its own anchor.
+        The skip stays operative as long as it represents a later due than
+        the type's natural anchor — the user's deferral hasn't been overtaken
+        by the natural cadence. For types whose natural anchor advances over
+        time without a completion (scheduled), the skip falls through once
+        today's period catches up. For types whose natural anchor is fixed
+        until completion (interval, oneshot with ``due_datetime``), the skip
+        persists until cleared by a completion.
+
+        Keeping the skip operative through OVERDUE — rather than expiring it
+        at ``skipped_until + grace_period`` — is what lets ``compute_next_due``
+        report ``skipped_until`` once the chore goes overdue, so the card's
+        "overdue by" reading starts at zero from when the skip's grace
+        elapsed instead of snapping back to a stale natural anchor.
         """
-        return self.skipped_until is not None and now < self.skipped_until + self.grace_period
+        if self.skipped_until is None:
+            return False
+        natural = self._anchor_due_at(now)
+        if natural is None:
+            return True
+        return self.skipped_until > natural
 
     @abc.abstractmethod
     def _schedule_to_dict(self) -> dict[str, Any]:
