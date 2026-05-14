@@ -457,12 +457,18 @@ function t(t,e,i,o){var s,n=arguments.length,a=n<3?e:null===o?o=Object.getOwnPro
         @chore-uncompleted=${this._onChoreCompleted}
         @chore-skipped=${this._onChoreCompleted}
       ></chore-detail-dialog>
-    `}_renderSections(){if(0===this._items.length)return W`<div class="empty">No chores to show</div>`;const t=function(t){const e=new Map;for(const i of t){let t=e.get(i.status);t||(t=[],e.set(i.status,t)),t.push(i)}return e}(this._items),e=!!this._config.hide_completed,i=!!this._config.hide_section_headers;return W`
-      ${Ft.map(o=>{const s=t.get(o);return s&&0!==s.length?"completed"===o&&e?F:W`
-          ${i?F:W`<div class="section-header ${o}">
-                ${Et[o]}
+    `}_renderSections(){const t=function(t){const e=new Map;for(const i of t){let t=e.get(i.status);t||(t=[],e.set(i.status,t)),t.push(i)}return e}(this._items),e=!!this._config.hide_completed,i=!!this._config.hide_section_headers,o=Ft.filter(i=>{const o=t.get(i);return!(!o||0===o.length)&&("completed"!==i||!e)});return 0===o.length?W`
+        <div class="placeholder">
+          <div class="placeholder-card">
+            <div class="placeholder-row">No chores</div>
+          </div>
+        </div>
+      `:W`
+      ${o.map(e=>{const o=t.get(e);return W`
+          ${i?F:W`<div class="section-header ${e}">
+                ${Et[e]}
               </div>`}
-          ${s.map(t=>W`
+          ${o.map(t=>W`
               <chore-row
                 .hass=${this.hass}
                 .item=${t}
@@ -471,7 +477,7 @@ function t(t,e,i,o){var s,n=arguments.length,a=n<3?e:null===o?o=Object.getOwnPro
                 .doubleTapAction=${this._config.double_tap_action??{action:"none"}}
               ></chore-row>
             `)}
-        `:F})}
+        `})}
     `}_onChoreDetail(t){this._dialogItem=t.detail.item,this._dialogOpen=!0}_onDialogClosed(){this._dialogOpen=!1}_onChoreCompleted(){this._dialogOpen=!1,this._refreshData()}}Vt.styles=a`
     :host {
       display: block;
@@ -531,6 +537,27 @@ function t(t,e,i,o){var s,n=arguments.length,a=n<3?e:null===o?o=Object.getOwnPro
       text-align: center;
       color: var(--secondary-text-color);
       font-size: 14px;
+    }
+
+    .placeholder {
+      margin-bottom: 5px;
+    }
+
+    .placeholder-card {
+      background: var(--card-background-color, var(--ha-card-background, white));
+      border-radius: 0 5px 5px 0;
+      border-left: 5px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      overflow: hidden;
+    }
+
+    .placeholder-row {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      gap: 12px;
+      font-size: 14px;
+      color: var(--secondary-text-color);
+      font-style: italic;
     }
 
     .loading {
