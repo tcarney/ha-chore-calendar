@@ -2,7 +2,7 @@
 
 # Changelog
 
-## [0.10.0](https://github.com/tcarney/ha-chore-calendar/compare/chore_calendar-v0.9.0...chore_calendar-v0.10.0) (2026-05-22)
+## [0.10.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.9.0...v0.10.0) (2026-05-22)
 
 
 ### Features
