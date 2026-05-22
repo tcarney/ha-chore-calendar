@@ -2,6 +2,18 @@
 
 # Changelog
 
+## [0.10.0](https://github.com/tcarney/ha-chore-calendar/compare/chore_calendar-v0.9.0...chore_calendar-v0.10.0) (2026-05-22)
+
+
+### Features
+
+* **card:** render placeholder row when no chores are visible ([#21](https://github.com/tcarney/ha-chore-calendar/issues/21)) ([3004421](https://github.com/tcarney/ha-chore-calendar/commit/3004421ded00a4c4d1753922a43fa720d80ae8ee))
+
+
+### Bug Fixes
+
+* keep skipped_until as operative anchor through OVERDUE ([#20](https://github.com/tcarney/ha-chore-calendar/issues/20)) ([8e0d087](https://github.com/tcarney/ha-chore-calendar/commit/8e0d087b2485e793009f72ba520ecc5e78b2bd60))
+
 ## 0.9.0 (2026-05-01)
 
 
