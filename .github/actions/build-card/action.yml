@@ -26,12 +26,26 @@ runs:
       shell: bash
       run: script/card/build
 
+    # Author the rebuild as whoever last changed the bundle's inputs (manifest
+    # version or card source) rather than the workflow actor: the release-please
+    # bot on a release PR, the contributor on a normal PR. Scoping to those
+    # paths credits the commit that actually drove the rebuild even when a PR
+    # mixes in unrelated commits.
+    - name: Capture bundle-input commit author
+      id: trigger-author
+      if: ${{ inputs.commit == 'true' }}
+      shell: bash
+      run: |
+        author="$(git log -1 --pretty='%an <%ae>' -- custom_components/chore_calendar/manifest.json card/src)"
+        echo "author=$author" >> "$GITHUB_OUTPUT"
+
     - name: Commit refreshed bundle
       if: ${{ inputs.commit == 'true' }}
       uses: stefanzweifel/git-auto-commit-action@04702edda442b2e678b25b537cec683a1493fcb9 # v7.1.0
       with:
         commit_message: "build: rebuild card bundle"
         file_pattern: "custom_components/chore_calendar/www/*"
+        commit_author: ${{ steps.trigger-author.outputs.author }}
 
     - name: Verify committed bundle matches build
       if: ${{ inputs.commit != 'true' }}
