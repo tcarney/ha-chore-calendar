@@ -15,7 +15,24 @@ jobs:
     runs-on: "ubuntu-latest"
     steps:
       - name: Run release-please
+        id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json
+
+      # release-please bumps manifest.json but cannot rebuild the card, whose
+      # bundle bakes in the manifest version at build time. Rebuild and commit
+      # it on the release PR branch so the merged release ships a bundle whose
+      # banner matches the released version. The GITHUB_TOKEN push does not
+      # re-trigger PR checks (by design), which is fine — the bundle is correct
+      # by merge time.
+      - name: Check out release PR branch
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+
+      - name: Rebuild card for release
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        uses: ./.github/actions/build-card

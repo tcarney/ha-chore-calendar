@@ -8,7 +8,8 @@ on:
     branches:
       - "main"
 
-permissions: {}
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -16,16 +17,15 @@ jobs:
     steps:
       - name: Checkout the repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: "card/package-lock.json"
+          # On pull requests, check out the head branch (not the detached merge
+          # ref) so a rebuilt bundle can be committed back to it. Empty on push
+          # events, where checkout falls back to the pushed ref.
+          ref: ${{ github.head_ref }}
 
+      # On pull requests, rebuild and commit the bundle if it drifted from
+      # source (no more "forgot to rebuild" CI failures). On main, verify only.
       - name: Build card
-        run: script/card/build
-
-      - name: Verify committed bundle matches build
-        run: git diff --exit-code -- custom_components/chore_calendar/www/
+        uses: ./.github/actions/build-card
+        with:
+          commit: ${{ github.event_name == 'pull_request' }}
