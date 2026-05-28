@@ -240,7 +240,7 @@ export class ChoreCalendarCardEditor extends LitElement {
       flex-shrink: 0;
     }
 
-    .period-inputs ha-textfield {
+    .period-inputs ha-input {
       width: 88px;
     }
   `;
@@ -479,7 +479,7 @@ export class ChoreCalendarCardEditor extends LitElement {
   private _renderPeriodRow(key: "due_date_period" | "completed_period", label: string) {
     const current = this._config[key] ?? {};
     // If either unit is set, show both (the missing one as "0"). If neither is
-    // set, both fields stay blank so the Material floating labels are visible.
+    // set, both fields stay blank so the placeholders are visible.
     const anySet = !!(current.days || current.hours);
     const daysValue = anySet ? String(current.days ?? 0) : "";
     const hoursValue = anySet ? String(current.hours ?? 0) : "";
@@ -487,24 +487,26 @@ export class ChoreCalendarCardEditor extends LitElement {
       <div class="period-row">
         <span class="period-label">${label}</span>
         <div class="period-inputs">
-          <ha-textfield
+          <ha-input
+            appearance="outlined"
             type="number"
             min="0"
             max="365"
-            label="days"
+            placeholder="days"
             .value=${daysValue}
             @change=${(ev: Event) =>
               this._setPeriod(key, "days", (ev.target as HTMLInputElement).value)}
-          ></ha-textfield>
-          <ha-textfield
+          ></ha-input>
+          <ha-input
+            appearance="outlined"
             type="number"
             min="0"
             max="23"
-            label="hours"
+            placeholder="hours"
             .value=${hoursValue}
             @change=${(ev: Event) =>
               this._setPeriod(key, "hours", (ev.target as HTMLInputElement).value)}
-          ></ha-textfield>
+          ></ha-input>
         </div>
       </div>
     `;
