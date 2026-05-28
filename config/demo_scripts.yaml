@@ -1,0 +1,156 @@
+populate_sample_chores:
+  alias: "Chore Calendar: Populate Sample Chores"
+  description: >-
+    Seeds a chore list with a spread of sample chores for screenshots/demos:
+    one overdue, one due, two upcoming, and two completed. Pass the calendar
+    entity of the list to populate. Re-running creates duplicate chores (each
+    gets a fresh UID), so start from an empty list for a clean shot.
+  mode: single
+  fields:
+    calendar_entity:
+      name: Chore Calendar entity
+      description: The calendar.* entity of the chore list to populate.
+      required: true
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+              integration: chore_calendar
+  sequence:
+    # Overdue — oneshot due at the top of the hour 2h ago. Always past the
+    # default 1h grace period and lands on a clean on-the-hour time.
+    - alias: Overdue
+      action: chore_calendar.create_item
+      data:
+        entity_id: "{{ calendar_entity }}"
+        chore_name: "Vacuum living room"
+        oneshot:
+          due_datetime: "{{ (now().replace(minute=0, second=0, microsecond=0) - timedelta(hours=2)).isoformat() }}"
+
+    # Due — oneshot due at the top of the current hour (0–59 min ago, always
+    # inside the default 1h grace period).
+    - alias: Due
+      action: chore_calendar.create_item
+      data:
+        entity_id: "{{ calendar_entity }}"
+        chore_name: "Empty the dishwasher"
+        oneshot:
+          due_datetime: "{{ now().replace(minute=0, second=0, microsecond=0).isoformat() }}"
+
+    # Upcoming — scheduled chores roll to their next active-day time.
+    - alias: Upcoming (trash)
+      action: chore_calendar.create_item
+      data:
+        entity_id: "{{ calendar_entity }}"
+        chore_name: "Take out the trash"
+        assigned_to: [person.bob]
+        scheduled:
+          time: "19:30:00"
+          active_days: [mon, thu]
+
+    - alias: Upcoming (counters)
+      action: chore_calendar.create_item
+      data:
+        entity_id: "{{ calendar_entity }}"
+        chore_name: "Wipe kitchen counters"
+        scheduled:
+          time: "21:00:00"
+
+    # Completed — create then complete so they land in the completed section.
+    - alias: Completed (medicine)
+      action: chore_calendar.create_item
+      data:
+        entity_id: "{{ calendar_entity }}"
+        chore_name: "Morning medicine"
+        assigned_to: [person.alice]
+        scheduled:
+          time: "08:00:00"
+    - alias: Completed (filter, interval anchored by completion)
+      action: chore_calendar.create_item
+      data:
+        entity_id: "{{ calendar_entity }}"
+        chore_name: "Change HVAC filter"
+        interval:
+          days: 90
+    - alias: Mark medicine complete
+      action: chore_calendar.complete_item
+      data:
+        entity_id: "{{ calendar_entity }}"
+        item: "Morning medicine"
+    - alias: Mark filter complete
+      action: chore_calendar.complete_item
+      data:
+        entity_id: "{{ calendar_entity }}"
+        item: "Change HVAC filter"
+
+populate_sample_calendar:
+  alias: "Chore Calendar: Populate Sample Calendar Events"
+  description: >-
+    Adds a spread of sample events to a writable calendar (e.g. a
+    local_calendar entity) for screenshots/demos. All events land on the
+    current day; some are in the past, which is fine for a static shot. Note
+    the chore_calendar calendar entity is read-only and cannot be targeted —
+    point this at a local_calendar or other writable calendar. Re-running adds
+    duplicate events, so clear the calendar first for a clean shot.
+  mode: single
+  fields:
+    calendar_entity:
+      name: Calendar entity
+      description: A writable calendar.* entity (e.g. local_calendar) to add events to.
+      required: true
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+  sequence:
+    # All-day event — spans today (end date is exclusive, so tomorrow).
+    - alias: All-day (trash pickup)
+      action: calendar.create_event
+      data:
+        entity_id: "{{ calendar_entity }}"
+        summary: "Trash & recycling pickup"
+        start_date: "{{ now().date().isoformat() }}"
+        end_date: "{{ (now().date() + timedelta(days=1)).isoformat() }}"
+
+    # Timed events across the day, anchored to today's date.
+    - alias: Morning workout
+      action: calendar.create_event
+      data:
+        entity_id: "{{ calendar_entity }}"
+        summary: "Morning workout"
+        start_date_time: "{{ today_at('07:00').isoformat() }}"
+        end_date_time: "{{ today_at('07:45').isoformat() }}"
+
+    - alias: Team standup
+      action: calendar.create_event
+      data:
+        entity_id: "{{ calendar_entity }}"
+        summary: "Team standup"
+        location: "Zoom"
+        start_date_time: "{{ today_at('09:00').isoformat() }}"
+        end_date_time: "{{ today_at('09:30').isoformat() }}"
+
+    - alias: Lunch
+      action: calendar.create_event
+      data:
+        entity_id: "{{ calendar_entity }}"
+        summary: "Lunch with Sam"
+        start_date_time: "{{ today_at('12:30').isoformat() }}"
+        end_date_time: "{{ today_at('13:30').isoformat() }}"
+
+    - alias: Dentist
+      action: calendar.create_event
+      data:
+        entity_id: "{{ calendar_entity }}"
+        summary: "Dentist appointment"
+        location: "Downtown Dental"
+        start_date_time: "{{ today_at('15:00').isoformat() }}"
+        end_date_time: "{{ today_at('16:00').isoformat() }}"
+
+    - alias: Dinner
+      action: calendar.create_event
+      data:
+        entity_id: "{{ calendar_entity }}"
+        summary: "Family dinner"
+        start_date_time: "{{ today_at('18:30').isoformat() }}"
+        end_date_time: "{{ today_at('20:00').isoformat() }}"
