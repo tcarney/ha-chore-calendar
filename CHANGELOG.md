@@ -2,6 +2,19 @@
 
 # Changelog
 
+## [0.10.1](https://github.com/tcarney/ha-chore-calendar/compare/v0.10.0...v0.10.1) (2026-05-28)
+
+
+### Bug Fixes
+
+* follow-up default skip during pending advances by one occurrence ([#24](https://github.com/tcarney/ha-chore-calendar/issues/24)) ([555f27b](https://github.com/tcarney/ha-chore-calendar/commit/555f27b94989781e31d07da11a15b05bdb5b1475))
+* migrate card editor period inputs from ha-textfield to ha-input ([#25](https://github.com/tcarney/ha-chore-calendar/issues/25)) ([0470ae2](https://github.com/tcarney/ha-chore-calendar/commit/0470ae2fc5421b39d645761225e29525264057f9))
+
+
+### Documentation
+
+* add README screenshots with demo data scripts ([#26](https://github.com/tcarney/ha-chore-calendar/issues/26)) ([cb8b79a](https://github.com/tcarney/ha-chore-calendar/commit/cb8b79aa520faf98c095629dd5712fb654512f13))
+
 ## [0.10.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.9.0...v0.10.0) (2026-05-22)
 
 
