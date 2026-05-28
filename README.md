@@ -2,6 +2,8 @@
 
 A Home Assistant custom integration for managing recurring household chores. Each chore list is added through Settings > Integrations, with chores managed via service calls. Provides per-chore sensor entities, a per-list calendar entity, and a per-list todo entity.
 
+![A standard Home Assistant calendar card and the included Chore Calendar card side by side, showing the same chores in both views.](docs/images/dashboard.png)
+
 ## Features
 
 - **Service-driven management**: Create, update, delete, and complete chores via service calls
@@ -346,6 +348,8 @@ response_variable: result
 
 A custom Lovelace card is included and auto-registered — no manual resource setup needed. Add it to a dashboard via the UI card picker or YAML.
 
+<img src="docs/images/chore_calendar.png" alt="The Chore Calendar card with Overdue, Due, Upcoming, and Completed sections." width="480">
+
 ### Minimal Configuration
 
 ```yaml
@@ -432,6 +436,8 @@ hold_action:
 ```
 
 ### Detail Dialog
+
+<img src="docs/images/detail.png" alt="The chore detail dialog overlaying the card, showing the list, schedule, assignee, and Skip/Complete buttons." width="480">
 
 Tapping a chore row (default behavior) opens a detail dialog showing:
 

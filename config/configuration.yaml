@@ -53,9 +53,16 @@ frontend:
 
 automation:
 
-script:
+script: !include demo_scripts.yaml
 
 scene:
+
+# Sample people for chore assignment demos (see demo_scripts.yaml).
+person:
+  - name: Alice
+    id: alice
+  - name: Bob
+    id: bob
 
 # Useful default_config integrations for development
 # https://www.home-assistant.io/integrations/history/
