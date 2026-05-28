@@ -59,12 +59,26 @@ class ScheduledChore(BaseChore):
     def apply_default_skip(self, now: datetime) -> datetime | None:
         """Skip to the next active day's period-due strictly after *now*.
 
-        Walks forward from the current operative period. An overdue chore's
-        period may be pinned in the past — stepping once would still land
-        in the past, so we advance until the candidate is strictly after
-        *now*. Guarantees the skip actually takes effect.
+        Walks forward from the **operative** anchor — ``skipped_until`` when
+        an active skip overrides the natural anchor, otherwise the current
+        period_due. Starting from the operative anchor is what makes a
+        follow-up default skip advance by one occurrence: without it, a skip
+        performed inside the skip-anchor's pending window would walk from the
+        natural (pre-skip) period, hit the existing ``skipped_until``, and
+        produce a no-op.
+
+        An overdue chore's anchor may still be pinned in the past — stepping
+        once would land in the past, so we advance until the candidate is
+        strictly after *now*.
         """
-        candidate = self._find_next_active_day(self._find_current_period(now))
+        # Operative anchor is non-None for ScheduledChore — _anchor_due_at
+        # always resolves a period — but the base signature returns
+        # ``datetime | None``, so resolve directly here.
+        if self._skip_anchor_active(now) and self.skipped_until is not None:
+            anchor = self.skipped_until
+        else:
+            anchor = self._find_current_period(now)
+        candidate = self._find_next_active_day(anchor)
         while candidate <= now:
             candidate = self._find_next_active_day(candidate)
         self.skipped_until = candidate

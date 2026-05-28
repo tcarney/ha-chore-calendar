@@ -576,6 +576,31 @@ class TestScheduledChoreSkip:
         assert result == expected
         assert chore.skipped_until == expected
 
+    def test_apply_default_skip_advances_existing_skip_in_pending(self):
+        """A follow-up default skip during the skip-anchor's pending window advances by one occurrence.
+
+        Regression: previously the walk started from the *natural* period
+        (anchored on ``last_completed``), so a chore in the skip-anchor's
+        pending window walked to the same active day the existing
+        ``skipped_until`` already pointed at — a no-op. Starting the walk
+        from the operative anchor (``skipped_until`` when active) advances
+        by one full active-day step instead.
+        """
+        chore = _make_scheduled(
+            last_completed=datetime(2026, 3, 30, 8, 0, tzinfo=TZ),  # Mon
+            # First skip already pushed next due to Wed 08:00.
+        )
+        chore.skipped_until = datetime(2026, 4, 1, 8, 0, tzinfo=TZ)
+        # Wed 06:00 — inside the skip anchor's pending window (05:00–08:00).
+        now = datetime(2026, 4, 1, 6, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.PENDING
+
+        result = chore.apply_default_skip(now)
+        expected = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        assert result == expected
+        assert chore.skipped_until == expected
+        assert chore.compute_status(now) == ChoreStatus.COMPLETED
+
     def test_skip_from_overdue_transitions_to_completed(self):
         """Calling skip on an OVERDUE chore flips status to COMPLETED via skipped_until."""
         chore = _make_scheduled(
