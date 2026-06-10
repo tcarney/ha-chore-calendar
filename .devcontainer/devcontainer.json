@@ -109,6 +109,8 @@
       }
     }
   },
-  "mounts": ["source=claude-state,target=/home/vscode/.claude,type=volume"],
+  "mounts": [
+    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached"
+  ],
   "remoteUser": "vscode"
 }
