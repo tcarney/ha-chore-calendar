@@ -187,6 +187,12 @@ async def test_create_scheduled_item(hass, config_entry):
     assert chore is not None
     assert chore.chore_name == "Morning Medicine"
     assert chore.assigned_to == ["person.alice"]
+    # The legacy selector synthesizes the canonical rrule/dtstart pair, with
+    # dtstart anchored to the creation date.
+    assert isinstance(chore, ScheduledChore)
+    assert chore.rrule == "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"
+    assert chore.created_at is not None
+    assert chore.dtstart == datetime.combine(chore.created_at.date(), dtime(8, 0))
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -715,6 +721,50 @@ async def test_update_item_same_type_succeeds(hass, config_entry):
     assert chore is not None
     assert isinstance(chore, IntervalChore)
     assert chore.interval == timedelta(days=7)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_scheduled_partial_legacy_keys_merge(hass, config_entry):
+    """Updating only time keeps the rrule; updating only active_days keeps dtstart's date."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    sched_uid = await _add_scheduled_chore(hass, config_entry)
+    store = config_entry.runtime_data.store
+
+    chore = store.get_chore(sched_uid)
+    assert isinstance(chore, ScheduledChore)
+    original_rrule = chore.rrule
+    assert chore.dtstart is not None
+    original_date = chore.dtstart.date()
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": sched_uid,
+            "scheduled": {"time": "20:15:00"},
+        },
+        blocking=True,
+    )
+    chore = store.get_chore(sched_uid)
+    assert isinstance(chore, ScheduledChore)
+    assert chore.rrule == original_rrule
+    assert chore.dtstart == datetime.combine(original_date, dtime(20, 15))
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": sched_uid,
+            "scheduled": {"active_days": ["sat", "sun"]},
+        },
+        blocking=True,
+    )
+    chore = store.get_chore(sched_uid)
+    assert isinstance(chore, ScheduledChore)
+    assert chore.rrule == "FREQ=WEEKLY;BYDAY=SA,SU"
+    assert chore.dtstart == datetime.combine(original_date, dtime(20, 15))
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

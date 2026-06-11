@@ -279,6 +279,10 @@ def _apply_overlays(
     """
     schedule = chore_dict.setdefault("schedule", {})
     if chore_type == ChoreType.SCHEDULED and ATTR_SCHEDULED in data:
+        # Legacy surface: ``time`` / ``active_days`` are written alongside
+        # the stored ``rrule`` / ``dtstart`` and merged by
+        # ScheduledChore.from_schedule (time replaces dtstart's time-of-day,
+        # active_days re-synthesizes the rrule).
         obj = data[ATTR_SCHEDULED]
         if "time" in obj:
             schedule["time"] = obj["time"]
@@ -314,6 +318,7 @@ def _build_chore_from_data(data: dict[str, Any]) -> BaseChore:
         "description": data.get(ATTR_DESCRIPTION) or None,
         "schedule": {},
         "assigned_to": list(data.get(ATTR_ASSIGNED_TO, [])),
+        "created_at": data.get("created_at"),
     }
     _apply_overlays(data, chore_dict, chore_type)
     return BaseChore.from_dict(chore_dict)
@@ -328,11 +333,12 @@ async def _async_handle_create(call: ServiceCall) -> None:
     # Resolve tag UUID if trigger_entity is a tag.
     trigger_tag_id = _resolve_trigger_tag_id(call.hass, call.data.get(ATTR_TRIGGER_ENTITY))
 
-    # Inject the generated uid for _build_chore_from_data.
-    data = {**call.data, "uid": uid}
+    # Inject the generated uid and creation timestamp for
+    # _build_chore_from_data — created_at must be present at construction
+    # time so a scheduled chore's dtstart anchors to the creation date.
+    data = {**call.data, "uid": uid, "created_at": dt_util.now().isoformat()}
     chore = _build_chore_from_data(data)
     chore.trigger_tag_id = trigger_tag_id
-    chore.created_at = dt_util.now()
 
     # Seed last_completed from the tag's last-scanned time so existing tag
     # systems transfer state into chore calendar on creation. Side effect:

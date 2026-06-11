@@ -135,8 +135,8 @@ async def test_store_delete_nonexistent_is_noop(hass):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_storage_migration_v2_to_v3(hass):
-    """v2→v3 migration lifts early_window/grace mins out of schedule and renames the former."""
+async def test_storage_migration_v2_to_v4(hass):
+    """v2 payloads migrate through both steps: the v3 window-field lift and the v4 rrule rewrite."""
     entry_id = "migration_entry"
     key = f"{DOMAIN}.{entry_id}"
 
@@ -200,15 +200,81 @@ async def test_storage_migration_v2_to_v3(hass):
     assert oneshot.pending_period == timedelta(minutes=60)
     assert oneshot.grace_period == timedelta(minutes=30)
 
-    # After save, the on-disk payload uses the new top-level keys and the
-    # schedule dicts no longer carry the old window fields.
+    # After save, the on-disk payload uses the new top-level keys, the
+    # schedule dicts no longer carry the old window fields, and the
+    # scheduled schedule uses the v4 {rrule, dtstart} shape.
     await store.async_save()
-    persisted = await Store(hass, 3, key).async_load()
+    persisted = await Store(hass, 4, key).async_load()
     assert persisted is not None
     by_uid = {item["uid"]: item for item in persisted["items"]}
     assert by_uid["scheduled-uid"]["pending_period_mins"] == 240
     assert by_uid["scheduled-uid"]["grace_period_mins"] == 90
-    assert "early_window_mins" not in by_uid["scheduled-uid"]["schedule"]
-    assert "grace_period_mins" not in by_uid["scheduled-uid"]["schedule"]
+    assert by_uid["scheduled-uid"]["schedule"] == {
+        "rrule": "FREQ=DAILY",
+        # No created_at in the v2 payload — dtstart falls back to the
+        # phase-neutral anchor date.
+        "dtstart": "1970-01-01T08:00:00",
+    }
     assert by_uid["interval-uid"]["pending_period_mins"] == DEFAULT_PENDING_PERIOD_MINS
     assert "grace_period_mins" not in by_uid["interval-uid"]["schedule"]
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_storage_migration_v3_to_v4(hass):
+    """v3→v4 rewrites scheduled schedules to {rrule, dtstart}; other types are untouched."""
+    entry_id = "migration_v4_entry"
+    key = f"{DOMAIN}.{entry_id}"
+
+    raw_store: Store[dict] = Store(hass, 3, key)
+    await raw_store.async_save(
+        {
+            "items": [
+                {
+                    "uid": "weekly-uid",
+                    "chore_name": "Trash Night",
+                    "chore_type": "scheduled",
+                    "schedule": {
+                        "time": "19:30:00",
+                        "active_days": ["mon", "thu"],
+                    },
+                    "pending_period_mins": 180,
+                    "grace_period_mins": 60,
+                    "created_at": "2026-05-04T10:15:00-04:00",
+                },
+                {
+                    "uid": "interval-uid",
+                    "chore_name": "Change Filter",
+                    "chore_type": "interval",
+                    "schedule": {
+                        "interval_mins": 129600,
+                    },
+                    "pending_period_mins": 180,
+                    "grace_period_mins": 1440,
+                },
+            ],
+        }
+    )
+
+    store = ChoreStore(hass, entry_id)
+    await store.async_load()
+
+    weekly = store.get_chore("weekly-uid")
+    assert isinstance(weekly, ScheduledChore)
+    assert weekly.rrule == "FREQ=WEEKLY;BYDAY=MO,TH"
+    # dtstart anchors to created_at's date at the legacy time-of-day.
+    assert weekly.dtstart is not None
+    assert weekly.dtstart.isoformat() == "2026-05-04T19:30:00"
+
+    interval = store.get_chore("interval-uid")
+    assert isinstance(interval, IntervalChore)
+    assert interval.interval == timedelta(minutes=129600)
+
+    await store.async_save()
+    persisted = await Store(hass, 4, key).async_load()
+    assert persisted is not None
+    by_uid = {item["uid"]: item for item in persisted["items"]}
+    assert by_uid["weekly-uid"]["schedule"] == {
+        "rrule": "FREQ=WEEKLY;BYDAY=MO,TH",
+        "dtstart": "2026-05-04T19:30:00",
+    }
+    assert by_uid["interval-uid"]["schedule"] == {"interval_mins": 129600}

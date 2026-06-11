@@ -9,8 +9,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import DEFAULT_PENDING_PERIOD_MINS, DOMAIN, STORAGE_VERSION
+from .const import DEFAULT_PENDING_PERIOD_MINS, DOMAIN, STORAGE_VERSION, ChoreType
 from .models import BaseChore
+from .models.scheduled import migrate_legacy_schedule
 
 
 class _ChoreCalendarStore(Store[dict[str, Any]]):
@@ -35,6 +36,14 @@ class _ChoreCalendarStore(Store[dict[str, Any]]):
         load time by ``BaseChore.from_dict`` (terminal is backfilled from
         the completion-vs-pending-window relationship; the dropped field is
         ignored), so no work is needed here.
+
+        v3 → v4: rewrite each scheduled item's ``schedule`` dict from
+        ``{time, active_days}`` to ``{rrule, dtstart}``. ``dtstart``'s date
+        comes from the item's ``created_at`` (the series phase anchor —
+        irrelevant at INTERVAL=1, but it must exist). Interval and oneshot
+        schedules are unchanged. The other v4 additions (``description``,
+        ``completion_count``, ``exdate``, ``rdate``) ride on load-time
+        defaults in ``BaseChore.from_dict``.
         """
         if old_major_version < 3:
             for item in old_data.get("items", []):
@@ -44,6 +53,13 @@ class _ChoreCalendarStore(Store[dict[str, Any]]):
                 item["pending_period_mins"] = pending_mins
                 if grace_mins is not None:
                     item["grace_period_mins"] = grace_mins
+        if old_major_version < 4:
+            for item in old_data.get("items", []):
+                if item.get("chore_type") != str(ChoreType.SCHEDULED):
+                    continue
+                created_raw = item.get("created_at")
+                created_at = dt_util.parse_datetime(created_raw) if created_raw else None
+                item["schedule"] = migrate_legacy_schedule(item.get("schedule", {}), created_at)
         return old_data
 
 

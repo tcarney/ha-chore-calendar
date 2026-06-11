@@ -423,8 +423,9 @@ class TestSerialization:
         assert isinstance(restored, ScheduledChore)
         assert restored.uid == original.uid
         assert restored.chore_name == original.chore_name
-        assert restored.time == original.time
-        assert restored.active_days == original.active_days
+        assert restored.rrule == "FREQ=WEEKLY;BYDAY=MO,WE,FR"
+        assert restored.rrule == original.rrule
+        assert restored.dtstart == original.dtstart
         assert restored.pending_period == original.pending_period
         assert restored.grace_period == original.grace_period
         assert restored.last_completed == original.last_completed
@@ -491,10 +492,19 @@ class TestSerialization:
             BaseChore.from_dict(data)
 
     def test_schedule_description_scheduled(self):
-        """schedule_description fills in all days when active_days is empty."""
+        """schedule_description derives display keys from a daily rrule: full week + time."""
         chore = _make_scheduled()
         desc = chore.schedule_description()
+        assert desc["rrule"] == "FREQ=DAILY"
+        assert desc["time"] == "08:00:00"
         assert len(desc["active_days"]) == 7
+
+    def test_schedule_description_weekly_derives_days(self):
+        """schedule_description derives active_days from a weekly rrule's BYDAY, in order."""
+        chore = _make_scheduled(active_days=["fri", "mon"])
+        desc = chore.schedule_description()
+        assert desc["rrule"] == "FREQ=WEEKLY;BYDAY=FR,MO"
+        assert desc["active_days"] == ["fri", "mon"]
 
     def test_schedule_description_interval(self):
         """schedule_description returns interval_mins and grace_period_mins."""
@@ -502,6 +512,93 @@ class TestSerialization:
         desc = chore.schedule_description()
         assert desc["interval_mins"] == 4320
         assert desc["grace_period_mins"] == 1440
+
+
+class TestScheduledRruleRepresentation:
+    """Test the {rrule, dtstart} canonical representation and legacy-arg synthesis."""
+
+    def test_legacy_args_synthesize_weekly_rrule(self):
+        """active_days synthesizes a weekly BYDAY rrule; time sets dtstart's time-of-day."""
+        chore = _make_scheduled(sched_time=time(19, 30), active_days=["mon", "thu"])
+        assert chore.rrule == "FREQ=WEEKLY;BYDAY=MO,TH"
+        assert chore.dtstart is not None
+        assert chore.dtstart.time() == time(19, 30)
+        assert chore.dtstart.tzinfo is None
+
+    def test_empty_active_days_synthesizes_daily(self):
+        """Empty active_days means every day → FREQ=DAILY."""
+        chore = _make_scheduled(active_days=[])
+        assert chore.rrule == "FREQ=DAILY"
+
+    def test_dtstart_date_anchors_to_created_at(self):
+        """Without an explicit dtstart, its date comes from created_at."""
+        chore = ScheduledChore(
+            uid="x",
+            chore_name="X",
+            chore_type=ChoreType.SCHEDULED,
+            time=time(8, 0),
+            created_at=datetime(2026, 5, 4, 10, 15, tzinfo=TZ),
+        )
+        assert chore.dtstart == datetime(2026, 5, 4, 8, 0)
+
+    def test_explicit_dtstart_is_canonical(self):
+        """An explicit rrule/dtstart pair is stored as-is (naive, seconds zeroed)."""
+        chore = ScheduledChore(
+            uid="x",
+            chore_name="X",
+            chore_type=ChoreType.SCHEDULED,
+            rrule="FREQ=WEEKLY;BYDAY=SU",
+            dtstart=datetime(2026, 5, 3, 9, 0, 30),
+        )
+        assert chore.rrule == "FREQ=WEEKLY;BYDAY=SU"
+        assert chore.dtstart == datetime(2026, 5, 3, 9, 0)
+
+    def test_unsupported_freq_raises(self):
+        """FREQ outside DAILY/WEEKLY/MONTHLY/YEARLY is rejected at construction."""
+        with pytest.raises(ValueError, match="FREQ"):
+            ScheduledChore(
+                uid="x",
+                chore_name="X",
+                chore_type=ChoreType.SCHEDULED,
+                rrule="FREQ=MINUTELY",
+            )
+
+    def test_from_schedule_v4_shape(self):
+        """from_schedule loads the v4 storage shape directly."""
+        chore = ScheduledChore.from_schedule(
+            {"uid": "x", "chore_name": "X", "chore_type": ChoreType.SCHEDULED},
+            {"rrule": "FREQ=WEEKLY;BYDAY=MO,WE,FR", "dtstart": "2026-05-04T08:00:00"},
+        )
+        assert chore.rrule == "FREQ=WEEKLY;BYDAY=MO,WE,FR"
+        assert chore.dtstart == datetime(2026, 5, 4, 8, 0)
+
+    def test_from_schedule_time_overlay_keeps_dtstart_date(self):
+        """A legacy time key overlaid on a stored schedule replaces only the time-of-day."""
+        chore = ScheduledChore.from_schedule(
+            {"uid": "x", "chore_name": "X", "chore_type": ChoreType.SCHEDULED},
+            {"rrule": "FREQ=WEEKLY;BYDAY=MO", "dtstart": "2026-05-04T08:00:00", "time": "20:15:00"},
+        )
+        assert chore.rrule == "FREQ=WEEKLY;BYDAY=MO"
+        assert chore.dtstart == datetime(2026, 5, 4, 20, 15)
+
+    def test_from_schedule_active_days_overlay_resynthesizes_rrule(self):
+        """A legacy active_days key overlaid on a stored schedule rewrites the rrule."""
+        chore = ScheduledChore.from_schedule(
+            {"uid": "x", "chore_name": "X", "chore_type": ChoreType.SCHEDULED},
+            {"rrule": "FREQ=DAILY", "dtstart": "2026-05-04T08:00:00", "active_days": ["sat", "sun"]},
+        )
+        assert chore.rrule == "FREQ=WEEKLY;BYDAY=SA,SU"
+        assert chore.dtstart == datetime(2026, 5, 4, 8, 0)
+
+    def test_schedule_to_dict_v4_shape(self):
+        """_schedule_to_dict serializes the canonical {rrule, dtstart} pair."""
+        chore = _make_scheduled(active_days=["mon", "wed", "fri"])
+        data = chore.to_dict()
+        assert chore.dtstart is not None
+        assert data["schedule"] == {
+            "rrule": "FREQ=WEEKLY;BYDAY=MO,WE,FR",
+            "dtstart": chore.dtstart.isoformat(),
+        }
 
 
 class TestCompletionUndoSlot:
