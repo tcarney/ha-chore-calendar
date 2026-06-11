@@ -453,6 +453,18 @@ For non-completed chores, "Skip" and "Complete" buttons appear in the dialog foo
 
 All options are configurable through the visual editor — no YAML required. Each entity is shown as a collapsible panel (collapsed: entity name with color dot; expanded: entity picker, color picker, exclude statuses multi-select, and remove button). Card-level options include toggle switches, number inputs, and action type dropdowns.
 
+### Native Todo Card
+
+Each chore list also works with HA's built-in [todo-list card](https://www.home-assistant.io/dashboards/todo-list/). Set `item_tap_action: toggle` so tapping a chore toggles completion:
+
+```yaml
+type: todo-list
+entity: todo.daily_chores
+item_tap_action: toggle
+```
+
+The default tap action (`edit`) opens HA's item editor, which is not fully supported.  Every save from that dialog fails with a validation error; `toggle` avoids the dialog entirely. To rename a chore or edit its description, use [`chore_calendar.update_item`](#update-a-chore).
+
 ## Automation Events
 
 ### `chore_calendar_status_changed`

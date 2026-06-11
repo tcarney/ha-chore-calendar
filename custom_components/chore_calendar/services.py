@@ -48,6 +48,7 @@ ATTR_BEFORE = "before"
 ATTR_CHORE_NAME = "chore_name"
 ATTR_COMPLETED_AT = "completed_at"
 ATTR_COMPLETED_BY = "completed_by"
+ATTR_DESCRIPTION = "description"
 ATTR_ENTITY_ID = "entity_id"
 ATTR_KEEP_FOR = "keep_for"
 ATTR_KEEP_SKIP = "keep_skip"
@@ -65,6 +66,7 @@ SERVICE_CREATE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
         vol.Required(ATTR_CHORE_NAME): cv.string,
+        vol.Optional(ATTR_DESCRIPTION): cv.string,
         vol.Optional(ATTR_TRIGGER_ENTITY): cv.entity_id,
         vol.Optional(ATTR_ASSIGNED_TO, default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
         vol.Optional(ATTR_SCHEDULED): dict,
@@ -80,6 +82,7 @@ SERVICE_UPDATE_SCHEMA = vol.Schema(
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
         vol.Optional(ATTR_ITEM): cv.string,
         vol.Optional(ATTR_CHORE_NAME): cv.string,
+        vol.Optional(ATTR_DESCRIPTION): cv.string,
         vol.Optional(ATTR_TRIGGER_ENTITY): cv.entity_id,
         vol.Optional(ATTR_ASSIGNED_TO): vol.All(cv.ensure_list, [cv.entity_id]),
         vol.Optional(ATTR_SCHEDULED): dict,
@@ -306,6 +309,9 @@ def _build_chore_from_data(data: dict[str, Any]) -> BaseChore:
         "uid": data["uid"],
         "chore_name": data[ATTR_CHORE_NAME],
         "chore_type": str(chore_type),
+        # Normalize empty string to None — the UI text selector submits ""
+        # for a cleared field.
+        "description": data.get(ATTR_DESCRIPTION) or None,
         "schedule": {},
         "assigned_to": list(data.get(ATTR_ASSIGNED_TO, [])),
     }
@@ -372,6 +378,9 @@ async def _async_handle_update(call: ServiceCall) -> None:
     updated = existing.to_dict()
     if ATTR_CHORE_NAME in call.data:
         updated["chore_name"] = call.data[ATTR_CHORE_NAME]
+    if ATTR_DESCRIPTION in call.data:
+        # Empty string clears the description (None in storage).
+        updated["description"] = call.data[ATTR_DESCRIPTION] or None
     if ATTR_TRIGGER_ENTITY in call.data:
         updated["trigger_tag_id"] = _resolve_trigger_tag_id(call.hass, call.data[ATTR_TRIGGER_ENTITY])
     if ATTR_ASSIGNED_TO in call.data:
@@ -587,6 +596,7 @@ async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
                 "uid": chore.uid,
                 "chore_name": chore.chore_name,
                 "chore_type": str(chore.chore_type),
+                "description": chore.description,
                 "status": current_status,
                 "next_due": next_due.isoformat() if next_due else None,
                 "last_completed": chore.last_completed.isoformat() if chore.last_completed else None,

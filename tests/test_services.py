@@ -190,6 +190,97 @@ async def test_create_scheduled_item(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_item_with_description(hass, config_entry):
+    """create_item stores an optional description."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Water Plants",
+            "description": "Only the ones on the porch.",
+            "interval": {"days": 2},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "Water Plants")
+    assert chore is not None
+    assert chore.description == "Only the ones on the porch."
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_item_without_description_is_none(hass, config_entry):
+    """create_item leaves description as None when not provided."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "No Description",
+            "interval": {"days": 2},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "No Description")
+    assert chore is not None
+    assert chore.description is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_item_sets_and_clears_description(hass, config_entry):
+    """update_item sets a description; an empty string clears it back to None."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    store = config_entry.runtime_data.store
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": "Test Chore",
+            "description": "Use the green bin.",
+        },
+        blocking=True,
+    )
+    assert store.get_chore(TEST_UID).description == "Use the green bin."
+
+    # An update without description leaves the stored value untouched.
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": "Test Chore",
+            "chore_name": "Test Chore",
+        },
+        blocking=True,
+    )
+    assert store.get_chore(TEST_UID).description == "Use the green bin."
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": "Test Chore",
+            "description": "",
+        },
+        blocking=True,
+    )
+    assert store.get_chore(TEST_UID).description is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_update_item(hass, config_entry):
     """update_item modifies an existing chore."""
     entity_id = await _setup_with_chore(hass, config_entry)
@@ -388,6 +479,35 @@ async def test_get_items(hass, config_entry):
     assert len(response["items"]) == 1
     assert response["items"][0]["uid"] == TEST_UID
     assert response["items"][0]["status"] in ("completed", "due", "overdue", "pending")
+    # description is always present in the response — None when unset.
+    assert response["items"][0]["description"] is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_items_returns_description(hass, config_entry):
+    """get_items includes a chore's description."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": "Test Chore",
+            "description": "Use the green bin.",
+        },
+        blocking=True,
+    )
+
+    response = await hass.services.async_call(
+        DOMAIN,
+        "get_items",
+        {"entity_id": entity_id},
+        blocking=True,
+        return_response=True,
+    )
+
+    assert response["items"][0]["description"] == "Use the green bin."
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

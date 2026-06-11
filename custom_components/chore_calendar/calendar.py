@@ -48,14 +48,26 @@ def _make_due_event(chore: BaseChore, now: datetime.datetime) -> CalendarEvent |
     if chore.compute_status(now) != ChoreStatus.COMPLETED or due_at > now:
         # Current period is active, or the due window is still in the future
         # (interval chores report the upcoming window even when completed).
-        return CalendarEvent(summary=chore.chore_name, start=due_at, end=due_at)
+        return CalendarEvent(
+            summary=chore.chore_name,
+            start=due_at,
+            end=due_at,
+            description=chore.description,
+            uid=chore.uid,
+        )
 
     # Current period is completed — show the next one. Ask for next_due from
     # after the current period ends so we skip past it.
     next_due = chore.compute_next_due(overdue_at)
     if next_due is None or next_due <= due_at:
         return None
-    return CalendarEvent(summary=chore.chore_name, start=next_due, end=next_due)
+    return CalendarEvent(
+        summary=chore.chore_name,
+        start=next_due,
+        end=next_due,
+        description=chore.description,
+        uid=chore.uid,
+    )
 
 
 def _make_completed_event(
@@ -72,10 +84,14 @@ def _make_completed_event(
         return None
     if cleared_at is not None and chore.last_completed < cleared_at:
         return None
+    # The completed marker carries the chore's uid so consumers can correlate
+    # it back to the chore, but no description — it is a synthetic history
+    # marker, not the chore's due event.
     return CalendarEvent(
         summary=f"✓ {chore.chore_name}",
         start=chore.last_completed,
         end=chore.last_completed,
+        uid=chore.uid,
     )
 
 

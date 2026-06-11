@@ -14,9 +14,16 @@ same helpers that back the ``complete_item`` / ``uncomplete_item`` services:
 * ``needs_action`` → ``completed``: record a completion for the current period.
 * ``completed`` → ``needs_action``: revert the most recent completion.
 
-No other updates (rename, due-date, description) are supported — the HA update
-service is called with a full ``TodoItem`` payload, so we silently ignore
-unsupported field changes rather than raise.
+Items surface ``BaseChore.description`` read-only (same stance as the calendar
+entity). ``SET_DESCRIPTION_ON_ITEM`` is deliberately not advertised: HA's todo
+card edit dialog submits the full form on save, including ``due_datetime`` for
+items that have a due time, and the service then rejects the call because due
+times here are derived from the chore schedule and not settable
+(``SET_DUE_DATETIME_ON_ITEM``). Until due-date writes have a sensible mapping,
+description edits go through ``chore_calendar.update_item``. No other updates
+(rename, due-date) are supported — the HA update service is called with a full
+``TodoItem`` payload, so we silently ignore unsupported field changes rather
+than raise.
 """
 
 from __future__ import annotations
@@ -35,7 +42,6 @@ from . import chore_list_device_info
 from .actions import async_complete_chore, async_uncomplete_chore
 from .const import ChoreStatus
 from .coordinator import ChoreCalendarCoordinator
-from .models import BaseChore
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -126,6 +132,7 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
                     uid=chore.uid,
                     status=todo_status,
                     completed=chore.last_completed,
+                    description=chore.description,
                 )
             else:
                 item = TodoItem(
@@ -133,6 +140,7 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
                     uid=chore.uid,
                     status=todo_status,
                     due=next_due,
+                    description=chore.description,
                 )
             entries.append((_BUCKET_ORDER[status], next_due, item))
 
@@ -148,19 +156,20 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
         HA's ``todo.update_item`` service passes the full ``TodoItem`` with any
         updated fields merged in. We compare the new ``status`` against the
         chore's current status and route accordingly. Status-only no-ops, plus
-        rename / due-date / description edits, are silently ignored.
+        rename / due-date / description edits, are silently ignored (see the
+        module docstring for why description stays read-only here).
         """
         if item.uid is None:
             msg = "Cannot update todo item without a uid"
             raise ServiceValidationError(msg)
 
-        chore = self._get_chore(item.uid)
+        store = self._entry.runtime_data.store
+        chore = store.get_chore(item.uid)
         if chore is None:
             msg = f"Chore '{item.uid}' not found"
             raise ServiceValidationError(msg)
 
         current_status = chore.compute_status(dt_util.now())
-        store = self._entry.runtime_data.store
 
         if item.status == TodoItemStatus.COMPLETED and current_status != ChoreStatus.COMPLETED:
             await async_complete_chore(store, self.coordinator, item.uid)
@@ -171,12 +180,6 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
             return
 
         # Same status, or unsupported edit (rename/due/description) — ignore.
-
-    def _get_chore(self, uid: str) -> BaseChore | None:
-        """Look up a chore by uid in the coordinator's current snapshot."""
-        if self.coordinator.data is None:
-            return None
-        return self.coordinator.data.get(uid)
 
 
 def _map_status(status: ChoreStatus) -> TodoItemStatus:

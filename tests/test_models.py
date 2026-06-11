@@ -451,6 +451,34 @@ class TestSerialization:
         assert restored.trigger_tag_id == "abc-123-uuid"
         assert restored.assigned_to == ["person.tom"]
 
+    def test_new_base_fields_round_trip(self):
+        """description, completion_count, exdate, and rdate survive a round-trip."""
+        original = _make_scheduled()
+        original.description = "Take with food."
+        original.completion_count = 7
+        original.exdate = [datetime(2026, 4, 1, 8, 0, tzinfo=TZ)]
+        original.rdate = [datetime(2026, 4, 5, 8, 0, tzinfo=TZ)]
+
+        restored = BaseChore.from_dict(original.to_dict())
+
+        assert restored.description == "Take with food."
+        assert restored.completion_count == 7
+        assert restored.exdate == original.exdate
+        assert restored.rdate == original.rdate
+
+    def test_legacy_dict_without_new_fields_loads_defaults(self):
+        """A stored dict predating description/completion_count/exdate/rdate loads with defaults."""
+        data = _make_scheduled().to_dict()
+        for key in ("description", "completion_count", "exdate", "rdate"):
+            del data[key]
+
+        restored = BaseChore.from_dict(data)
+
+        assert restored.description is None
+        assert restored.completion_count == 0
+        assert restored.exdate == []
+        assert restored.rdate == []
+
     def test_from_dict_unknown_type_raises(self):
         """from_dict raises ValueError for unknown chore_type."""
         data = {
@@ -520,6 +548,29 @@ class TestCompletionUndoSlot:
         assert chore.last_completed_by is None
         assert chore.previous_last_completed is None
         assert chore.previous_last_completed_by is None
+
+    def test_completion_count_increments_and_reverts_symmetrically(self):
+        """apply_completion increments the counter; revert_completion decrements it."""
+        chore = _make_interval()
+        assert chore.completion_count == 0
+
+        chore.apply_completion(datetime(2026, 3, 30, 7, 0, tzinfo=TZ), "person.alice")
+        assert chore.completion_count == 1
+
+        chore.apply_completion(datetime(2026, 3, 31, 7, 0, tzinfo=TZ), "person.bob")
+        assert chore.completion_count == 2
+
+        chore.revert_completion()
+        assert chore.completion_count == 1
+
+    def test_completion_count_revert_floors_at_zero(self):
+        """Reverting a completion loaded from a pre-counter store does not go negative."""
+        # Legacy shape: last_completed set, but counter backfilled to zero.
+        chore = _make_interval(last_completed=datetime(2026, 3, 30, 7, 0, tzinfo=TZ))
+        assert chore.completion_count == 0
+
+        chore.revert_completion()
+        assert chore.completion_count == 0
 
     def test_revert_without_completion_raises(self):
         """revert_completion raises when there is nothing to revert."""

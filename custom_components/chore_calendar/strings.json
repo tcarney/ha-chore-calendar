@@ -89,6 +89,10 @@
           "name": "Chore name",
           "description": "Display name for the chore."
         },
+        "description": {
+          "name": "Description",
+          "description": "Optional detail text, shown on the chore's calendar events."
+        },
         "trigger_entity": {
           "name": "Trigger entity",
           "description": "Entity that triggers completion (e.g. an NFC tag)."
@@ -134,6 +138,10 @@
         "chore_name": {
           "name": "Chore name",
           "description": "New display name for the chore."
+        },
+        "description": {
+          "name": "Description",
+          "description": "New detail text. Provide an empty value to clear it."
         },
         "trigger_entity": {
           "name": "Trigger entity",

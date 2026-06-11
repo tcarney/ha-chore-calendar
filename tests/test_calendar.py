@@ -241,6 +241,8 @@ async def test_get_events_returns_due_event(hass, config_entry):
     assert events[0].start == datetime(2026, 3, 30, 8, 0, tzinfo=TZ)
     # Due events are zero-duration markers at the due time.
     assert events[0].end == events[0].start
+    # Every emitted event carries the chore's uid as the join key.
+    assert events[0].uid == "med"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -395,6 +397,77 @@ async def test_get_events_empty_when_no_chores(hass, config_entry):
     events = await entity.async_get_events(hass, start, end)
 
     assert events == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_events_carries_uid_and_description(hass, config_entry):
+    """Due events carry uid and description; completed markers carry uid only."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    completed_at = datetime(2026, 3, 30, 7, 30, tzinfo=TZ)
+    chore = ScheduledChore(
+        uid="med",
+        chore_name="Medicine",
+        chore_type=ChoreType.SCHEDULED,
+        description="Take with food.",
+        time=time(8, 0),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        last_completed=completed_at,
+    )
+    await runtime.store.async_create_chore(chore)
+
+    frozen = datetime(2026, 3, 30, 9, 0, tzinfo=TZ)
+    with patch("homeassistant.util.dt.now", return_value=frozen):
+        await runtime.coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+        entity = _get_calendar_entity(hass, entity_id)
+        start = datetime(2026, 3, 30, 0, 0, tzinfo=TZ)
+        end = datetime(2026, 4, 1, 0, 0, tzinfo=TZ)
+        events = await entity.async_get_events(hass, start, end)
+
+    due_events = [e for e in events if "✓" not in e.summary]
+    completed_events = [e for e in events if "✓" in e.summary]
+    assert len(due_events) == 1
+    assert due_events[0].uid == "med"
+    assert due_events[0].description == "Take with food."
+    assert len(completed_events) == 1
+    assert completed_events[0].uid == "med"
+    # The completed marker is a synthetic history event — no description.
+    assert completed_events[0].description is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_events_description_none_when_unset(hass, config_entry):
+    """A chore without a description emits due events with description=None."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = ScheduledChore(
+        uid="med",
+        chore_name="Medicine",
+        chore_type=ChoreType.SCHEDULED,
+        time=time(8, 0),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+    )
+    await runtime.store.async_create_chore(chore)
+
+    frozen = datetime(2026, 3, 30, 7, 0, tzinfo=TZ)
+    with patch("homeassistant.util.dt.now", return_value=frozen):
+        await runtime.coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+        entity = _get_calendar_entity(hass, entity_id)
+        start = datetime(2026, 3, 30, 0, 0, tzinfo=TZ)
+        end = datetime(2026, 3, 31, 0, 0, tzinfo=TZ)
+        events = await entity.async_get_events(hass, start, end)
+
+    assert len(events) == 1
+    assert events[0].uid == "med"
+    assert events[0].description is None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

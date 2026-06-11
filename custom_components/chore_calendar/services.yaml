@@ -12,6 +12,11 @@ create_item:
       example: "Morning Medicine"
       selector:
         text:
+    description:
+      example: "Take with food. Refills are in the hall closet."
+      selector:
+        text:
+          multiline: true
     trigger_entity:
       selector:
         entity:
@@ -89,6 +94,10 @@ update_item:
     chore_name:
       selector:
         text:
+    description:
+      selector:
+        text:
+          multiline: true
     trigger_entity:
       selector:
         entity:
