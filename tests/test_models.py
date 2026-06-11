@@ -342,8 +342,8 @@ class TestIntervalChoreStatus:
 
         # Immediately after first completion: COMPLETED.
         assert chore.compute_status(first_completion) == ChoreStatus.COMPLETED
-        # next_due now anchored at first_completion + interval.
-        assert chore.compute_next_due(first_completion) == first_completion + chore.interval
+        # next_due now anchored at first_completion + interval (3 days).
+        assert chore.compute_next_due(first_completion) == first_completion + timedelta(days=3)
 
 
 class TestIntervalChoreNextDue:
@@ -599,6 +599,104 @@ class TestScheduledRruleRepresentation:
             "rrule": "FREQ=WEEKLY;BYDAY=MO,WE,FR",
             "dtstart": chore.dtstart.isoformat(),
         }
+
+
+class TestIntervalFreqRepresentation:
+    """Test the {freq, interval} canonical representation and calendar stepping."""
+
+    def _make(self, freq: str, interval: int, **kwargs) -> IntervalChore:
+        return IntervalChore(
+            uid="x",
+            chore_name="X",
+            chore_type=ChoreType.INTERVAL,
+            freq=freq,
+            interval=interval,
+            **kwargs,
+        )
+
+    @pytest.mark.parametrize(
+        ("delta", "expected"),
+        [
+            (timedelta(days=90), ("daily", 90)),
+            (timedelta(weeks=2), ("weekly", 2)),
+            (timedelta(days=7), ("weekly", 1)),
+            (timedelta(hours=4), ("hourly", 4)),
+            (timedelta(minutes=90), ("minutely", 90)),
+        ],
+    )
+    def test_timedelta_normalizes_to_largest_unit(self, delta, expected):
+        """A legacy timedelta interval maps onto the largest exactly-dividing unit."""
+        chore = IntervalChore(
+            uid="x",
+            chore_name="X",
+            chore_type=ChoreType.INTERVAL,
+            interval=delta,
+        )
+        assert (chore.freq, chore.interval) == expected
+
+    def test_invalid_freq_raises(self):
+        """An unknown freq is rejected at construction."""
+        with pytest.raises(ValueError, match="freq"):
+            self._make("fortnightly", 1)
+
+    def test_monthly_steps_track_the_calendar(self):
+        """Monthly intervals step calendar months, clamping at short month ends."""
+        chore = self._make("monthly", 1, last_completed=datetime(2026, 1, 31, 9, 0, tzinfo=TZ))
+        now = datetime(2026, 2, 1, 9, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2026, 2, 28, 9, 0, tzinfo=TZ)
+
+    def test_quarterly_next_due(self):
+        """An "after 3 months" chore lands three calendar months out."""
+        chore = self._make("monthly", 3, last_completed=datetime(2026, 3, 15, 9, 0, tzinfo=TZ))
+        now = datetime(2026, 3, 16, 9, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2026, 6, 15, 9, 0, tzinfo=TZ)
+
+    def test_yearly_next_due(self):
+        """Yearly intervals step calendar years."""
+        chore = self._make("yearly", 1, last_completed=datetime(2026, 3, 15, 9, 0, tzinfo=TZ))
+        now = datetime(2026, 3, 16, 9, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2027, 3, 15, 9, 0, tzinfo=TZ)
+
+    def test_default_skip_slides_by_calendar_step(self):
+        """apply_default_skip advances by one calendar step from now."""
+        chore = self._make("monthly", 3, last_completed=datetime(2026, 3, 15, 9, 0, tzinfo=TZ))
+        now = datetime(2026, 3, 20, 10, 0, tzinfo=TZ)
+        assert chore.apply_default_skip(now) == datetime(2026, 6, 20, 10, 0, tzinfo=TZ)
+        assert chore.skipped_until == datetime(2026, 6, 20, 10, 0, tzinfo=TZ)
+
+    def test_round_trip_v5_shape(self):
+        """{freq, interval} survives a to_dict/from_dict round-trip."""
+        original = self._make("monthly", 3)
+        data = original.to_dict()
+        assert data["schedule"] == {"freq": "monthly", "interval": 3}
+
+        restored = BaseChore.from_dict(data)
+        assert isinstance(restored, IntervalChore)
+        assert (restored.freq, restored.interval) == ("monthly", 3)
+
+    def test_from_schedule_legacy_interval_mins(self):
+        """from_schedule still accepts the legacy interval_mins shape."""
+        chore = IntervalChore.from_schedule(
+            {"uid": "x", "chore_name": "X", "chore_type": ChoreType.INTERVAL},
+            {"interval_mins": 20160},
+        )
+        assert (chore.freq, chore.interval) == ("weekly", 2)
+
+    def test_schedule_description_derives_interval_mins(self):
+        """Sub-monthly freqs expose a derived interval_mins for the card."""
+        chore = self._make("weekly", 2)
+        desc = chore.schedule_description()
+        assert desc["freq"] == "weekly"
+        assert desc["interval"] == 2
+        assert desc["interval_mins"] == 20160
+
+    def test_schedule_description_monthly_has_no_interval_mins(self):
+        """Month/year intervals have no fixed minute count — no derived key."""
+        chore = self._make("monthly", 3)
+        desc = chore.schedule_description()
+        assert desc["freq"] == "monthly"
+        assert desc["interval"] == 3
+        assert "interval_mins" not in desc
 
 
 class TestCompletionUndoSlot:

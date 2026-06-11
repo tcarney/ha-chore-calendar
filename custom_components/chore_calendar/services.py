@@ -41,6 +41,7 @@ from .const import (
 )
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore, OneshotChore
+from .models.interval import VALID_INTERVAL_FREQS, mins_to_freq_interval
 from .store import ChoreStore
 
 # Service-specific field keys (not shared with sensor attributes).
@@ -243,6 +244,37 @@ def _duration_to_mins(dur: dict[str, Any]) -> int:
     return int(dur.get("days", 0)) * 1440 + int(dur.get("hours", 0)) * 60 + int(dur.get("minutes", 0))
 
 
+def _interval_schedule_from_call(obj: dict[str, Any]) -> dict[str, Any]:
+    """Translate an ``interval`` service sub-object to the {freq, interval} schedule shape.
+
+    Two accepted shapes: the structured selector (``frequency`` +
+    ``interval``, per the recurrence-model design) and the legacy HA
+    duration dict (``days`` / ``hours`` / ``minutes``), which maps onto the
+    largest exactly-dividing unit. Mixing them is rejected — a call carrying
+    both is ambiguous about which one is meant.
+    """
+    duration_keys = [key for key in ("days", "hours", "minutes") if key in obj]
+    if "frequency" in obj:
+        if duration_keys:
+            msg = f"Interval cannot mix 'frequency' with duration fields {duration_keys!r}"
+            raise ServiceValidationError(msg)
+        frequency = obj["frequency"]
+        if frequency not in VALID_INTERVAL_FREQS:
+            msg = f"Invalid interval frequency {frequency!r} (must be one of {VALID_INTERVAL_FREQS})"
+            raise ServiceValidationError(msg)
+        try:
+            count = int(obj.get("interval", 1))
+        except (TypeError, ValueError):
+            msg = f"Invalid interval count {obj.get('interval')!r} (must be a positive integer)"
+            raise ServiceValidationError(msg) from None
+        if count < 1:
+            msg = f"Invalid interval count {count!r} (must be a positive integer)"
+            raise ServiceValidationError(msg)
+        return {"freq": frequency, "interval": count}
+    freq, interval = mins_to_freq_interval(_duration_to_mins(obj))
+    return {"freq": freq, "interval": interval}
+
+
 def _infer_chore_type(data: dict[str, Any]) -> ChoreType:
     """Infer chore type from the presence of ``scheduled`` / ``interval`` / ``oneshot``.
 
@@ -289,7 +321,7 @@ def _apply_overlays(
         if "active_days" in obj:
             schedule["active_days"] = obj["active_days"]
     elif chore_type == ChoreType.INTERVAL and ATTR_INTERVAL in data:
-        schedule["interval_mins"] = _duration_to_mins(data[ATTR_INTERVAL])
+        schedule.update(_interval_schedule_from_call(data[ATTR_INTERVAL]))
     elif chore_type == ChoreType.ONESHOT and ATTR_ONESHOT in data:
         obj = data[ATTR_ONESHOT]
         if "due_datetime" in obj:

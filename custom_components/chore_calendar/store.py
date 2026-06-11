@@ -11,6 +11,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DEFAULT_PENDING_PERIOD_MINS, DOMAIN, STORAGE_VERSION, ChoreType
 from .models import BaseChore
+from .models.interval import mins_to_freq_interval
 from .models.scheduled import migrate_legacy_schedule
 
 
@@ -44,6 +45,11 @@ class _ChoreCalendarStore(Store[dict[str, Any]]):
         schedules are unchanged. The other v4 additions (``description``,
         ``completion_count``, ``exdate``, ``rdate``) ride on load-time
         defaults in ``BaseChore.from_dict``.
+
+        v4 → v5: rewrite each interval item's ``schedule`` dict from
+        ``{interval_mins}`` to ``{freq, interval}``, mapped onto the largest
+        exactly-dividing unit (lossless by construction — anything that
+        doesn't divide falls through to ``minutely``).
         """
         if old_major_version < 3:
             for item in old_data.get("items", []):
@@ -60,6 +66,14 @@ class _ChoreCalendarStore(Store[dict[str, Any]]):
                 created_raw = item.get("created_at")
                 created_at = dt_util.parse_datetime(created_raw) if created_raw else None
                 item["schedule"] = migrate_legacy_schedule(item.get("schedule", {}), created_at)
+        if old_major_version < 5:
+            for item in old_data.get("items", []):
+                if item.get("chore_type") != str(ChoreType.INTERVAL):
+                    continue
+                schedule = item.get("schedule", {})
+                # Missing interval_mins maps to the model default (1 day).
+                freq, interval = mins_to_freq_interval(int(schedule.get("interval_mins", 1440)))
+                item["schedule"] = {"freq": freq, "interval": interval}
         return old_data
 
 

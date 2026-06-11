@@ -220,6 +220,65 @@ async def test_create_item_with_description(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_interval_item_structured_frequency(hass, config_entry):
+    """create_item accepts the structured {frequency, interval} shape — months expressible."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Change Furnace Filter",
+            "interval": {"frequency": "monthly", "interval": 3},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "Change Furnace Filter")
+    assert isinstance(chore, IntervalChore)
+    assert (chore.freq, chore.interval) == ("monthly", 3)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_interval_item_invalid_frequency_raises(hass, config_entry):
+    """create_item rejects an unknown interval frequency."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError, match="frequency"):
+        await hass.services.async_call(
+            DOMAIN,
+            "create_item",
+            {
+                "entity_id": entity_id,
+                "chore_name": "Bad Frequency",
+                "interval": {"frequency": "fortnightly"},
+            },
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_interval_item_mixed_shapes_raises(hass, config_entry):
+    """create_item rejects mixing the structured shape with duration fields."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError, match="mix"):
+        await hass.services.async_call(
+            DOMAIN,
+            "create_item",
+            {
+                "entity_id": entity_id,
+                "chore_name": "Mixed Shapes",
+                "interval": {"frequency": "monthly", "days": 3},
+            },
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_create_item_without_description_is_none(hass, config_entry):
     """create_item leaves description as None when not provided."""
     entity_id = await _setup_with_chore(hass, config_entry)
@@ -720,7 +779,8 @@ async def test_update_item_same_type_succeeds(hass, config_entry):
     chore = config_entry.runtime_data.store.get_chore(TEST_UID)
     assert chore is not None
     assert isinstance(chore, IntervalChore)
-    assert chore.interval == timedelta(days=7)
+    # The legacy duration shape maps onto the largest exactly-dividing unit.
+    assert (chore.freq, chore.interval) == ("weekly", 1)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
