@@ -215,6 +215,7 @@ async def test_storage_migration_v2_to_v5(hass):
         # No created_at in the v2 payload — dtstart falls back to the
         # phase-neutral anchor date.
         "dtstart": "1970-01-01T08:00:00",
+        "persist": False,
     }
     assert by_uid["interval-uid"]["pending_period_mins"] == DEFAULT_PENDING_PERIOD_MINS
     # 129600 minutes = 90 days (not a whole number of weeks).
@@ -280,6 +281,7 @@ async def test_storage_migration_v3_to_v5(hass):
     assert by_uid["weekly-uid"]["schedule"] == {
         "rrule": "FREQ=WEEKLY;BYDAY=MO,TH",
         "dtstart": "2026-05-04T19:30:00",
+        "persist": False,
     }
     assert by_uid["interval-uid"]["schedule"] == {"freq": "daily", "interval": 90}
 

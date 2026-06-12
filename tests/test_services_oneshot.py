@@ -152,7 +152,7 @@ async def test_create_with_multiple_schedule_keys_raises(hass, config_entry):
             {
                 "entity_id": entity_id,
                 "chore_name": "Confused Chore",
-                "scheduled": {"time": "08:00:00"},
+                "scheduled": {"frequency": "daily"},
                 "oneshot": {"due_datetime": "2026-04-15T12:00:00-05:00"},
             },
             blocking=True,

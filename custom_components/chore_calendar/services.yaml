@@ -33,14 +33,29 @@ create_item:
         object:
           translation_key: scheduled
           fields:
-            time:
+            frequency:
               required: true
               selector:
-                time:
-            active_days:
+                select:
+                  options:
+                    - label: Daily
+                      value: daily
+                    - label: Weekly
+                      value: weekly
+                    - label: Monthly
+                      value: monthly
+                    - label: Yearly
+                      value: yearly
+            interval:
+              selector:
+                number:
+                  min: 1
+                  mode: box
+            byday:
               selector:
                 select:
                   multiple: true
+                  custom_value: true
                   options:
                     - label: Monday
                       value: mon
@@ -56,9 +71,84 @@ create_item:
                       value: sat
                     - label: Sunday
                       value: sun
+            bymonthday:
+              selector:
+                text:
+                  multiple: true
+            bysetpos:
+              selector:
+                text:
+                  multiple: true
+            bymonth:
+              selector:
+                select:
+                  multiple: true
+                  options:
+                    - label: January
+                      value: "1"
+                    - label: February
+                      value: "2"
+                    - label: March
+                      value: "3"
+                    - label: April
+                      value: "4"
+                    - label: May
+                      value: "5"
+                    - label: June
+                      value: "6"
+                    - label: July
+                      value: "7"
+                    - label: August
+                      value: "8"
+                    - label: September
+                      value: "9"
+                    - label: October
+                      value: "10"
+                    - label: November
+                      value: "11"
+                    - label: December
+                      value: "12"
+            dtstart:
+              selector:
+                text:
+            until:
+              selector:
+                datetime:
+            count:
+              selector:
+                number:
+                  min: 1
+                  mode: box
+            persist:
+              selector:
+                boolean:
     interval:
       selector:
-        duration:
+        object:
+          translation_key: interval
+          fields:
+            frequency:
+              required: true
+              selector:
+                select:
+                  options:
+                    - label: Minutes
+                      value: minutely
+                    - label: Hours
+                      value: hourly
+                    - label: Days
+                      value: daily
+                    - label: Weeks
+                      value: weekly
+                    - label: Months
+                      value: monthly
+                    - label: Years
+                      value: yearly
+            interval:
+              selector:
+                number:
+                  min: 1
+                  mode: box
     oneshot:
       selector:
         object:
@@ -114,13 +204,28 @@ update_item:
         object:
           translation_key: scheduled
           fields:
-            time:
+            frequency:
               selector:
-                time:
-            active_days:
+                select:
+                  options:
+                    - label: Daily
+                      value: daily
+                    - label: Weekly
+                      value: weekly
+                    - label: Monthly
+                      value: monthly
+                    - label: Yearly
+                      value: yearly
+            interval:
+              selector:
+                number:
+                  min: 1
+                  mode: box
+            byday:
               selector:
                 select:
                   multiple: true
+                  custom_value: true
                   options:
                     - label: Monday
                       value: mon
@@ -136,9 +241,83 @@ update_item:
                       value: sat
                     - label: Sunday
                       value: sun
+            bymonthday:
+              selector:
+                text:
+                  multiple: true
+            bysetpos:
+              selector:
+                text:
+                  multiple: true
+            bymonth:
+              selector:
+                select:
+                  multiple: true
+                  options:
+                    - label: January
+                      value: "1"
+                    - label: February
+                      value: "2"
+                    - label: March
+                      value: "3"
+                    - label: April
+                      value: "4"
+                    - label: May
+                      value: "5"
+                    - label: June
+                      value: "6"
+                    - label: July
+                      value: "7"
+                    - label: August
+                      value: "8"
+                    - label: September
+                      value: "9"
+                    - label: October
+                      value: "10"
+                    - label: November
+                      value: "11"
+                    - label: December
+                      value: "12"
+            dtstart:
+              selector:
+                text:
+            until:
+              selector:
+                datetime:
+            count:
+              selector:
+                number:
+                  min: 1
+                  mode: box
+            persist:
+              selector:
+                boolean:
     interval:
       selector:
-        duration:
+        object:
+          translation_key: interval
+          fields:
+            frequency:
+              selector:
+                select:
+                  options:
+                    - label: Minutes
+                      value: minutely
+                    - label: Hours
+                      value: hourly
+                    - label: Days
+                      value: daily
+                    - label: Weeks
+                      value: weekly
+                    - label: Months
+                      value: monthly
+                    - label: Years
+                      value: yearly
+            interval:
+              selector:
+                number:
+                  min: 1
+                  mode: box
     oneshot:
       selector:
         object:

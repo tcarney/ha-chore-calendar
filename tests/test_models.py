@@ -598,7 +598,167 @@ class TestScheduledRruleRepresentation:
         assert data["schedule"] == {
             "rrule": "FREQ=WEEKLY;BYDAY=MO,WE,FR",
             "dtstart": chore.dtstart.isoformat(),
+            "persist": False,
         }
+
+
+class TestScheduledFiniteRules:
+    """UNTIL/COUNT lifecycle: terminal-on-exhaustion, revert, skip-past-end."""
+
+    def _count3(self, **kwargs) -> ScheduledChore:
+        """Daily chore with exactly three occurrences: Jun 1, 2, 3 2026 at 08:00."""
+        return ScheduledChore(
+            uid="finite",
+            chore_name="Finite",
+            chore_type=ChoreType.SCHEDULED,
+            rrule="FREQ=DAILY;COUNT=3",
+            dtstart=datetime(2026, 6, 1, 8, 0),
+            pending_period=timedelta(hours=3),
+            grace_period=timedelta(hours=1),
+            **kwargs,
+        )
+
+    def test_completing_final_occurrence_goes_terminal(self):
+        """The third completion of a COUNT=3 rule ends the series."""
+        chore = self._count3()
+        chore.apply_completion(datetime(2026, 6, 1, 8, 30, tzinfo=TZ), None)
+        assert chore.terminal is False
+        chore.apply_completion(datetime(2026, 6, 2, 8, 30, tzinfo=TZ), None)
+        assert chore.terminal is False
+        chore.apply_completion(datetime(2026, 6, 3, 8, 15, tzinfo=TZ), None)
+        assert chore.terminal is True
+
+        now = datetime(2026, 6, 4, 12, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.COMPLETED
+        assert chore.compute_next_due(now) is None
+        assert chore.compute_due_range(now) is None
+
+    def test_until_exhaustion_goes_terminal(self):
+        """Completing the final occurrence before UNTIL ends the series."""
+        chore = ScheduledChore(
+            uid="finite",
+            chore_name="Finite",
+            chore_type=ChoreType.SCHEDULED,
+            rrule="FREQ=DAILY;UNTIL=20260603T235959",
+            dtstart=datetime(2026, 6, 1, 8, 0),
+            pending_period=timedelta(hours=3),
+            grace_period=timedelta(hours=1),
+        )
+        chore.apply_completion(datetime(2026, 6, 3, 8, 15, tzinfo=TZ), None)
+        assert chore.terminal is True
+
+    def test_revert_reopens_the_series(self):
+        """Reverting the exhausting completion clears terminal and re-pins the final period."""
+        chore = self._count3(last_completed=datetime(2026, 6, 2, 8, 30, tzinfo=TZ))
+        chore.apply_completion(datetime(2026, 6, 3, 8, 15, tzinfo=TZ), None)
+        assert chore.terminal is True
+
+        chore.revert_completion()
+        assert chore.terminal is False
+        now = datetime(2026, 6, 3, 10, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.OVERDUE
+        assert chore.compute_next_due(now) == datetime(2026, 6, 3, 8, 0, tzinfo=TZ)
+
+    def test_missed_final_occurrence_stays_pinned_overdue(self):
+        """An uncompleted exhausted series stays actionable, pinned to the oldest period."""
+        chore = self._count3(created_at=datetime(2026, 5, 31, 12, 0, tzinfo=TZ))
+        now = datetime(2026, 6, 10, 12, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.OVERDUE
+        # Never-completed pinning still applies: the first valid period, not the last.
+        assert chore.compute_next_due(now) == datetime(2026, 6, 1, 8, 0, tzinfo=TZ)
+
+    def test_default_skip_past_end_goes_terminal(self):
+        """Skipping past the final occurrence exhausts the series."""
+        chore = self._count3(last_completed=datetime(2026, 6, 2, 8, 30, tzinfo=TZ))
+        result = chore.apply_default_skip(datetime(2026, 6, 3, 6, 0, tzinfo=TZ))
+        assert result is None
+        assert chore.skipped_until is None
+        assert chore.terminal is True
+
+    def test_mid_series_completion_not_terminal(self):
+        """Completing a non-final occurrence leaves the series open."""
+        chore = self._count3()
+        chore.apply_completion(datetime(2026, 6, 2, 8, 30, tzinfo=TZ), None)
+        now = datetime(2026, 6, 2, 12, 0, tzinfo=TZ)
+        assert chore.terminal is False
+        assert chore.compute_next_due(now) == datetime(2026, 6, 3, 8, 0, tzinfo=TZ)
+
+    def test_persist_round_trips(self):
+        """persist survives serialization; stored schedules without it default False."""
+        chore = self._count3()
+        chore.persist = True
+        restored = BaseChore.from_dict(chore.to_dict())
+        assert isinstance(restored, ScheduledChore)
+        assert restored.persist is True
+
+        data = chore.to_dict()
+        del data["schedule"]["persist"]
+        restored = BaseChore.from_dict(data)
+        assert isinstance(restored, ScheduledChore)
+        assert restored.persist is False
+
+
+class TestScheduledNewRecurrenceShapes:
+    """Stage C shapes the legacy model could not express."""
+
+    def _chore(self, rrule: str, dtstart: datetime, **kwargs) -> ScheduledChore:
+        return ScheduledChore(
+            uid="shape",
+            chore_name="Shape",
+            chore_type=ChoreType.SCHEDULED,
+            rrule=rrule,
+            dtstart=dtstart,
+            pending_period=timedelta(hours=3),
+            grace_period=timedelta(hours=1),
+            **kwargs,
+        )
+
+    def test_every_other_monday_keeps_phase(self):
+        """INTERVAL=2 alternates weeks anchored on dtstart, not on the query date."""
+        chore = self._chore(
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO",
+            datetime(2026, 6, 8, 8, 0),  # A Monday — the "on" week.
+            last_completed=datetime(2026, 6, 8, 8, 30, tzinfo=TZ),
+        )
+        now = datetime(2026, 6, 9, 12, 0, tzinfo=TZ)
+        # Next is Jun 22, not Jun 15 — the off week is skipped.
+        assert chore.compute_next_due(now) == datetime(2026, 6, 22, 8, 0, tzinfo=TZ)
+
+    def test_last_friday_of_month(self):
+        """FREQ=MONTHLY;BYDAY=-1FR resolves the last Friday of each month."""
+        chore = self._chore(
+            "FREQ=MONTHLY;BYDAY=-1FR",
+            datetime(2026, 1, 1, 8, 0),
+            created_at=datetime(2026, 3, 1, 12, 0, tzinfo=TZ),
+        )
+        now = datetime(2026, 3, 10, 12, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.PENDING
+        assert chore.compute_next_due(now) == datetime(2026, 3, 27, 8, 0, tzinfo=TZ)
+
+        chore.apply_completion(datetime(2026, 3, 27, 8, 30, tzinfo=TZ), None)
+        later = datetime(2026, 3, 28, 12, 0, tzinfo=TZ)
+        assert chore.compute_next_due(later) == datetime(2026, 4, 24, 8, 0, tzinfo=TZ)
+
+    def test_seasonal_daily_waits_for_season_opening(self):
+        """FREQ=DAILY;BYMONTH=4..10 has no occurrences out of season."""
+        chore = self._chore(
+            "FREQ=DAILY;BYMONTH=4,5,6,7,8,9,10",
+            datetime(2026, 1, 1, 8, 0),
+            created_at=datetime(2026, 3, 15, 12, 0, tzinfo=TZ),
+        )
+        now = datetime(2026, 3, 20, 12, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.PENDING
+        assert chore.compute_next_due(now) == datetime(2026, 4, 1, 8, 0, tzinfo=TZ)
+
+    def test_fifteenth_of_each_month(self):
+        """FREQ=MONTHLY;BYMONTHDAY=15 walks month boundaries."""
+        chore = self._chore(
+            "FREQ=MONTHLY;BYMONTHDAY=15",
+            datetime(2026, 1, 15, 9, 0),
+            last_completed=datetime(2026, 5, 15, 9, 30, tzinfo=TZ),
+        )
+        now = datetime(2026, 5, 20, 12, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2026, 6, 15, 9, 0, tzinfo=TZ)
 
 
 class TestIntervalFreqRepresentation:

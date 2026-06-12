@@ -41,7 +41,8 @@ from .const import (
 )
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore, OneshotChore
-from .models.interval import VALID_INTERVAL_FREQS, mins_to_freq_interval
+from .models.interval import VALID_INTERVAL_FREQS
+from .recurrence import scheduled_selector_to_schedule
 from .store import ChoreStore
 
 # Service-specific field keys (not shared with sensor attributes).
@@ -247,32 +248,34 @@ def _duration_to_mins(dur: dict[str, Any]) -> int:
 def _interval_schedule_from_call(obj: dict[str, Any]) -> dict[str, Any]:
     """Translate an ``interval`` service sub-object to the {freq, interval} schedule shape.
 
-    Two accepted shapes: the structured selector (``frequency`` +
-    ``interval``, per the recurrence-model design) and the legacy HA
-    duration dict (``days`` / ``hours`` / ``minutes``), which maps onto the
-    largest exactly-dividing unit. Mixing them is rejected — a call carrying
-    both is ambiguous about which one is meant.
+    Only the structured selector shape is accepted: ``frequency`` (required)
+    plus ``interval`` (default 1). The pre-0.11 HA duration dict
+    (``days`` / ``hours`` / ``minutes``) was removed — the unknown-field
+    error below points callers at the replacement.
     """
-    duration_keys = [key for key in ("days", "hours", "minutes") if key in obj]
-    if "frequency" in obj:
-        if duration_keys:
-            msg = f"Interval cannot mix 'frequency' with duration fields {duration_keys!r}"
-            raise ServiceValidationError(msg)
-        frequency = obj["frequency"]
-        if frequency not in VALID_INTERVAL_FREQS:
-            msg = f"Invalid interval frequency {frequency!r} (must be one of {VALID_INTERVAL_FREQS})"
-            raise ServiceValidationError(msg)
-        try:
-            count = int(obj.get("interval", 1))
-        except (TypeError, ValueError):
-            msg = f"Invalid interval count {obj.get('interval')!r} (must be a positive integer)"
-            raise ServiceValidationError(msg) from None
-        if count < 1:
-            msg = f"Invalid interval count {count!r} (must be a positive integer)"
-            raise ServiceValidationError(msg)
-        return {"freq": frequency, "interval": count}
-    freq, interval = mins_to_freq_interval(_duration_to_mins(obj))
-    return {"freq": freq, "interval": interval}
+    unknown = [key for key in obj if key not in ("frequency", "interval")]
+    if unknown:
+        msg = (
+            f"Unknown interval field(s) {unknown!r}; valid fields are ['frequency', 'interval']. "
+            "(The former duration shape was replaced — e.g. {'frequency': 'daily', 'interval': 14}.)"
+        )
+        raise ServiceValidationError(msg)
+    if "frequency" not in obj:
+        msg = "interval requires 'frequency' (one of minutely/hourly/daily/weekly/monthly/yearly)"
+        raise ServiceValidationError(msg)
+    frequency = obj["frequency"]
+    if frequency not in VALID_INTERVAL_FREQS:
+        msg = f"Invalid interval frequency {frequency!r} (must be one of {VALID_INTERVAL_FREQS})"
+        raise ServiceValidationError(msg)
+    try:
+        count = int(obj.get("interval", 1))
+    except (TypeError, ValueError):
+        msg = f"Invalid interval count {obj.get('interval')!r} (must be a positive integer)"
+        raise ServiceValidationError(msg) from None
+    if count < 1:
+        msg = f"Invalid interval count {count!r} (must be a positive integer)"
+        raise ServiceValidationError(msg)
+    return {"freq": frequency, "interval": count}
 
 
 def _infer_chore_type(data: dict[str, Any]) -> ChoreType:
@@ -311,15 +314,17 @@ def _apply_overlays(
     """
     schedule = chore_dict.setdefault("schedule", {})
     if chore_type == ChoreType.SCHEDULED and ATTR_SCHEDULED in data:
-        # Legacy surface: ``time`` / ``active_days`` are written alongside
-        # the stored ``rrule`` / ``dtstart`` and merged by
-        # ScheduledChore.from_schedule (time replaces dtstart's time-of-day,
-        # active_days re-synthesizes the rrule).
-        obj = data[ATTR_SCHEDULED]
-        if "time" in obj:
-            schedule["time"] = obj["time"]
-        if "active_days" in obj:
-            schedule["active_days"] = obj["active_days"]
+        # The structured selector is a full recurrence specification — the
+        # synthesized schedule replaces the stored one (dtstart / persist
+        # carry over when omitted; see recurrence.py).
+        created_raw = chore_dict.get("created_at")
+        new_schedule = scheduled_selector_to_schedule(
+            data[ATTR_SCHEDULED],
+            existing=dict(schedule),
+            created_at=dt_util.parse_datetime(created_raw) if created_raw else None,
+        )
+        schedule.clear()
+        schedule.update(new_schedule)
     elif chore_type == ChoreType.INTERVAL and ATTR_INTERVAL in data:
         schedule.update(_interval_schedule_from_call(data[ATTR_INTERVAL]))
     elif chore_type == ChoreType.ONESHOT and ATTR_ONESHOT in data:
@@ -460,6 +465,12 @@ async def _async_handle_update(call: ServiceCall) -> None:
         and isinstance(call.data[ATTR_ONESHOT], dict)
         and "due_datetime" in call.data[ATTR_ONESHOT]
     ):
+        updated["terminal"] = False
+
+    # Likewise a scheduled-recurrence update re-enters the cycle: an
+    # UNTIL/COUNT-exhausted series picks up the new rule instead of staying
+    # terminal-COMPLETED.
+    if existing.chore_type == ChoreType.SCHEDULED and ATTR_SCHEDULED in call.data:
         updated["terminal"] = False
 
     chore = BaseChore.from_dict(updated)

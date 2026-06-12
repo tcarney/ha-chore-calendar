@@ -11,9 +11,9 @@ from dateutil import rrule as du_rrule
 from .base import BaseChore
 
 # Day name abbreviations used by the legacy service surface (Monday = 0).
-_DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-# RFC 5545 BYDAY codes, index-aligned with _DAY_NAMES.
-_BYDAY_CODES = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
+DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+# RFC 5545 BYDAY codes, index-aligned with DAY_NAMES.
+BYDAY_CODES = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
 
 # FREQ values accepted on a ScheduledChore rrule — matches the subset HA's
 # calendar websocket validator allows.
@@ -33,7 +33,7 @@ def active_days_to_rrule(active_days: list[str]) -> str:
     Empty (or all-unrecognized — the legacy model never validated day names,
     so a stored typo must not fail the load) means every day.
     """
-    codes = [_BYDAY_CODES[_DAY_NAMES.index(day)] for day in active_days if day in _DAY_NAMES]
+    codes = [BYDAY_CODES[DAY_NAMES.index(day)] for day in active_days if day in DAY_NAMES]
     if not codes:
         return "FREQ=DAILY"
     return "FREQ=WEEKLY;BYDAY=" + ",".join(codes)
@@ -95,6 +95,11 @@ class ScheduledChore(BaseChore):
 
     rrule: str = "FREQ=DAILY"
     dtstart: datetime | None = None
+    # When False (default), a terminal scheduled chore (UNTIL/COUNT
+    # exhausted) is deleted from storage on the next hide_completed_items /
+    # todo.remove_completed_items sweep — the OneshotChore lifecycle. When
+    # True the chore stays in storage, re-enterable via update_item.
+    persist: bool = False
     time: InitVar[dt_time | None] = None
     active_days: InitVar[list[str] | None] = None
 
@@ -151,8 +156,12 @@ class ScheduledChore(BaseChore):
 
         If the chore is overdue (uncompleted and past the grace period),
         return the *overdue* period's due time — not the next period's.
-        This keeps next_due stable until the chore is completed.
+        This keeps next_due stable until the chore is completed. Returns
+        None once the series is terminal (UNTIL/COUNT exhausted) or when
+        the satisfied current period has no occurrence after it.
         """
+        if self.terminal:
+            return None
         if self._skip_anchor_active(now):
             return self.skipped_until
 
@@ -185,7 +194,9 @@ class ScheduledChore(BaseChore):
 
         An overdue chore's anchor may still be pinned in the past — stepping
         once would land in the past, so we advance until the candidate is
-        strictly after *now*.
+        strictly after *now*. Skipping past the final occurrence of a
+        finite (UNTIL/COUNT) rule exhausts the series: the chore goes
+        terminal and the skip anchor clears.
         """
         # Operative anchor is non-None for ScheduledChore — _anchor_due_at
         # always resolves a period — but the base signature returns
@@ -195,10 +206,43 @@ class ScheduledChore(BaseChore):
         else:
             anchor = self._find_current_period(now)
         candidate = self._find_next_active_day(anchor)
-        while candidate <= now:
+        while candidate is not None and candidate <= now:
             candidate = self._find_next_active_day(candidate)
+        if candidate is None:
+            self.skipped_until = None
+            self.terminal = True
+            return None
         self.skipped_until = candidate
         return candidate
+
+    def apply_completion(
+        self,
+        timestamp: datetime,
+        completed_by: str | None,
+        *,
+        clear_skip: bool = True,
+    ) -> None:
+        """Record a completion; exhausting a finite rule marks the chore terminal.
+
+        Completing the final occurrence of an UNTIL/COUNT rule ends the
+        series — ``terminal=True`` is the same "won't roll forward" signal
+        ``OneshotChore`` uses, and the persist sweep keys off it.
+        """
+        super().apply_completion(timestamp, completed_by, clear_skip=clear_skip)
+        if self._is_finite():
+            period = self._find_current_period(timestamp)
+            if self._find_next_active_day(period) is None:
+                self.terminal = True
+
+    def revert_completion(self) -> None:
+        """Revert a completion, reopening an exhausted series."""
+        super().revert_completion()
+        self.terminal = False
+
+    def _is_finite(self) -> bool:
+        """Return True when the rrule carries UNTIL or COUNT."""
+        parts = _rrule_parts(self.rrule)
+        return "UNTIL" in parts or "COUNT" in parts
 
     def _find_current_period(self, now: datetime) -> datetime:
         """Find the period_due for the period that *now* falls into.
@@ -228,6 +272,10 @@ class ScheduledChore(BaseChore):
             period = candidate
             for _ in range(365):
                 prev = self._prev_occurrence(period, inclusive=False)
+                if prev >= period:
+                    # Clamped at the series start (finite rule) — nothing
+                    # earlier exists to pin to.
+                    break
                 prev_pending = prev - self.pending_period
                 if self.last_completed >= prev_pending:
                     break
@@ -244,10 +292,18 @@ class ScheduledChore(BaseChore):
         # hasn't reached its first period_due yet) or after it (the first
         # period was missed), the first valid period is the anchor — none of
         # the subsequent periods are completed either.
-        return self._first_active_day_at_or_after(self.created_at)
+        first_valid = self._first_active_day_at_or_after(self.created_at)
+        if first_valid is None:
+            # Finite rule fully exhausted before the chore existed — pin to
+            # the final occurrence so callers still get a usable anchor.
+            return candidate
+        return first_valid
 
-    def _first_active_day_at_or_after(self, ts: datetime) -> datetime:
-        """Return the smallest occurrence greater than or equal to *ts*."""
+    def _first_active_day_at_or_after(self, ts: datetime) -> datetime | None:
+        """Return the smallest occurrence greater than or equal to *ts*.
+
+        None when a finite rule has no occurrence at or after *ts*.
+        """
         return self._next_occurrence(ts, inclusive=True)
 
     def _find_previous_active_day(self, dt: datetime) -> datetime:
@@ -259,8 +315,11 @@ class ScheduledChore(BaseChore):
         """
         return self._prev_occurrence(self._day_anchor(dt), inclusive=True)
 
-    def _find_next_active_day(self, dt: datetime) -> datetime:
-        """First occurrence strictly after *dt*'s calendar date."""
+    def _find_next_active_day(self, dt: datetime) -> datetime | None:
+        """First occurrence strictly after *dt*'s calendar date.
+
+        None when a finite (UNTIL/COUNT) rule has no further occurrence.
+        """
         return self._next_occurrence(self._day_anchor(dt), inclusive=False)
 
     def _day_anchor(self, dt: datetime) -> datetime:
@@ -272,23 +331,30 @@ class ScheduledChore(BaseChore):
         """Last occurrence at or before (``inclusive``) / strictly before *ts*.
 
         *ts* is tz-aware; enumeration happens in floating local time and the
-        result is re-localized to ``ts.tzinfo``.
+        result is re-localized to ``ts.tzinfo``. When *ts* precedes the
+        series start (a finite, non-rebased rule), clamps to the first
+        occurrence so the completion walk-back terminates there — callers
+        treat a non-decreasing step as "nothing earlier exists".
         """
         naive = ts.replace(tzinfo=None)
-        found = self._build_rule(self._rebased_dtstart(naive)).before(naive, inc=inclusive)
+        rule = self._build_rule(self._rebased_dtstart(naive))
+        found = rule.before(naive, inc=inclusive)
         if found is None:
-            # Unreachable on the bi-infinite DAILY/WEEKLY grid; possible for
-            # a hand-edited MONTHLY/YEARLY rule queried before its anchor.
+            found = rule.after(naive, inc=True)
+        if found is None:
+            # Degenerate empty rule (e.g. UNTIL before dtstart).
             found = self._start
         return found.replace(tzinfo=ts.tzinfo)
 
-    def _next_occurrence(self, ts: datetime, *, inclusive: bool) -> datetime:
-        """First occurrence at or after (``inclusive``) / strictly after *ts*."""
+    def _next_occurrence(self, ts: datetime, *, inclusive: bool) -> datetime | None:
+        """First occurrence at or after (``inclusive``) / strictly after *ts*.
+
+        None when a finite (UNTIL/COUNT) rule is exhausted at *ts*.
+        """
         naive = ts.replace(tzinfo=None)
         found = self._build_rule(self._rebased_dtstart(naive)).after(naive, inc=inclusive)
         if found is None:
-            # Unreachable while UNTIL/COUNT are unsupported (infinite rules).
-            found = self._start
+            return None
         return found.replace(tzinfo=ts.tzinfo)
 
     def _build_rule(self, dtstart: datetime) -> Any:
@@ -304,12 +370,14 @@ class ScheduledChore(BaseChore):
         docstring) needs occurrences before the anchor anyway. Shifting
         ``dtstart`` by whole interval steps preserves the occurrence grid
         exactly for DAILY/WEEKLY rules. MONTHLY/YEARLY have no fixed-length
-        step and fall back to the true anchor — fine until the structured
-        selector exposes them, and revisited there. COUNT-bearing rules must
-        never be rebased (the count is anchored at dtstart); COUNT is not
-        expressible until that same stage.
+        step and use the true anchor (acceptably slow: their occurrences are
+        sparse). COUNT-bearing rules are never rebased — the count is
+        anchored at dtstart, so shifting it would change which occurrences
+        exist; their enumeration cost is bounded by the count itself.
         """
         parts = _rrule_parts(self.rrule)
+        if "COUNT" in parts:
+            return self._start
         interval = int(parts.get("INTERVAL", "1"))
         freq = parts.get("FREQ")
         if freq == "DAILY":
@@ -329,6 +397,7 @@ class ScheduledChore(BaseChore):
         return {
             "rrule": self.rrule,
             "dtstart": self._start.isoformat(),
+            "persist": self.persist,
         }
 
     def schedule_description(self) -> dict[str, Any]:
@@ -342,7 +411,7 @@ class ScheduledChore(BaseChore):
         """
         data = super().schedule_description()
         data["time"] = self._start.time().isoformat()
-        data["active_days"] = self._derived_active_days() or list(_DAY_NAMES)
+        data["active_days"] = self._derived_active_days() or list(DAY_NAMES)
         return data
 
     def _derived_active_days(self) -> list[str]:
@@ -353,8 +422,8 @@ class ScheduledChore(BaseChore):
         names: list[str] = []
         for code in parts.get("BYDAY", "").split(","):
             cleaned = code.strip().upper()
-            if cleaned in _BYDAY_CODES:
-                names.append(_DAY_NAMES[_BYDAY_CODES.index(cleaned)])
+            if cleaned in BYDAY_CODES:
+                names.append(DAY_NAMES[BYDAY_CODES.index(cleaned)])
         return names
 
     @classmethod
@@ -375,4 +444,5 @@ class ScheduledChore(BaseChore):
             kwargs["time"] = _parse_time(time_raw)
         if "active_days" in schedule:
             kwargs["active_days"] = list(schedule["active_days"])
-        return cls(**base, **kwargs)
+        # Default False for stored schedules predating the field.
+        return cls(**base, persist=bool(schedule.get("persist", False)), **kwargs)

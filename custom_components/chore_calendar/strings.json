@@ -45,13 +45,57 @@
   "selector": {
     "scheduled": {
       "fields": {
-        "time": {
-          "name": "Scheduled time",
-          "description": "The daily time this chore is due."
+        "frequency": {
+          "name": "Repeat",
+          "description": "Daily, weekly, monthly, or yearly."
         },
-        "active_days": {
-          "name": "Active days",
-          "description": "Days of the week this chore is active. Leave empty for every day."
+        "interval": {
+          "name": "Repeat interval",
+          "description": "Every N units (2 with weekly = every other week)."
+        },
+        "byday": {
+          "name": "Weekdays",
+          "description": "Days of the week. Monthly/yearly rules also take an ordinal prefix as a custom value ('-1fri' = last Friday)."
+        },
+        "bymonthday": {
+          "name": "Days of the month",
+          "description": "E.g. 15, or -1 for the last day. Monthly/yearly only."
+        },
+        "bysetpos": {
+          "name": "Weekday position",
+          "description": "Nth match of the weekdays within the month (-1 = last). Requires weekdays; monthly/yearly only."
+        },
+        "bymonth": {
+          "name": "Months",
+          "description": "Limit to these months (seasonal window)."
+        },
+        "dtstart": {
+          "name": "Start",
+          "description": "Time of day ('08:00:00'), or a full datetime to set the phase when the repeat interval is above 1. Omit to keep the current start."
+        },
+        "until": {
+          "name": "End on",
+          "description": "Last day or datetime of the series. Mutually exclusive with 'End after'."
+        },
+        "count": {
+          "name": "End after",
+          "description": "Total occurrences. Mutually exclusive with 'End on'."
+        },
+        "persist": {
+          "name": "Keep after series ends",
+          "description": "Keep the expired chore in storage (re-enterable via update_item) instead of sweeping it with hidden completed items."
+        }
+      }
+    },
+    "interval": {
+      "fields": {
+        "frequency": {
+          "name": "Repeat",
+          "description": "Minutely, hourly, daily, weekly, monthly, or yearly."
+        },
+        "interval": {
+          "name": "Repeat interval",
+          "description": "Due this many units after the last completion (3 with monthly = after 3 months)."
         }
       }
     },
@@ -103,11 +147,11 @@
         },
         "scheduled": {
           "name": "Scheduled",
-          "description": "Configure a chore that recurs at a fixed time on specific days."
+          "description": "A chore that repeats on a calendar grid."
         },
         "interval": {
           "name": "Interval",
-          "description": "How often this chore should be performed. Provide this for an interval chore."
+          "description": "A chore due a fixed period after its last completion."
         },
         "oneshot": {
           "name": "Oneshot",
@@ -153,11 +197,11 @@
         },
         "scheduled": {
           "name": "Scheduled",
-          "description": "Update scheduled chore timing."
+          "description": "Replace the repeat rule ('Repeat' required), or pass only start/keep fields to leave the rule unchanged."
         },
         "interval": {
           "name": "Interval",
-          "description": "How often this chore should be performed."
+          "description": "New repeat unit and interval."
         },
         "oneshot": {
           "name": "Oneshot",
