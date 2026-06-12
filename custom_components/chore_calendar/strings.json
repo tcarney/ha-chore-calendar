@@ -285,9 +285,17 @@
           "name": "Item name or UID",
           "description": "Required when targeting the calendar entity; inferred when targeting a chore sensor."
         },
+        "range": {
+          "name": "Range",
+          "description": "'This occurrence' skips just the targeted occurrence (scheduled default; not valid for interval chores). 'This and future' slides the whole series forward (interval default; a bare 'Until' implies it)."
+        },
+        "recurrence_id": {
+          "name": "Occurrence",
+          "description": "Identifies the occurrence to skip with 'This occurrence', in the form calendar events carry (e.g. 20260615T080000). Omit to skip the next upcoming one."
+        },
         "until": {
           "name": "Until",
-          "description": "Datetime to defer the chore until. Omit to use the type-specific default: next active day for scheduled chores, now + interval for interval chores, or clear the due date for oneshot chores."
+          "description": "Datetime to defer the chore until, with 'This and future'. Omit to use the type-specific default: next occurrence for scheduled chores, now + interval for interval chores, or clear the due date for oneshot chores."
         }
       }
     },

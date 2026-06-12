@@ -1368,7 +1368,8 @@ async def test_skip_item_interval_default_is_now_plus_interval(hass, config_entr
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_skip_item_scheduled_default_is_next_active_day(hass, config_entry):
-    """skip_item with no `until` defaults to next active day for ScheduledChore."""
+    """skip_item with no `until` defaults to range THIS for ScheduledChore:
+    the targeted occurrence is exdated and the anchor moves one occurrence."""
     entity_id = await _setup_with_chore(hass, config_entry)
     sched_uid = await _add_scheduled_chore(hass, config_entry)
 
@@ -1383,6 +1384,128 @@ async def test_skip_item_scheduled_default_is_next_active_day(hass, config_entry
 
     chore = config_entry.runtime_data.store.get_chore(sched_uid)
     assert chore.skipped_until == datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
+    assert chore.exdate == [datetime(2026, 3, 30, 8, 0, tzinfo=TZ)]
+    assert chore.skip_exdate == datetime(2026, 3, 30, 8, 0, tzinfo=TZ)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_scheduled_bare_until_still_slides(hass, config_entry):
+    """A bare `until` keeps its pre-range meaning (THISANDFUTURE) — no exdate."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    sched_uid = await _add_scheduled_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "skip_item",
+        {"entity_id": entity_id, "item": sched_uid, "until": "2026-04-10T08:00:00-05:00"},
+        blocking=True,
+    )
+
+    chore = config_entry.runtime_data.store.get_chore(sched_uid)
+    assert chore.skipped_until == datetime(2026, 4, 10, 8, 0, tzinfo=TZ)
+    assert chore.exdate == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_with_recurrence_id_targets_specific_occurrence(hass, config_entry):
+    """An explicit recurrence_id exdates that occurrence without deferring
+    the current cycle."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    sched_uid = await _add_scheduled_chore(hass, config_entry)
+    store = config_entry.runtime_data.store
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "skip_item",
+            {
+                "entity_id": entity_id,
+                "item": sched_uid,
+                "range": "THIS",
+                "recurrence_id": "20260403T080000",
+            },
+            blocking=True,
+        )
+
+    chore = store.get_chore(sched_uid)
+    assert len(chore.exdate) == 1
+    assert chore.exdate[0].replace(tzinfo=None) == datetime(2026, 4, 3, 8, 0)
+    # The current (pinned) cycle is untouched — no deferral started.
+    assert chore.skipped_until is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_interval_this_rejected(hass, config_entry):
+    """Range THIS is invalid for interval chores — no grid to exclude from."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError, match="THIS is not valid"):
+        await hass.services.async_call(
+            DOMAIN,
+            "skip_item",
+            {"entity_id": entity_id, "item": TEST_UID, "range": "THIS"},
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_until_with_this_rejected(hass, config_entry):
+    """`until` only pairs with THISANDFUTURE."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    sched_uid = await _add_scheduled_chore(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError, match="only valid with range THISANDFUTURE"):
+        await hass.services.async_call(
+            DOMAIN,
+            "skip_item",
+            {
+                "entity_id": entity_id,
+                "item": sched_uid,
+                "range": "THIS",
+                "until": "2026-04-10T08:00:00-05:00",
+            },
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_recurrence_id_with_thisandfuture_rejected(hass, config_entry):
+    """`recurrence_id` only pairs with THIS."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    sched_uid = await _add_scheduled_chore(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError, match="only valid with range THIS"):
+        await hass.services.async_call(
+            DOMAIN,
+            "skip_item",
+            {
+                "entity_id": entity_id,
+                "item": sched_uid,
+                "range": "THISANDFUTURE",
+                "recurrence_id": "20260403T080000",
+            },
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_invalid_recurrence_id_rejected(hass, config_entry):
+    """A malformed recurrence_id fails with a format hint."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    sched_uid = await _add_scheduled_chore(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError, match="compact form"):
+        await hass.services.async_call(
+            DOMAIN,
+            "skip_item",
+            {
+                "entity_id": entity_id,
+                "item": sched_uid,
+                "range": "THIS",
+                "recurrence_id": "2026-04-03T08:00:00",
+            },
+            blocking=True,
+        )
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

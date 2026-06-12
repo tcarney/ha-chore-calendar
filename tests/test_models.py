@@ -860,6 +860,138 @@ class TestIntervalFreqRepresentation:
         assert "interval_mins" not in desc
 
 
+class TestThisModeSkip:
+    """THIS-mode skip — exdate one occurrence (recurrence model §3)."""
+
+    def _daily(self, **kwargs) -> ScheduledChore:
+        return ScheduledChore(
+            uid="this_skip",
+            chore_name="This Skip",
+            chore_type=ChoreType.SCHEDULED,
+            time=time(8, 0),
+            pending_period=timedelta(hours=3),
+            grace_period=timedelta(hours=1),
+            **kwargs,
+        )
+
+    def test_skip_next_occurrence_goes_dormant(self):
+        """Skipping exdates the next occurrence and defers to the one after."""
+        chore = self._daily(last_completed=datetime(2026, 3, 30, 8, 30, tzinfo=TZ))
+        result = chore.apply_occurrence_skip(datetime(2026, 3, 30, 18, 0, tzinfo=TZ), None)
+
+        assert chore.exdate == [datetime(2026, 3, 31, 8, 0, tzinfo=TZ)]
+        assert chore.skip_exdate == datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
+        assert result == datetime(2026, 4, 1, 8, 0, tzinfo=TZ)
+        assert chore.skipped_until == result
+
+        # Inside what would have been the skipped occurrence's window the
+        # chore reads dormant, anchored on the deferral.
+        inside = datetime(2026, 3, 31, 6, 0, tzinfo=TZ)
+        assert chore.compute_status(inside) == ChoreStatus.COMPLETED
+        assert chore.compute_next_due(inside) == datetime(2026, 4, 1, 8, 0, tzinfo=TZ)
+
+    def test_follow_up_skip_advances_one_more(self):
+        """A second THIS skip exdates the new next occurrence."""
+        chore = self._daily(last_completed=datetime(2026, 3, 30, 8, 30, tzinfo=TZ))
+        chore.apply_occurrence_skip(datetime(2026, 3, 30, 18, 0, tzinfo=TZ), None)
+        result = chore.apply_occurrence_skip(datetime(2026, 3, 31, 12, 0, tzinfo=TZ), None)
+
+        assert chore.exdate == [
+            datetime(2026, 3, 31, 8, 0, tzinfo=TZ),
+            datetime(2026, 4, 1, 8, 0, tzinfo=TZ),
+        ]
+        assert result == datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        assert chore.skipped_until == result
+
+    def test_pinned_overdue_skip_goes_dormant_past_now(self):
+        """Skipping a deeply-pinned overdue chore exdates the pinned occurrence
+        and defers strictly past now (the apply_default_skip walk)."""
+        chore = self._daily(created_at=datetime(2026, 3, 30, 4, 0, tzinfo=TZ))
+        now = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.OVERDUE
+
+        result = chore.apply_occurrence_skip(now, None)
+
+        assert chore.exdate == [datetime(2026, 3, 30, 8, 0, tzinfo=TZ)]
+        assert result == datetime(2026, 4, 3, 8, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.COMPLETED
+        assert chore.compute_next_due(now) == result
+
+    def test_complete_then_uncomplete_restores_skip_state(self):
+        """Completing clears the skip (exdate popped — the original occurrence
+        is satisfied after all); uncompleting restores the full skip state."""
+        chore = self._daily(last_completed=datetime(2026, 3, 30, 8, 30, tzinfo=TZ))
+        chore.apply_occurrence_skip(datetime(2026, 3, 30, 18, 0, tzinfo=TZ), None)
+
+        chore.apply_completion(datetime(2026, 3, 31, 19, 0, tzinfo=TZ), "person.tom")
+        assert chore.exdate == []
+        assert chore.skip_exdate is None
+        assert chore.skipped_until is None
+        # The completion satisfies the originally-skipped occurrence's period.
+        after = datetime(2026, 3, 31, 20, 0, tzinfo=TZ)
+        assert chore.compute_status(after) == ChoreStatus.COMPLETED
+
+        chore.revert_completion()
+        assert chore.exdate == [datetime(2026, 3, 31, 8, 0, tzinfo=TZ)]
+        assert chore.skip_exdate == datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
+        assert chore.skipped_until == datetime(2026, 4, 1, 8, 0, tzinfo=TZ)
+        assert chore.last_completed == datetime(2026, 3, 30, 8, 30, tzinfo=TZ)
+
+    def test_keep_skip_completion_preserves_exdate(self):
+        """clear_skip=False leaves the exdate and the deferral in place."""
+        chore = self._daily(last_completed=datetime(2026, 3, 30, 8, 30, tzinfo=TZ))
+        chore.apply_occurrence_skip(datetime(2026, 3, 30, 18, 0, tzinfo=TZ), None)
+
+        chore.apply_completion(datetime(2026, 3, 31, 19, 0, tzinfo=TZ), None, clear_skip=False)
+        assert chore.exdate == [datetime(2026, 3, 31, 8, 0, tzinfo=TZ)]
+        assert chore.skip_exdate == datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
+        assert chore.skipped_until == datetime(2026, 4, 1, 8, 0, tzinfo=TZ)
+        assert chore.previous_exdate is None
+
+    def test_explicit_future_target_leaves_cycle_untouched(self):
+        """Exdating a future occurrence is a permanent hole; the current cycle
+        keeps its anchor and no skip deferral starts."""
+        chore = self._daily(last_completed=datetime(2026, 3, 30, 8, 30, tzinfo=TZ))
+        now = datetime(2026, 3, 30, 18, 0, tzinfo=TZ)
+        result = chore.apply_occurrence_skip(now, datetime(2026, 4, 3, 8, 0, tzinfo=TZ))
+
+        assert chore.exdate == [datetime(2026, 4, 3, 8, 0, tzinfo=TZ)]
+        assert chore.skip_exdate is None
+        assert chore.skipped_until is None
+        # The next due is still tomorrow.
+        assert result == datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
+
+    def test_invalid_target_raises(self):
+        """Off-grid and already-skipped targets are rejected."""
+        chore = self._daily(last_completed=datetime(2026, 3, 30, 8, 30, tzinfo=TZ))
+        now = datetime(2026, 3, 30, 18, 0, tzinfo=TZ)
+        with pytest.raises(ValueError, match="not an upcoming occurrence"):
+            chore.apply_occurrence_skip(now, datetime(2026, 4, 3, 9, 30, tzinfo=TZ))
+
+        chore.apply_occurrence_skip(now, datetime(2026, 4, 3, 8, 0, tzinfo=TZ))
+        with pytest.raises(ValueError, match="not an upcoming occurrence"):
+            chore.apply_occurrence_skip(now, datetime(2026, 4, 3, 8, 0, tzinfo=TZ))
+
+    def test_skip_final_occurrence_goes_terminal(self):
+        """Exdating the final occurrence of a finite rule exhausts the series."""
+        chore = ScheduledChore(
+            uid="finite",
+            chore_name="Finite",
+            chore_type=ChoreType.SCHEDULED,
+            rrule="FREQ=DAILY;COUNT=2",
+            dtstart=datetime(2026, 6, 1, 8, 0),
+            pending_period=timedelta(hours=3),
+            grace_period=timedelta(hours=1),
+            last_completed=datetime(2026, 6, 1, 8, 30, tzinfo=TZ),
+        )
+        result = chore.apply_occurrence_skip(datetime(2026, 6, 1, 18, 0, tzinfo=TZ), None)
+        assert result is None
+        assert chore.terminal is True
+        assert chore.skipped_until is None
+        assert chore.exdate == [datetime(2026, 6, 2, 8, 0, tzinfo=TZ)]
+
+
 # Season window: October through March.
 OCT_MAR = [10, 11, 12, 1, 2, 3]
 

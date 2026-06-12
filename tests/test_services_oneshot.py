@@ -338,7 +338,7 @@ async def test_skip_completed_oneshot_raises(hass, config_entry):
         blocking=True,
     )
 
-    with pytest.raises(ServiceValidationError, match="completed oneshot"):
+    with pytest.raises(ServiceValidationError, match="completed chore"):
         await hass.services.async_call(
             DOMAIN,
             "skip_item",
