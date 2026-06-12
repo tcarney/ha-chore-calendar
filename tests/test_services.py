@@ -52,7 +52,8 @@ async def _setup_with_chore(hass, entry: MockConfigEntry) -> str:
         uid=TEST_UID,
         chore_name="Test Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=3),
+        freq="daily",
+        interval=3,
         grace_period=timedelta(days=1),
     )
     await runtime_data.store.async_create_chore(chore)
@@ -938,7 +939,8 @@ def _build_chore_of_type(chore_type: ChoreType, uid: str = TEST_UID):
             uid=uid,
             chore_name="Existing Chore",
             chore_type=ChoreType.INTERVAL,
-            interval=timedelta(days=3),
+            freq="daily",
+            interval=3,
         )
     if chore_type == ChoreType.SCHEDULED:
         return ScheduledChore(

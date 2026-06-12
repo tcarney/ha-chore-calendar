@@ -136,7 +136,8 @@ async def test_todo_items_maps_due_to_needs_action(hass, config_entry):
         uid="due-chore",
         chore_name="Take Out Trash",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=7),
     )
@@ -177,7 +178,8 @@ async def test_needs_action_item_omits_previous_period_completion(hass, config_e
         uid="recurring",
         chore_name="Recurring Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
         grace_period=timedelta(hours=1),
         last_completed=previous_completion,
     )
@@ -207,7 +209,8 @@ async def test_todo_items_maps_completed_to_completed(hass, config_entry):
         uid="done",
         chore_name="Water Plants",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=last_completed,
     )
@@ -279,7 +282,8 @@ async def test_todo_items_sort_order(hass, config_entry):
         uid="due",
         chore_name="Due Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=7),
     )
@@ -288,7 +292,8 @@ async def test_todo_items_sort_order(hass, config_entry):
         uid="overdue",
         chore_name="Overdue Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=3),
     )
@@ -309,7 +314,8 @@ async def test_todo_items_sort_order(hass, config_entry):
         uid="completed",
         chore_name="Completed Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(hours=1),
     )
@@ -337,7 +343,8 @@ async def test_todo_entity_state_counts_needs_action(hass, config_entry):
         uid="due-a",
         chore_name="Due A",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         created_at=FROZEN_NOW,
     )
@@ -345,7 +352,8 @@ async def test_todo_entity_state_counts_needs_action(hass, config_entry):
         uid="due-b",
         chore_name="Due B",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         created_at=FROZEN_NOW,
     )
@@ -353,7 +361,8 @@ async def test_todo_entity_state_counts_needs_action(hass, config_entry):
         uid="done",
         chore_name="Done",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(hours=1),
     )
@@ -382,7 +391,8 @@ async def test_update_needs_action_to_completed_records_completion(hass, config_
         uid="chore-1",
         chore_name="Test Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         created_at=FROZEN_NOW,
     )
@@ -421,7 +431,8 @@ async def test_update_completed_to_needs_action_reverts_completion(hass, config_
         uid="chore-1",
         chore_name="Test Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(hours=1),
     )
@@ -462,7 +473,8 @@ async def test_todo_items_carry_description(hass, config_entry):
         chore_name="Take Out Trash",
         chore_type=ChoreType.INTERVAL,
         description="Bins go out Sunday night.",
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=7),
     )
@@ -471,7 +483,8 @@ async def test_todo_items_carry_description(hass, config_entry):
         chore_name="Water Plants",
         chore_type=ChoreType.INTERVAL,
         description="Only the porch ones.",
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(hours=1),
     )
@@ -505,7 +518,8 @@ async def test_update_description_is_ignored(hass, config_entry):
         chore_name="Test Chore",
         chore_type=ChoreType.INTERVAL,
         description="Original note.",
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=7),
     )
@@ -563,7 +577,8 @@ async def test_update_uncomplete_with_no_completion_raises(hass, config_entry):
         uid="never-done",
         chore_name="Never Done",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         created_at=FROZEN_NOW,
     )
@@ -594,7 +609,8 @@ async def test_update_same_status_is_noop(hass, config_entry):
         uid="chore-1",
         chore_name="Test Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(hours=1),  # COMPLETED
     )
@@ -626,7 +642,8 @@ async def test_recurring_chore_reappears_as_needs_action(hass, config_entry):
         uid="recurring",
         chore_name="Recurring Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
         grace_period=timedelta(hours=1),
         created_at=FROZEN_NOW,
     )

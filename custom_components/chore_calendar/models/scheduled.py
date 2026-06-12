@@ -39,26 +39,6 @@ def active_days_to_rrule(active_days: list[str]) -> str:
     return "FREQ=WEEKLY;BYDAY=" + ",".join(codes)
 
 
-def migrate_legacy_schedule(schedule: dict[str, Any], created_at: datetime | None) -> dict[str, Any]:
-    """Translate a v3 ``{time, active_days}`` schedule dict to v4 ``{rrule, dtstart}``.
-
-    ``dtstart``'s date comes from ``created_at`` — phase is irrelevant at
-    INTERVAL=1, but the anchor must exist (see the class docstring).
-    """
-    tod = _parse_time(schedule.get("time", "08:00:00"))
-    anchor = created_at.date() if created_at is not None else _FALLBACK_ANCHOR_DATE
-    return {
-        "rrule": active_days_to_rrule(list(schedule.get("active_days", []))),
-        "dtstart": datetime.combine(anchor, tod.replace(second=0, microsecond=0)).isoformat(),
-    }
-
-
-def _parse_time(raw: str) -> dt_time:
-    """Parse an ``HH:MM[:SS]`` string into a time."""
-    parts = raw.split(":")
-    return dt_time(int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
-
-
 def _rrule_parts(rrule: str) -> dict[str, str]:
     """Split an RRULE string into an uppercase-keyed part dict."""
     parts: dict[str, str] = {}
@@ -86,11 +66,11 @@ class ScheduledChore(BaseChore):
     ``last_completed`` may predate creation, and the completion walk-back
     must be able to follow it).
 
-    ``time`` / ``active_days`` are accepted as init-only legacy arguments
-    (the v3 surface): ``active_days`` synthesizes the rrule (empty = daily)
-    and ``time`` sets ``dtstart``'s time-of-day. They take precedence over
-    ``rrule`` / ``dtstart`` when both are supplied — that is what lets the
-    service layer overlay partial legacy updates onto a stored schedule.
+    ``time`` / ``active_days`` are accepted as init-only convenience
+    arguments: ``active_days`` synthesizes the rrule (empty = daily) and
+    ``time`` sets ``dtstart``'s time-of-day. They are construction sugar
+    (used heavily by tests), not a serialization surface — storage and
+    services speak only ``rrule`` / ``dtstart``.
     """
 
     rrule: str = "FREQ=DAILY"
@@ -497,11 +477,10 @@ class ScheduledChore(BaseChore):
         }
 
     def schedule_description(self) -> dict[str, Any]:
-        """Add legacy display keys (``time`` / ``active_days``) alongside the rrule.
+        """Add derived display keys (``time`` / ``active_days``) alongside the rrule.
 
-        The card renders daily/weekly schedules from ``time`` /
-        ``active_days``, so deriving them here keeps that rendering stable
-        until the card learns the structured shapes. Daily (and any rule
+        The card's compact daily/weekly rendering consumes these directly
+        instead of re-deriving them from the rrule. Daily (and any rule
         without a weekly BYDAY) displays as the full week so the sensor
         reads "every day".
         """
@@ -524,21 +503,11 @@ class ScheduledChore(BaseChore):
 
     @classmethod
     def from_schedule(cls, base: dict[str, Any], schedule: dict[str, Any]) -> Self:
-        """Create a ScheduledChore from base kwargs and a schedule dict.
-
-        Accepts the v4 storage shape (``rrule`` / ``dtstart``), the legacy
-        service shape (``time`` / ``active_days``), or a mix — the service
-        layer overlays legacy keys onto a stored schedule for partial
-        updates, and ``__post_init__`` resolves the precedence.
-        """
+        """Create a ScheduledChore from a v4+ schedule dict."""
         kwargs: dict[str, Any] = {}
         if rrule := schedule.get("rrule"):
             kwargs["rrule"] = rrule
         if dtstart_raw := schedule.get("dtstart"):
             kwargs["dtstart"] = datetime.fromisoformat(dtstart_raw)
-        if time_raw := schedule.get("time"):
-            kwargs["time"] = _parse_time(time_raw)
-        if "active_days" in schedule:
-            kwargs["active_days"] = list(schedule["active_days"])
-        # Default False for stored schedules predating the field.
+        # persist defaults False for stored schedules predating the field.
         return cls(**base, persist=bool(schedule.get("persist", False)), **kwargs)

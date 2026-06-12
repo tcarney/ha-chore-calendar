@@ -47,7 +47,8 @@ async def test_sensor_created_for_existing_chore(hass, config_entry):
         uid="water_filter",
         chore_name="Change Water Filter",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=90),
+        freq="daily",
+        interval=90,
     )
     await runtime_data.store.async_create_chore(chore)
     await runtime_data.coordinator.async_refresh()
@@ -79,7 +80,8 @@ async def test_sensor_removed_when_chore_deleted(hass, config_entry):
         uid="temp_chore",
         chore_name="Temporary",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
     )
     await runtime_data.store.async_create_chore(chore)
     await runtime_data.coordinator.async_refresh()
@@ -113,7 +115,8 @@ async def test_sensor_attributes(hass, config_entry):
         uid="dishes",
         chore_name="Do Dishes",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
         trigger_tag_id="dishes-tag-uuid",
         assigned_to=["person.alice"],
     )

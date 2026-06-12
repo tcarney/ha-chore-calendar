@@ -32,7 +32,8 @@ async def test_coordinator_returns_chores(hass):
         uid="test_chore",
         chore_name="Test",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
     )
     await store.async_create_chore(chore)
 
@@ -88,7 +89,8 @@ async def test_coordinator_no_event_when_status_unchanged(hass):
         uid="test",
         chore_name="Test",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=30),
+        freq="daily",
+        interval=30,
     )
     await store.async_create_chore(chore)
 
@@ -113,7 +115,8 @@ async def test_coordinator_cleans_up_deleted_chores(hass):
         uid="temp",
         chore_name="Temp",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
     )
     await store.async_create_chore(chore)
     coordinator = await _setup_coordinator(hass, store)

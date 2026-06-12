@@ -161,7 +161,8 @@ async def test_event_property_skips_interval_no_anchor(hass, config_entry):
         uid="no_anchor",
         chore_name="No Anchor",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=3),
+        freq="daily",
+        interval=3,
         grace_period=timedelta(days=1),
     )
     await runtime.store.async_create_chore(chore)
@@ -188,7 +189,8 @@ async def test_event_property_interval_with_created_at(hass, config_entry):
         uid="with_created",
         chore_name="With Created",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=3),
+        freq="daily",
+        interval=3,
         grace_period=timedelta(days=1),
         created_at=created,
     )

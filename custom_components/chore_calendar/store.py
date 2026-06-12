@@ -11,8 +11,60 @@ from homeassistant.util import dt as dt_util
 
 from .const import DEFAULT_PENDING_PERIOD_MINS, DOMAIN, STORAGE_VERSION, ChoreType
 from .models import BaseChore
-from .models.interval import mins_to_freq_interval
-from .models.scheduled import migrate_legacy_schedule
+
+# ---------------------------------------------------------------------------
+# Frozen migration translation helpers.
+#
+# These encode the exact v3→v4 / v4→v5 schedule rewrites and deliberately do
+# NOT import live model code — a migration must keep producing byte-identical
+# output even as the models evolve.
+# ---------------------------------------------------------------------------
+
+_V3_DAY_TO_BYDAY = {
+    "mon": "MO",
+    "tue": "TU",
+    "wed": "WE",
+    "thu": "TH",
+    "fri": "FR",
+    "sat": "SA",
+    "sun": "SU",
+}
+# Phase-neutral dtstart date when a v3 item carries no created_at.
+_V3_FALLBACK_ANCHOR = datetime(1970, 1, 1)
+# Largest-first minute table for the v4→v5 interval rewrite.
+_V4_UNIT_MINS = {"weekly": 10080, "daily": 1440, "hourly": 60, "minutely": 1}
+
+
+def _migrate_v3_scheduled_schedule(schedule: dict[str, Any], created_at: datetime | None) -> dict[str, Any]:
+    """Translate a v3 ``{time, active_days}`` schedule to v4 ``{rrule, dtstart}``.
+
+    Empty (or unrecognized — v3 never validated day names) ``active_days``
+    means every day. ``dtstart``'s date comes from ``created_at`` — phase is
+    irrelevant at INTERVAL=1, but the anchor must exist.
+    """
+    parts = str(schedule.get("time", "08:00:00")).split(":")
+    hour, minute = int(parts[0]), int(parts[1])
+    codes = [_V3_DAY_TO_BYDAY[day] for day in schedule.get("active_days", []) if day in _V3_DAY_TO_BYDAY]
+    rrule = "FREQ=WEEKLY;BYDAY=" + ",".join(codes) if codes else "FREQ=DAILY"
+    anchor = created_at.date() if created_at is not None else _V3_FALLBACK_ANCHOR.date()
+    return {
+        "rrule": rrule,
+        "dtstart": datetime(anchor.year, anchor.month, anchor.day, hour, minute).isoformat(),
+    }
+
+
+def _migrate_v4_interval_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
+    """Translate a v4 ``{interval_mins}`` schedule to v5 ``{freq, interval}``.
+
+    Maps onto the largest exactly-dividing unit; anything that doesn't
+    divide falls through to ``minutely`` (lossless by construction).
+    Missing ``interval_mins`` maps to the model default (1 day).
+    """
+    mins = int(schedule.get("interval_mins", 1440))
+    for freq, unit in _V4_UNIT_MINS.items():
+        if mins >= unit and mins % unit == 0:
+            return {"freq": freq, "interval": mins // unit}
+    return {"freq": "minutely", "interval": mins}
 
 
 class _ChoreCalendarStore(Store[dict[str, Any]]):
@@ -65,15 +117,12 @@ class _ChoreCalendarStore(Store[dict[str, Any]]):
                     continue
                 created_raw = item.get("created_at")
                 created_at = dt_util.parse_datetime(created_raw) if created_raw else None
-                item["schedule"] = migrate_legacy_schedule(item.get("schedule", {}), created_at)
+                item["schedule"] = _migrate_v3_scheduled_schedule(item.get("schedule", {}), created_at)
         if old_major_version < 5:
             for item in old_data.get("items", []):
                 if item.get("chore_type") != str(ChoreType.INTERVAL):
                     continue
-                schedule = item.get("schedule", {})
-                # Missing interval_mins maps to the model default (1 day).
-                freq, interval = mins_to_freq_interval(int(schedule.get("interval_mins", 1440)))
-                item["schedule"] = {"freq": freq, "interval": interval}
+                item["schedule"] = _migrate_v4_interval_schedule(item.get("schedule", {}))
         return old_data
 
 

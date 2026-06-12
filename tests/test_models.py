@@ -239,18 +239,20 @@ class TestScheduledChoreDueRange:
 
 def _make_interval(
     *,
-    interval_mins: int = 4320,  # 3 days
+    freq: str = "daily",
+    interval: int = 3,
     pending_period_mins: int = 180,
     grace_period_mins: int = 1440,  # 1 day
     created_at: datetime | None = None,
     last_completed: datetime | None = None,
 ) -> IntervalChore:
-    """Create an IntervalChore with test defaults."""
+    """Create an IntervalChore with test defaults (every 3 days)."""
     return IntervalChore(
         uid="test_interval",
         chore_name="Test Interval",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(minutes=interval_mins),
+        freq=freq,
+        interval=interval,
         pending_period=timedelta(minutes=pending_period_mins),
         grace_period=timedelta(minutes=grace_period_mins),
         created_at=created_at,
@@ -304,7 +306,6 @@ class TestIntervalChoreStatus:
     def test_pending_inside_pending_window(self):
         """Status is PENDING in the window before due_at after first completion."""
         chore = _make_interval(
-            interval_mins=4320,  # 3 days
             pending_period_mins=180,  # 3 hours
             last_completed=datetime(2026, 3, 27, 12, 0, tzinfo=TZ),
         )
@@ -315,7 +316,6 @@ class TestIntervalChoreStatus:
     def test_completed_just_before_pending_window(self):
         """Just before pending_at, status is still COMPLETED (cycle not yet pending)."""
         chore = _make_interval(
-            interval_mins=4320,
             pending_period_mins=180,
             last_completed=datetime(2026, 3, 27, 12, 0, tzinfo=TZ),
         )
@@ -326,7 +326,6 @@ class TestIntervalChoreStatus:
     def test_zero_pending_period_skips_pending_state(self):
         """pending_period=0 preserves the pre-promotion behavior (no PENDING window)."""
         chore = _make_interval(
-            interval_mins=4320,
             pending_period_mins=0,
             last_completed=datetime(2026, 3, 27, 12, 0, tzinfo=TZ),
         )
@@ -379,7 +378,6 @@ class TestIntervalChoreDueRange:
     def test_due_range_with_completion(self):
         """Due range spans from last_completed + interval to + interval + grace."""
         chore = _make_interval(
-            interval_mins=4320,  # 3 days
             grace_period_mins=1440,  # 1 day
             last_completed=datetime(2026, 3, 27, 12, 0, tzinfo=TZ),
         )
@@ -508,10 +506,11 @@ class TestSerialization:
         assert desc["active_days"] == ["fri", "mon"]
 
     def test_schedule_description_interval(self):
-        """schedule_description returns interval_mins and grace_period_mins."""
+        """schedule_description returns the canonical freq/interval plus windows."""
         chore = _make_interval()
         desc = chore.schedule_description()
-        assert desc["interval_mins"] == 4320
+        assert desc["freq"] == "daily"
+        assert desc["interval"] == 3
         assert desc["grace_period_mins"] == 1440
 
 
@@ -571,24 +570,6 @@ class TestScheduledRruleRepresentation:
             {"rrule": "FREQ=WEEKLY;BYDAY=MO,WE,FR", "dtstart": "2026-05-04T08:00:00"},
         )
         assert chore.rrule == "FREQ=WEEKLY;BYDAY=MO,WE,FR"
-        assert chore.dtstart == datetime(2026, 5, 4, 8, 0)
-
-    def test_from_schedule_time_overlay_keeps_dtstart_date(self):
-        """A legacy time key overlaid on a stored schedule replaces only the time-of-day."""
-        chore = ScheduledChore.from_schedule(
-            {"uid": "x", "chore_name": "X", "chore_type": ChoreType.SCHEDULED},
-            {"rrule": "FREQ=WEEKLY;BYDAY=MO", "dtstart": "2026-05-04T08:00:00", "time": "20:15:00"},
-        )
-        assert chore.rrule == "FREQ=WEEKLY;BYDAY=MO"
-        assert chore.dtstart == datetime(2026, 5, 4, 20, 15)
-
-    def test_from_schedule_active_days_overlay_resynthesizes_rrule(self):
-        """A legacy active_days key overlaid on a stored schedule rewrites the rrule."""
-        chore = ScheduledChore.from_schedule(
-            {"uid": "x", "chore_name": "X", "chore_type": ChoreType.SCHEDULED},
-            {"rrule": "FREQ=DAILY", "dtstart": "2026-05-04T08:00:00", "active_days": ["sat", "sun"]},
-        )
-        assert chore.rrule == "FREQ=WEEKLY;BYDAY=SA,SU"
         assert chore.dtstart == datetime(2026, 5, 4, 8, 0)
 
     def test_schedule_to_dict_v4_shape(self):
@@ -775,26 +756,6 @@ class TestIntervalFreqRepresentation:
             **kwargs,
         )
 
-    @pytest.mark.parametrize(
-        ("delta", "expected"),
-        [
-            (timedelta(days=90), ("daily", 90)),
-            (timedelta(weeks=2), ("weekly", 2)),
-            (timedelta(days=7), ("weekly", 1)),
-            (timedelta(hours=4), ("hourly", 4)),
-            (timedelta(minutes=90), ("minutely", 90)),
-        ],
-    )
-    def test_timedelta_normalizes_to_largest_unit(self, delta, expected):
-        """A legacy timedelta interval maps onto the largest exactly-dividing unit."""
-        chore = IntervalChore(
-            uid="x",
-            chore_name="X",
-            chore_type=ChoreType.INTERVAL,
-            interval=delta,
-        )
-        assert (chore.freq, chore.interval) == expected
-
     def test_invalid_freq_raises(self):
         """An unknown freq is rejected at construction."""
         with pytest.raises(ValueError, match="freq"):
@@ -835,24 +796,8 @@ class TestIntervalFreqRepresentation:
         assert isinstance(restored, IntervalChore)
         assert (restored.freq, restored.interval) == ("monthly", 3)
 
-    def test_from_schedule_legacy_interval_mins(self):
-        """from_schedule still accepts the legacy interval_mins shape."""
-        chore = IntervalChore.from_schedule(
-            {"uid": "x", "chore_name": "X", "chore_type": ChoreType.INTERVAL},
-            {"interval_mins": 20160},
-        )
-        assert (chore.freq, chore.interval) == ("weekly", 2)
-
-    def test_schedule_description_derives_interval_mins(self):
-        """Sub-monthly freqs expose a derived interval_mins for the card."""
-        chore = self._make("weekly", 2)
-        desc = chore.schedule_description()
-        assert desc["freq"] == "weekly"
-        assert desc["interval"] == 2
-        assert desc["interval_mins"] == 20160
-
-    def test_schedule_description_monthly_has_no_interval_mins(self):
-        """Month/year intervals have no fixed minute count — no derived key."""
+    def test_schedule_description_has_no_derived_keys(self):
+        """The description is the canonical shape — no legacy interval_mins."""
         chore = self._make("monthly", 3)
         desc = chore.schedule_description()
         assert desc["freq"] == "monthly"
@@ -1401,7 +1346,7 @@ class TestIntervalChoreSkip:
 
     def test_apply_default_skip_is_now_plus_interval(self):
         """Default skip sets skipped_until to now + interval."""
-        chore = _make_interval(interval_mins=4320)  # 3 days
+        chore = _make_interval()  # 3 days
         now = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
         expected = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
         result = chore.apply_default_skip(now)

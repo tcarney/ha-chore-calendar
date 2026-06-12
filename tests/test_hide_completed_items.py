@@ -237,7 +237,8 @@ async def test_sweep_keeps_recurring_chore(hass, config_entry):
         uid="interval-1",
         chore_name="Water Plants",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(hours=1),
     )
@@ -299,7 +300,8 @@ async def test_calendar_hides_pre_cutoff_completed_event(hass, config_entry):
         uid="recurring",
         chore_name="Water Plants",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=1),
     )
@@ -330,7 +332,8 @@ async def test_todo_hides_pre_cutoff_completed_item(hass, config_entry):
         uid="recurring",
         chore_name="Water Plants",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=1),
     )
@@ -356,7 +359,8 @@ async def test_post_cutoff_completion_reappears(hass, config_entry):
         uid="recurring",
         chore_name="Water Plants",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW + timedelta(minutes=5),  # post-cutoff
     )
@@ -439,7 +443,8 @@ async def test_get_items_does_not_filter_by_cutoff(hass, config_entry):
         uid="recurring",
         chore_name="Water Plants",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=1),
     )

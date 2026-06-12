@@ -11,30 +11,17 @@ from dateutil.relativedelta import relativedelta
 from .base import BaseChore
 
 # Allowed freq values — RRULE vocabulary, lowercased. ``minutely`` /
-# ``hourly`` keep the legacy sub-day intervals expressible; HA's calendar
-# websocket validator excludes them, but that restriction only governs rrule
-# strings on emitted CalendarEvents, and interval chores never emit one.
+# ``hourly`` keep sub-day intervals expressible; HA's calendar websocket
+# validator excludes them, but that restriction only governs rrule strings
+# on emitted CalendarEvents, and interval chores never emit one.
 VALID_INTERVAL_FREQS = ("minutely", "hourly", "daily", "weekly", "monthly", "yearly")
 
-# Minutes per unit for the freqs with a fixed-length period (sub-monthly),
-# largest first — iteration order drives the largest-exactly-dividing-unit
-# mapping for legacy minute counts.
+# Minutes per unit for the freqs with a fixed-length period (sub-monthly) —
+# the step size of the season-excision accumulation walk.
 _UNIT_MINS = {"weekly": 10080, "daily": 1440, "hourly": 60, "minutely": 1}
 
 # Iteration guard for the season-excision walks (50 years of months).
 _MAX_MONTH_STEPS = 600
-
-
-def mins_to_freq_interval(mins: int) -> tuple[str, int]:
-    """Map a legacy interval minute count onto the largest exactly-dividing unit.
-
-    Lossless by construction: anything that doesn't divide into a larger
-    unit falls through to ``minutely``.
-    """
-    for freq, unit in _UNIT_MINS.items():
-        if mins >= unit and mins % unit == 0:
-            return freq, mins // unit
-    return "minutely", mins
 
 
 @dataclass
@@ -49,9 +36,7 @@ class IntervalChore(BaseChore):
     Canonical schedule fields are ``freq`` (RRULE vocabulary, lowercased)
     and ``interval`` (the N in "after N freq units"), stepped via
     ``relativedelta`` so month/year intervals track the calendar instead of
-    approximating with a fixed-length duration. A ``timedelta`` is still
-    accepted for ``interval`` (the legacy construction surface) and is
-    normalized onto the largest exactly-dividing unit.
+    approximating with a fixed-length duration.
 
     ``bymonth`` is an optional season window: out-of-season months are
     excised from the interval clock (see ``_next_due_from``). ``until`` /
@@ -64,7 +49,7 @@ class IntervalChore(BaseChore):
     """
 
     freq: str = "daily"
-    interval: int | timedelta = 1
+    interval: int = 1
     # Optional season window — months (1-12) in which the interval clock
     # runs. Empty means all year.
     bymonth: list[int] = field(default_factory=list)
@@ -77,9 +62,7 @@ class IntervalChore(BaseChore):
     persist: bool = False
 
     def __post_init__(self) -> None:
-        """Normalize a legacy timedelta interval and validate the new fields."""
-        if isinstance(self.interval, timedelta):
-            self.freq, self.interval = mins_to_freq_interval(int(self.interval.total_seconds() // 60))
+        """Validate the schedule fields."""
         if self.freq not in VALID_INTERVAL_FREQS:
             msg = f"Unsupported interval freq: {self.freq!r} (must be one of {VALID_INTERVAL_FREQS})"
             raise ValueError(msg)
@@ -90,34 +73,21 @@ class IntervalChore(BaseChore):
             # until is floating local time — strip a stray timezone.
             self.until = self.until.replace(tzinfo=None)
 
-    def _interval_n(self) -> int:
-        """Return ``interval`` as an int, normalizing a mutated-in timedelta.
-
-        ``__post_init__`` normalizes timedeltas at construction; this covers
-        direct field mutation afterwards.
-        """
-        n = self.interval
-        if isinstance(n, timedelta):
-            self.freq, n = mins_to_freq_interval(int(n.total_seconds() // 60))
-            self.interval = n
-        return n
-
     def _step(self) -> relativedelta:
         """Return one full interval as a calendar-aware delta (season-blind)."""
-        n = self._interval_n()
         match self.freq:
             case "minutely":
-                return relativedelta(minutes=n)
+                return relativedelta(minutes=self.interval)
             case "hourly":
-                return relativedelta(hours=n)
+                return relativedelta(hours=self.interval)
             case "daily":
-                return relativedelta(days=n)
+                return relativedelta(days=self.interval)
             case "weekly":
-                return relativedelta(weeks=n)
+                return relativedelta(weeks=self.interval)
             case "monthly":
-                return relativedelta(months=n)
+                return relativedelta(months=self.interval)
             case _:  # "yearly" — __post_init__ rejects anything else.
-                return relativedelta(years=n)
+                return relativedelta(years=self.interval)
 
     def _next_due_from(self, anchor: datetime) -> datetime:
         """One interval after *anchor*, with out-of-season months excised.
@@ -153,8 +123,7 @@ class IntervalChore(BaseChore):
 
     def _excised_duration_add(self, naive: datetime, allowed: set[int]) -> datetime:
         """Accumulate a fixed-length interval across in-season time only."""
-        unit_mins = _UNIT_MINS[self.freq]
-        remaining = timedelta(minutes=unit_mins * self._interval_n())
+        remaining = timedelta(minutes=_UNIT_MINS[self.freq] * self.interval)
         cursor = naive
         if cursor.month not in allowed:
             cursor = _next_allowed_month_start(cursor, allowed)
@@ -183,12 +152,12 @@ class IntervalChore(BaseChore):
             anchor = _shift_to_next_allowed_month(anchor, allowed)
 
         if self.freq == "yearly":
-            result = anchor + relativedelta(years=self._interval_n())
+            result = anchor + relativedelta(years=self.interval)
             if result.month not in allowed:
                 result = _shift_to_next_allowed_month(result, allowed)
             return result
 
-        remaining = self._interval_n()
+        remaining = self.interval
         cursor = anchor
         for _ in range(_MAX_MONTH_STEPS):
             cursor = _month_start(cursor) + relativedelta(months=1)
@@ -253,11 +222,9 @@ class IntervalChore(BaseChore):
 
     def _schedule_to_dict(self) -> dict[str, Any]:
         """Serialize interval-chore-specific fields (season/end keys sparse)."""
-        # Normalize first — freq may shift alongside the interval count.
-        interval = self._interval_n()
         data: dict[str, Any] = {
             "freq": self.freq,
-            "interval": interval,
+            "interval": self.interval,
             "persist": self.persist,
         }
         if self.bymonth:
@@ -268,33 +235,9 @@ class IntervalChore(BaseChore):
             data["count"] = self.count
         return data
 
-    def schedule_description(self) -> dict[str, Any]:
-        """Add a derived ``interval_mins`` for freqs with a fixed-length period.
-
-        The card renders interval schedules from ``interval_mins``, so
-        deriving it keeps that rendering stable for every freq that maps
-        exactly. Month/year intervals have no fixed minute count — the card
-        learns the ``freq`` / ``interval`` shape in the card-display stage.
-        """
-        data = super().schedule_description()
-        # Normalize first — freq may shift alongside the interval count.
-        interval = self._interval_n()
-        unit = _UNIT_MINS.get(self.freq)
-        if unit is not None:
-            data["interval_mins"] = unit * interval
-        return data
-
     @classmethod
     def from_schedule(cls, base: dict[str, Any], schedule: dict[str, Any]) -> Self:
-        """Create an IntervalChore from base kwargs and a schedule dict.
-
-        Accepts the v5 storage shape (``freq`` / ``interval`` plus the
-        optional season/end keys) and the legacy ``interval_mins`` shape,
-        mapped onto the largest exactly-dividing unit.
-        """
-        if "freq" not in schedule and "interval_mins" in schedule:
-            freq, interval = mins_to_freq_interval(int(schedule["interval_mins"]))
-            return cls(**base, freq=freq, interval=interval)
+        """Create an IntervalChore from a v5 schedule dict."""
         until_raw = schedule.get("until")
         count_raw = schedule.get("count")
         return cls(

@@ -36,7 +36,8 @@ async def test_tag_scan_completes_matching_chore(hass):
         uid="water_filter",
         chore_name="Water Filter",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=30),
+        freq="daily",
+        interval=30,
         grace_period=timedelta(days=7),
         trigger_tag_id=TAG_UUID,
     )
@@ -66,7 +67,8 @@ async def test_tag_scan_ignores_non_matching_tag(hass):
         uid="water_filter",
         chore_name="Water Filter",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=30),
+        freq="daily",
+        interval=30,
         grace_period=timedelta(days=7),
         trigger_tag_id=TAG_UUID,
     )
@@ -93,7 +95,8 @@ async def test_tag_scan_ignores_chore_without_tag(hass):
         uid="no_tag",
         chore_name="No Tag",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
     )
     await store.async_create_chore(chore)
     await coordinator.async_refresh()
@@ -183,7 +186,8 @@ async def test_tag_scan_skips_interval_in_completed_phase(hass):
         uid="water_filter",
         chore_name="Water Filter",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=30),
+        freq="daily",
+        interval=30,
         pending_period=timedelta(hours=3),
         grace_period=timedelta(days=7),
         trigger_tag_id=TAG_UUID,
@@ -216,7 +220,8 @@ async def test_tag_scan_completes_interval_in_pending_window(hass):
         uid="water_filter",
         chore_name="Water Filter",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=30),
+        freq="daily",
+        interval=30,
         pending_period=timedelta(hours=3),
         grace_period=timedelta(days=7),
         trigger_tag_id=TAG_UUID,
@@ -249,7 +254,8 @@ async def test_tag_scan_completes_multiple_matching_chores(hass):
             uid=cid,
             chore_name=cid,
             chore_type=ChoreType.INTERVAL,
-            interval=timedelta(days=1),
+            freq="daily",
+            interval=1,
             trigger_tag_id=TAG_UUID,
         )
         await store.async_create_chore(chore)
@@ -277,7 +283,8 @@ async def test_tag_scan_empty_tag_id_ignored(hass):
         uid="test",
         chore_name="Test",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
         trigger_tag_id=TAG_UUID,
     )
     await store.async_create_chore(chore)
@@ -309,7 +316,8 @@ async def test_tag_scan_populates_undo_slot(hass):
         uid="med",
         chore_name="Medicine",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
         trigger_tag_id=TAG_UUID,
         last_completed=prior,
         last_completed_by="person.alice",
@@ -349,7 +357,8 @@ async def test_tag_scan_completion_can_be_uncompleted(hass):
         uid="med",
         chore_name="Medicine",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
         trigger_tag_id=TAG_UUID,
         last_completed=prior,
         last_completed_by="person.alice",
@@ -382,7 +391,8 @@ async def test_unsubscribe_stops_listener(hass):
         uid="test",
         chore_name="Test",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
         trigger_tag_id=TAG_UUID,
     )
     await store.async_create_chore(chore)

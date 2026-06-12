@@ -30,7 +30,8 @@ async def test_store_create_and_get(hass):
         uid="water_filter",
         chore_name="Change Water Filter",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=90),
+        freq="daily",
+        interval=90,
         grace_period=timedelta(days=14),
     )
     await store.async_create_chore(chore)
@@ -50,7 +51,8 @@ async def test_store_update_chore(hass):
         uid="water_filter",
         chore_name="Change Water Filter",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=90),
+        freq="daily",
+        interval=90,
     )
     await store.async_create_chore(chore)
 
@@ -72,7 +74,8 @@ async def test_store_delete_chore(hass):
         uid="water_filter",
         chore_name="Change Water Filter",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=90),
+        freq="daily",
+        interval=90,
     )
     await store.async_create_chore(chore)
     await store.async_delete_chore("water_filter")
@@ -114,7 +117,8 @@ async def test_store_get_all_returns_copy(hass):
         uid="test",
         chore_name="Test",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
     )
     await store.async_create_chore(chore)
 
