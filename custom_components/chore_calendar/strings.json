@@ -96,6 +96,22 @@
         "interval": {
           "name": "Repeat interval",
           "description": "Due this many units after the last completion (3 with monthly = after 3 months)."
+        },
+        "bymonth": {
+          "name": "Months",
+          "description": "Season window — the interval clock only runs in these months."
+        },
+        "until": {
+          "name": "End on",
+          "description": "The series ends once the next due passes this. Mutually exclusive with 'End after'."
+        },
+        "count": {
+          "name": "End after",
+          "description": "Total completions. Mutually exclusive with 'End on'."
+        },
+        "persist": {
+          "name": "Keep after series ends",
+          "description": "Keep the expired chore in storage (re-enterable via update_item) instead of sweeping it with hidden completed items."
         }
       }
     },

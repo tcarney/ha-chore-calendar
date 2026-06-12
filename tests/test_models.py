@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -828,7 +829,7 @@ class TestIntervalFreqRepresentation:
         """{freq, interval} survives a to_dict/from_dict round-trip."""
         original = self._make("monthly", 3)
         data = original.to_dict()
-        assert data["schedule"] == {"freq": "monthly", "interval": 3}
+        assert data["schedule"] == {"freq": "monthly", "interval": 3, "persist": False}
 
         restored = BaseChore.from_dict(data)
         assert isinstance(restored, IntervalChore)
@@ -857,6 +858,169 @@ class TestIntervalFreqRepresentation:
         assert desc["freq"] == "monthly"
         assert desc["interval"] == 3
         assert "interval_mins" not in desc
+
+
+# Season window: October through March.
+OCT_MAR = [10, 11, 12, 1, 2, 3]
+
+
+class TestIntervalSeasonality:
+    """bymonth excision clock — out-of-season months don't count (§2)."""
+
+    def _make(self, freq: str, interval: int, bymonth: list[int], **kwargs) -> IntervalChore:
+        return IntervalChore(
+            uid="seasonal",
+            chore_name="Seasonal",
+            chore_type=ChoreType.INTERVAL,
+            freq=freq,
+            interval=interval,
+            bymonth=bymonth,
+            **kwargs,
+        )
+
+    def test_sub_monthly_carries_remainder_across_closed_months(self):
+        """The plan's example: 5 days with 2 in-season days left lands 3 days
+        into the next allowed month."""
+        chore = self._make("daily", 5, [3, 5], last_completed=datetime(2026, 3, 30, 0, 0, tzinfo=TZ))
+        now = datetime(2026, 3, 30, 1, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2026, 5, 4, 0, 0, tzinfo=TZ)
+
+    def test_sub_monthly_exact_boundary_lands_at_season_opening(self):
+        """An interval consuming exactly the remaining in-season time lands at the opening."""
+        chore = self._make("daily", 2, [3, 5], last_completed=datetime(2026, 3, 30, 0, 0, tzinfo=TZ))
+        now = datetime(2026, 3, 30, 1, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2026, 5, 1, 0, 0, tzinfo=TZ)
+
+    def test_sub_monthly_in_season_is_plain_addition(self):
+        """Fully in-season intervals behave exactly like the season-less model."""
+        chore = self._make("daily", 5, [3], last_completed=datetime(2026, 3, 10, 9, 0, tzinfo=TZ))
+        now = datetime(2026, 3, 10, 10, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2026, 3, 15, 9, 0, tzinfo=TZ)
+
+    def test_out_of_season_completion_starts_clock_at_opening(self):
+        """A completion in a closed month anchors at the next season opening."""
+        chore = self._make("daily", 3, [10], last_completed=datetime(2026, 8, 15, 12, 0, tzinfo=TZ))
+        now = datetime(2026, 8, 15, 13, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2026, 10, 4, 0, 0, tzinfo=TZ)
+
+    def test_monthly_steps_count_allowed_months_only(self):
+        """The plan's example: every 2 months, Oct-Mar, completed Feb 10 → Oct 10."""
+        chore = self._make("monthly", 2, OCT_MAR, last_completed=datetime(2026, 2, 10, 9, 0, tzinfo=TZ))
+        now = datetime(2026, 2, 11, 9, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2026, 10, 10, 9, 0, tzinfo=TZ)
+
+    def test_monthly_out_of_season_anchor_slides_to_opening(self):
+        """An out-of-season monthly completion counts months from the opening."""
+        chore = self._make("monthly", 1, OCT_MAR, last_completed=datetime(2026, 7, 10, 9, 0, tzinfo=TZ))
+        now = datetime(2026, 7, 11, 9, 0, tzinfo=TZ)
+        # Clock starts at the Oct opening; one allowed month later is Nov.
+        assert chore.compute_next_due(now) == datetime(2026, 11, 10, 9, 0, tzinfo=TZ)
+
+    def test_monthly_clamps_day_to_target_month(self):
+        """Day-of-month clamps when the target month is shorter."""
+        chore = self._make("monthly", 1, [1, 2], last_completed=datetime(2026, 1, 31, 9, 0, tzinfo=TZ))
+        now = datetime(2026, 2, 1, 9, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2026, 2, 28, 9, 0, tzinfo=TZ)
+
+    def test_yearly_out_of_season_shifts_to_allowed_month(self):
+        """A yearly chore completed out of season lands in the allowed month."""
+        chore = self._make("yearly", 1, [3], last_completed=datetime(2026, 6, 15, 9, 0, tzinfo=TZ))
+        now = datetime(2026, 6, 16, 9, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2028, 3, 15, 9, 0, tzinfo=TZ)
+
+    def test_yearly_in_season_steps_plainly(self):
+        """An in-season yearly anchor stays in its month."""
+        chore = self._make("yearly", 1, OCT_MAR, last_completed=datetime(2026, 11, 5, 9, 0, tzinfo=TZ))
+        now = datetime(2026, 11, 6, 9, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2027, 11, 5, 9, 0, tzinfo=TZ)
+
+    def test_excision_is_wall_clock_across_dst(self):
+        """The excision walk reads wall time — a DST transition inside the
+        window doesn't shift the due time."""
+        ny = ZoneInfo("America/New_York")
+        # Season closes after March; spring-forward is Mar 8 2026.
+        chore = self._make("daily", 5, [3, 5], last_completed=datetime(2026, 3, 6, 22, 0, tzinfo=ny))
+        now = datetime(2026, 3, 7, 0, 0, tzinfo=ny)
+        # 5 wall days later, same wall time, despite the lost hour.
+        assert chore.compute_next_due(now) == datetime(2026, 3, 11, 22, 0, tzinfo=ny)
+
+    def test_default_skip_slide_is_season_filtered(self):
+        """The default-skip slide honors the season window."""
+        chore = self._make("daily", 3, [3, 5], last_completed=datetime(2026, 3, 1, 0, 0, tzinfo=TZ))
+        result = chore.apply_default_skip(datetime(2026, 3, 30, 0, 0, tzinfo=TZ))
+        # 2 in-season days remain in March; the third lands May 1 + 1 day.
+        assert result == datetime(2026, 5, 2, 0, 0, tzinfo=TZ)
+        assert chore.skipped_until == result
+
+
+class TestIntervalLifecycle:
+    """until/count end conditions — terminal + persist, mirroring the other types."""
+
+    def _make(self, **kwargs) -> IntervalChore:
+        return IntervalChore(
+            uid="finite",
+            chore_name="Finite",
+            chore_type=ChoreType.INTERVAL,
+            freq="daily",
+            interval=3,
+            **kwargs,
+        )
+
+    def test_until_exhaustion_goes_terminal(self):
+        """A completion whose next due exceeds until ends the series."""
+        chore = self._make(until=datetime(2026, 6, 10, 0, 0))
+        chore.apply_completion(datetime(2026, 6, 5, 9, 0, tzinfo=TZ), None)
+        assert chore.terminal is False
+
+        chore.apply_completion(datetime(2026, 6, 8, 9, 0, tzinfo=TZ), None)
+        assert chore.terminal is True
+        now = datetime(2026, 6, 9, 9, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.COMPLETED
+        assert chore.compute_next_due(now) is None
+        assert chore.compute_due_range(now) is None
+
+    def test_count_reads_completion_count(self):
+        """The Nth completion ends the series; revert reopens it."""
+        chore = self._make(count=2)
+        chore.apply_completion(datetime(2026, 6, 1, 9, 0, tzinfo=TZ), None)
+        assert chore.terminal is False
+        chore.apply_completion(datetime(2026, 6, 4, 9, 0, tzinfo=TZ), None)
+        assert chore.terminal is True
+
+        chore.revert_completion()
+        assert chore.terminal is False
+        assert chore.completion_count == 1
+
+    def test_default_skip_past_until_goes_terminal(self):
+        """Sliding past until exhausts the series and clears the skip anchor."""
+        chore = self._make(until=datetime(2026, 6, 10, 0, 0), last_completed=datetime(2026, 6, 5, 9, 0, tzinfo=TZ))
+        result = chore.apply_default_skip(datetime(2026, 6, 8, 9, 0, tzinfo=TZ))
+        assert result is None
+        assert chore.skipped_until is None
+        assert chore.terminal is True
+
+    def test_season_and_end_fields_round_trip(self):
+        """bymonth/until/count/persist survive serialization, sparse when unset."""
+        chore = self._make(bymonth=[10, 11], until=datetime(2027, 3, 31, 23, 59, 59), persist=True)
+        data = chore.to_dict()
+        assert data["schedule"] == {
+            "freq": "daily",
+            "interval": 3,
+            "persist": True,
+            "bymonth": [10, 11],
+            "until": "2027-03-31T23:59:59",
+        }
+        restored = BaseChore.from_dict(data)
+        assert isinstance(restored, IntervalChore)
+        assert restored.bymonth == [10, 11]
+        assert restored.until == datetime(2027, 3, 31, 23, 59, 59)
+        assert restored.count is None
+        assert restored.persist is True
+
+    def test_invalid_bymonth_raises(self):
+        """Month numbers outside 1-12 are rejected at construction."""
+        with pytest.raises(ValueError, match="bymonth"):
+            self._make(bymonth=[13])
 
 
 class TestCompletionUndoSlot:

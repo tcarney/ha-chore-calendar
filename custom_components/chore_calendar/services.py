@@ -41,8 +41,7 @@ from .const import (
 )
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore, OneshotChore
-from .models.interval import VALID_INTERVAL_FREQS
-from .recurrence import scheduled_selector_to_schedule
+from .recurrence import interval_selector_to_schedule, scheduled_selector_to_schedule
 from .store import ChoreStore
 
 # Service-specific field keys (not shared with sensor attributes).
@@ -245,39 +244,6 @@ def _duration_to_mins(dur: dict[str, Any]) -> int:
     return int(dur.get("days", 0)) * 1440 + int(dur.get("hours", 0)) * 60 + int(dur.get("minutes", 0))
 
 
-def _interval_schedule_from_call(obj: dict[str, Any]) -> dict[str, Any]:
-    """Translate an ``interval`` service sub-object to the {freq, interval} schedule shape.
-
-    Only the structured selector shape is accepted: ``frequency`` (required)
-    plus ``interval`` (default 1). The pre-0.11 HA duration dict
-    (``days`` / ``hours`` / ``minutes``) was removed — the unknown-field
-    error below points callers at the replacement.
-    """
-    unknown = [key for key in obj if key not in ("frequency", "interval")]
-    if unknown:
-        msg = (
-            f"Unknown interval field(s) {unknown!r}; valid fields are ['frequency', 'interval']. "
-            "(The former duration shape was replaced — e.g. {'frequency': 'daily', 'interval': 14}.)"
-        )
-        raise ServiceValidationError(msg)
-    if "frequency" not in obj:
-        msg = "interval requires 'frequency' (one of minutely/hourly/daily/weekly/monthly/yearly)"
-        raise ServiceValidationError(msg)
-    frequency = obj["frequency"]
-    if frequency not in VALID_INTERVAL_FREQS:
-        msg = f"Invalid interval frequency {frequency!r} (must be one of {VALID_INTERVAL_FREQS})"
-        raise ServiceValidationError(msg)
-    try:
-        count = int(obj.get("interval", 1))
-    except (TypeError, ValueError):
-        msg = f"Invalid interval count {obj.get('interval')!r} (must be a positive integer)"
-        raise ServiceValidationError(msg) from None
-    if count < 1:
-        msg = f"Invalid interval count {count!r} (must be a positive integer)"
-        raise ServiceValidationError(msg)
-    return {"freq": frequency, "interval": count}
-
-
 def _infer_chore_type(data: dict[str, Any]) -> ChoreType:
     """Infer chore type from the presence of ``scheduled`` / ``interval`` / ``oneshot``.
 
@@ -326,7 +292,9 @@ def _apply_overlays(
         schedule.clear()
         schedule.update(new_schedule)
     elif chore_type == ChoreType.INTERVAL and ATTR_INTERVAL in data:
-        schedule.update(_interval_schedule_from_call(data[ATTR_INTERVAL]))
+        new_schedule = interval_selector_to_schedule(data[ATTR_INTERVAL], existing=dict(schedule))
+        schedule.clear()
+        schedule.update(new_schedule)
     elif chore_type == ChoreType.ONESHOT and ATTR_ONESHOT in data:
         obj = data[ATTR_ONESHOT]
         if "due_datetime" in obj:
@@ -467,10 +435,12 @@ async def _async_handle_update(call: ServiceCall) -> None:
     ):
         updated["terminal"] = False
 
-    # Likewise a scheduled-recurrence update re-enters the cycle: an
-    # UNTIL/COUNT-exhausted series picks up the new rule instead of staying
-    # terminal-COMPLETED.
+    # Likewise a recurrence update on the recurring types re-enters the
+    # cycle: an until/count-exhausted series picks up the new rule instead
+    # of staying terminal-COMPLETED.
     if existing.chore_type == ChoreType.SCHEDULED and ATTR_SCHEDULED in call.data:
+        updated["terminal"] = False
+    if existing.chore_type == ChoreType.INTERVAL and ATTR_INTERVAL in call.data:
         updated["terminal"] = False
 
     chore = BaseChore.from_dict(updated)

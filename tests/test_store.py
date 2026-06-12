@@ -219,7 +219,7 @@ async def test_storage_migration_v2_to_v5(hass):
     }
     assert by_uid["interval-uid"]["pending_period_mins"] == DEFAULT_PENDING_PERIOD_MINS
     # 129600 minutes = 90 days (not a whole number of weeks).
-    assert by_uid["interval-uid"]["schedule"] == {"freq": "daily", "interval": 90}
+    assert by_uid["interval-uid"]["schedule"] == {"freq": "daily", "interval": 90, "persist": False}
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -283,7 +283,7 @@ async def test_storage_migration_v3_to_v5(hass):
         "dtstart": "2026-05-04T19:30:00",
         "persist": False,
     }
-    assert by_uid["interval-uid"]["schedule"] == {"freq": "daily", "interval": 90}
+    assert by_uid["interval-uid"]["schedule"] == {"freq": "daily", "interval": 90, "persist": False}
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -347,5 +347,5 @@ async def test_storage_migration_v4_to_v5(hass):
     persisted = await Store(hass, 5, key).async_load()
     assert persisted is not None
     by_uid = {item["uid"]: item for item in persisted["items"]}
-    assert by_uid["fortnight-uid"]["schedule"] == {"freq": "weekly", "interval": 2}
-    assert by_uid["hours-uid"]["schedule"] == {"freq": "hourly", "interval": 4}
+    assert by_uid["fortnight-uid"]["schedule"] == {"freq": "weekly", "interval": 2, "persist": False}
+    assert by_uid["hours-uid"]["schedule"] == {"freq": "hourly", "interval": 4, "persist": False}

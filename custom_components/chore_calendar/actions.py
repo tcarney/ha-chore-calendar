@@ -18,7 +18,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .const import EVENT_ITEM_DELETED, LOGGER, ChoreEventSource, ChoreStatus
-from .models import OneshotChore, ScheduledChore
+from .models import IntervalChore, OneshotChore, ScheduledChore
 
 if TYPE_CHECKING:
     from .coordinator import ChoreCalendarCoordinator
@@ -94,13 +94,14 @@ async def async_apply_completed_cleared_at(
 
     Used by both the ``hide_completed_items`` service handler and the todo
     entity's ``async_remove_completed_items``. After updating the cutoff,
-    deletes any terminal-completed oneshot — and any UNTIL/COUNT-exhausted
-    (``terminal``) scheduled chore — whose ``last_completed`` precedes the
-    new cutoff and whose ``persist`` flag is False; these chores are "done
-    with" by user intent. A scheduled chore that is merely completed for the
-    current period is never swept: only the ``terminal`` flag makes it
-    eligible. Each deletion fires ``chore_calendar_item_deleted`` with the
-    supplied *entity_id* in the payload.
+    deletes any terminal-completed oneshot — and any until/count-exhausted
+    (``terminal``) scheduled or interval chore — whose ``last_completed``
+    precedes the new cutoff and whose ``persist`` flag is False; these
+    chores are "done with" by user intent. A recurring chore that is merely
+    completed for the current cycle is never swept: only the ``terminal``
+    flag makes it eligible. Each deletion fires
+    ``chore_calendar_item_deleted`` with the supplied *entity_id* in the
+    payload.
     """
     await store.async_set_completed_cleared_at(cleared_at)
     LOGGER.debug(
@@ -112,7 +113,7 @@ async def async_apply_completed_cleared_at(
     now = dt_util.now()
     swept = 0
     for chore in list(store.get_all_chores().values()):
-        if isinstance(chore, ScheduledChore):
+        if isinstance(chore, (IntervalChore, ScheduledChore)):
             # Recurring chores are only swept once their series is exhausted.
             if not chore.terminal:
                 continue

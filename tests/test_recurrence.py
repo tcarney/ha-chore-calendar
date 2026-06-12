@@ -8,7 +8,7 @@ import pytest
 
 from custom_components.chore_calendar.const import ChoreType
 from custom_components.chore_calendar.models import ScheduledChore
-from custom_components.chore_calendar.recurrence import scheduled_selector_to_schedule
+from custom_components.chore_calendar.recurrence import interval_selector_to_schedule, scheduled_selector_to_schedule
 from homeassistant.exceptions import ServiceValidationError
 
 TZ = timezone(timedelta(hours=-5))
@@ -151,3 +151,66 @@ def test_synthesized_rrules_parse_in_the_model():
             schedule,
         )
         assert chore.rrule == schedule["rrule"]
+
+
+# ---------------------------------------------------------------------------
+# Interval selector translation
+# ---------------------------------------------------------------------------
+
+
+def _translate_interval(obj, existing=None):
+    return interval_selector_to_schedule(obj, existing=existing or {})
+
+
+def test_interval_full_shape():
+    """Season and end fields land in the schedule; bymonth strings coerce."""
+    schedule = _translate_interval(
+        {"frequency": "monthly", "interval": 2, "bymonth": ["10", "11", "12", "1", "2", "3"]}
+    )
+    assert schedule == {
+        "freq": "monthly",
+        "interval": 2,
+        "persist": False,
+        "bymonth": [10, 11, 12, 1, 2, 3],
+    }
+
+
+def test_interval_until_and_count():
+    """until parses like the scheduled selector (bare date = end of day)."""
+    schedule = _translate_interval({"frequency": "daily", "interval": 3, "until": "2027-03-31"})
+    assert schedule["until"] == "2027-03-31T23:59:59"
+
+    schedule = _translate_interval({"frequency": "daily", "count": 5})
+    assert schedule["count"] == 5
+
+
+def test_interval_recurrence_update_clears_omitted_fields():
+    """A recurrence update is a full specification — omitted season/end keys clear."""
+    existing = {"freq": "monthly", "interval": 2, "bymonth": [10], "count": 3, "persist": True}
+    schedule = _translate_interval({"frequency": "weekly", "interval": 1}, existing=existing)
+    assert schedule == {"freq": "weekly", "interval": 1, "persist": True}
+
+
+def test_interval_persist_only_keeps_rule():
+    """persist alone flips the flag without touching the stored rule."""
+    existing = {"freq": "monthly", "interval": 2, "bymonth": [10], "persist": False}
+    schedule = _translate_interval({"persist": True}, existing=existing)
+    assert schedule == {"freq": "monthly", "interval": 2, "bymonth": [10], "persist": True}
+
+
+@pytest.mark.parametrize(
+    ("obj", "match"),
+    [
+        ({"days": 14}, "duration shape was replaced"),
+        ({}, "frequency"),
+        ({"interval": 2}, "frequency"),
+        ({"frequency": "fortnightly"}, "frequency"),
+        ({"frequency": "daily", "until": "2027-03-31", "count": 3}, "mutually exclusive"),
+        ({"frequency": "daily", "bymonth": [13]}, "bymonth"),
+        ({"frequency": "daily", "count": 0}, "count"),
+    ],
+)
+def test_interval_validation_rejections(obj, match):
+    """Invalid interval objects raise ServiceValidationError."""
+    with pytest.raises(ServiceValidationError, match=match):
+        _translate_interval(obj)

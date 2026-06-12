@@ -16,9 +16,16 @@ from typing import Any
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.util import dt as dt_util
 
+from .models.interval import VALID_INTERVAL_FREQS
 from .models.scheduled import BYDAY_CODES, DAY_NAMES
 
 _FREQUENCIES = ("daily", "weekly", "monthly", "yearly")
+
+# Interval selector fields. Like the scheduled selector, the recurrence
+# fields form a full specification (``frequency`` required when any is
+# present); ``persist`` alone is a lifecycle tweak that keeps the rule.
+_INTERVAL_RECURRENCE_KEYS = ("frequency", "interval", "bymonth", "until", "count")
+_INTERVAL_ALLOWED_KEYS = (*_INTERVAL_RECURRENCE_KEYS, "persist")
 
 # Fields that define the recurrence rule itself. When any is present the
 # sub-object is treated as a full rule specification (``frequency``
@@ -71,6 +78,58 @@ def scheduled_selector_to_schedule(
             raise ServiceValidationError(msg)
 
     return {"rrule": rrule, "dtstart": dtstart.isoformat(), "persist": persist}
+
+
+def interval_selector_to_schedule(obj: dict[str, Any], *, existing: dict[str, Any]) -> dict[str, Any]:
+    """Validate an ``interval`` service sub-object and build the stored schedule.
+
+    Returns the complete schedule dict (``freq`` / ``interval`` / ``persist``
+    plus sparse ``bymonth`` / ``until`` / ``count``). Recurrence fields are a
+    full specification — omitted season/end keys are cleared; ``persist``
+    alone keeps the stored rule.
+    """
+    unknown = [key for key in obj if key not in _INTERVAL_ALLOWED_KEYS]
+    if unknown:
+        msg = (
+            f"Unknown interval field(s) {unknown!r}; valid fields are {list(_INTERVAL_ALLOWED_KEYS)!r}. "
+            "(The former duration shape was replaced — e.g. {'frequency': 'daily', 'interval': 14}.)"
+        )
+        raise ServiceValidationError(msg)
+
+    persist = bool(obj.get("persist", existing.get("persist", False)))
+
+    if not any(key in obj for key in _INTERVAL_RECURRENCE_KEYS):
+        if not existing.get("freq"):
+            msg = "interval requires 'frequency' when creating a chore"
+            raise ServiceValidationError(msg)
+        schedule = dict(existing)
+        schedule["persist"] = persist
+        return schedule
+
+    frequency = obj.get("frequency")
+    if frequency is None:
+        msg = "interval requires 'frequency' (one of minutely/hourly/daily/weekly/monthly/yearly)"
+        raise ServiceValidationError(msg)
+    if frequency not in VALID_INTERVAL_FREQS:
+        msg = f"Invalid interval frequency {frequency!r} (must be one of {VALID_INTERVAL_FREQS})"
+        raise ServiceValidationError(msg)
+    if "until" in obj and "count" in obj:
+        msg = "'until' and 'count' are mutually exclusive"
+        raise ServiceValidationError(msg)
+
+    schedule: dict[str, Any] = {
+        "freq": frequency,
+        "interval": _coerce_int(obj.get("interval", 1), "interval", minimum=1),
+        "persist": persist,
+    }
+    bymonth = _coerce_int_list(obj.get("bymonth"), "bymonth", 1, 12)
+    if bymonth:
+        schedule["bymonth"] = bymonth
+    if "until" in obj:
+        schedule["until"] = _parse_until(obj["until"]).isoformat()
+    if "count" in obj:
+        schedule["count"] = _coerce_int(obj["count"], "count", minimum=1)
+    return schedule
 
 
 def _synthesize_rrule(obj: dict[str, Any]) -> str:

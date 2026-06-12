@@ -389,6 +389,95 @@ async def test_count_chore_goes_terminal_and_is_swept(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_seasonal_interval_chore(hass, config_entry):
+    """Checkpoint: an interval chore with a season window stores it, and a
+    completion in a closed month lands the next due at the season opening."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Furnace Filter",
+            "interval": {"frequency": "monthly", "interval": 2, "bymonth": [10, 11, 12, 1, 2, 3]},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "Furnace Filter")
+    assert isinstance(chore, IntervalChore)
+    assert (chore.freq, chore.interval) == ("monthly", 2)
+    assert chore.bymonth == [10, 11, 12, 1, 2, 3]
+
+    # Complete it in February — the plan's example: Mar is month 1, Oct is
+    # month 2 → due Oct 10.
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": chore.uid, "completed_at": "2026-02-10T09:00:00-05:00"},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert refreshed is not None
+    next_due = refreshed.compute_next_due(datetime(2026, 2, 11, 9, 0, tzinfo=TZ))
+    assert next_due == datetime(2026, 10, 10, 9, 0, tzinfo=TZ)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_interval_count_exhaustion_and_update_reopens(hass, config_entry):
+    """An interval count chore goes terminal on the Nth completion; a
+    recurrence update reopens it (and clears the season/end fields)."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Medication Refill",
+            "interval": {"frequency": "daily", "interval": 3, "count": 2},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "Medication Refill")
+    assert isinstance(chore, IntervalChore)
+
+    for day, expect_terminal in ((1, False), (4, True)):
+        await hass.services.async_call(
+            DOMAIN,
+            "complete_item",
+            {
+                "entity_id": entity_id,
+                "item": chore.uid,
+                "completed_at": f"2026-06-0{day}T09:00:00-05:00",
+            },
+            blocking=True,
+        )
+        refreshed = store.get_chore(chore.uid)
+        assert refreshed is not None
+        assert refreshed.terminal is expect_terminal, f"after completion on day {day}"
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": chore.uid, "interval": {"frequency": "weekly"}},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert isinstance(refreshed, IntervalChore)
+    assert refreshed.terminal is False
+    assert (refreshed.freq, refreshed.interval) == ("weekly", 1)
+    # Full-replacement semantics: the count cleared with the new rule.
+    assert refreshed.count is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_update_scheduled_recurrence_clears_terminal(hass, config_entry):
     """A recurrence update re-enters an exhausted series."""
     entity_id = await _setup_with_chore(hass, config_entry)
