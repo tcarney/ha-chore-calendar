@@ -47,7 +47,7 @@
       "fields": {
         "frequency": {
           "name": "Repeat",
-          "description": "Daily, weekly, monthly, or yearly."
+          "description": "How often this chore recurs."
         },
         "interval": {
           "name": "Repeat interval",
@@ -55,7 +55,7 @@
         },
         "byday": {
           "name": "Weekdays",
-          "description": "Days of the week. Monthly/yearly rules also take an ordinal prefix as a custom value ('-1fri' = last Friday)."
+          "description": "Days of the week. Combine with 'Weekday position' for 'last Friday'-style rules (YAML also accepts '-1fri')."
         },
         "bymonthday": {
           "name": "Days of the month",
@@ -67,11 +67,11 @@
         },
         "bymonth": {
           "name": "Months",
-          "description": "Limit to these months (seasonal window)."
+          "description": "Season window — occurrences only in these months."
         },
         "dtstart": {
           "name": "Start",
-          "description": "Time of day ('08:00:00'), or a full datetime to set the phase when the repeat interval is above 1. Omit to keep the current start."
+          "description": "Time of day for every occurrence. In YAML, a full datetime sets the series start when the repeat interval is above 1."
         },
         "until": {
           "name": "End on",
@@ -82,8 +82,8 @@
           "description": "Total occurrences. Mutually exclusive with 'End on'."
         },
         "persist": {
-          "name": "Keep after series ends",
-          "description": "Keep the expired chore in storage (re-enterable via update_item) instead of sweeping it with hidden completed items."
+          "name": "Keep when finished",
+          "description": "Keep the chore after its series ends; otherwise hide_completed_items deletes it."
         }
       }
     },
@@ -91,11 +91,11 @@
       "fields": {
         "frequency": {
           "name": "Repeat",
-          "description": "Minutely, hourly, daily, weekly, monthly, or yearly."
+          "description": "Unit for 'Repeat interval'."
         },
         "interval": {
           "name": "Repeat interval",
-          "description": "Due this many units after the last completion (3 with monthly = after 3 months)."
+          "description": "Due this many units after the last completion (e.g. 3 months)."
         },
         "bymonth": {
           "name": "Months",
@@ -110,8 +110,8 @@
           "description": "Total completions. Mutually exclusive with 'End on'."
         },
         "persist": {
-          "name": "Keep after series ends",
-          "description": "Keep the expired chore in storage (re-enterable via update_item) instead of sweeping it with hidden completed items."
+          "name": "Keep when finished",
+          "description": "Keep the chore after its series ends; otherwise hide_completed_items deletes it."
         }
       }
     },
@@ -119,11 +119,11 @@
       "fields": {
         "due_datetime": {
           "name": "Due datetime",
-          "description": "When this chore is due. Omit to create an unscheduled chore that can be rescheduled later."
+          "description": "When this chore is due. Omit to leave it unscheduled."
         },
         "persist": {
-          "name": "Persist after completion",
-          "description": "When false (default), the chore is deleted on the next hide_completed_items / todo.remove_completed_items call. When true, the chore stays in storage so it can be reactivated via update_item."
+          "name": "Keep when finished",
+          "description": "Keep the chore after completion; otherwise hide_completed_items deletes it."
         }
       }
     },
@@ -171,11 +171,11 @@
         },
         "oneshot": {
           "name": "Oneshot",
-          "description": "Configure a non-recurring chore with a specific due datetime (or no date for an unscheduled item)."
+          "description": "A non-recurring chore with an optional due datetime."
         },
         "pending_period": {
           "name": "Pending period",
-          "description": "How long before the due time the chore reads as pending (upcoming, completable early). Default: 3 hours."
+          "description": "How long before the due time the chore reads as pending (completable early). Default: 3 hours."
         },
         "grace_period": {
           "name": "Grace period",
@@ -221,7 +221,7 @@
         },
         "oneshot": {
           "name": "Oneshot",
-          "description": "Update a oneshot chore's due datetime. Set due datetime to null to clear it."
+          "description": "New due datetime; null clears it (unscheduled)."
         },
         "pending_period": {
           "name": "Pending period",
@@ -269,7 +269,7 @@
         },
         "keep_skip": {
           "name": "Keep skip",
-          "description": "Preserve any active skip instead of clearing it. Useful when completing early but still wanting the deferral to hold."
+          "description": "Preserve an active skip instead of clearing it (e.g. completing early while keeping the deferral)."
         }
       }
     },
@@ -287,15 +287,15 @@
         },
         "range": {
           "name": "Range",
-          "description": "'This occurrence' skips just the targeted occurrence (scheduled default; not valid for interval chores). 'This and future' slides the whole series forward (interval default; a bare 'Until' implies it)."
+          "description": "'This occurrence' skips a single occurrence (scheduled only, and their default). 'This and future' slides the whole series (interval default; implied by 'Until')."
         },
         "recurrence_id": {
           "name": "Occurrence",
-          "description": "Identifies the occurrence to skip with 'This occurrence', in the form calendar events carry (e.g. 20260615T080000). Omit to skip the next upcoming one."
+          "description": "The occurrence to skip, as carried by calendar events (e.g. 20260615T080000). Defaults to the next upcoming one."
         },
         "until": {
           "name": "Until",
-          "description": "Datetime to defer the chore until, with 'This and future'. Omit to use the type-specific default: next occurrence for scheduled chores, now + interval for interval chores, or clear the due date for oneshot chores."
+          "description": "Defer until this datetime ('This and future'). Omit for the type default: next occurrence (scheduled), now + interval (interval), clear the due date (oneshot)."
         }
       }
     },
@@ -315,7 +315,7 @@
     },
     "hide_completed_items": {
       "name": "Hide completed items",
-      "description": "Set the per-list cutoff for hiding completed items from the calendar and todo entities. Items completed before the cutoff are hidden but their last_completed timestamps are preserved for state computation. Terminal-completed oneshot chores with persist=false are deleted from storage during this call.",
+      "description": "Hide items completed before a cutoff from the calendar and todo entities. Completion history is preserved; finished chores without 'Keep when finished' are deleted.",
       "fields": {
         "entity_id": {
           "name": "Entity",

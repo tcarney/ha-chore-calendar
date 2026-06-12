@@ -55,7 +55,7 @@ create_item:
               selector:
                 select:
                   multiple: true
-                  custom_value: true
+                  mode: list
                   options:
                     - label: Monday
                       value: mon
@@ -110,7 +110,7 @@ create_item:
                       value: "12"
             dtstart:
               selector:
-                text:
+                time:
             until:
               selector:
                 datetime:
@@ -132,17 +132,17 @@ create_item:
               selector:
                 select:
                   options:
-                    - label: Minutes
+                    - label: Minutely
                       value: minutely
-                    - label: Hours
+                    - label: Hourly
                       value: hourly
-                    - label: Days
+                    - label: Daily
                       value: daily
-                    - label: Weeks
+                    - label: Weekly
                       value: weekly
-                    - label: Months
+                    - label: Monthly
                       value: monthly
-                    - label: Years
+                    - label: Yearly
                       value: yearly
             interval:
               selector:
@@ -265,7 +265,7 @@ update_item:
               selector:
                 select:
                   multiple: true
-                  custom_value: true
+                  mode: list
                   options:
                     - label: Monday
                       value: mon
@@ -320,7 +320,7 @@ update_item:
                       value: "12"
             dtstart:
               selector:
-                text:
+                time:
             until:
               selector:
                 datetime:
@@ -341,17 +341,17 @@ update_item:
               selector:
                 select:
                   options:
-                    - label: Minutes
+                    - label: Minutely
                       value: minutely
-                    - label: Hours
+                    - label: Hourly
                       value: hourly
-                    - label: Days
+                    - label: Daily
                       value: daily
-                    - label: Weeks
+                    - label: Weekly
                       value: weekly
-                    - label: Months
+                    - label: Monthly
                       value: monthly
-                    - label: Years
+                    - label: Yearly
                       value: yearly
             interval:
               selector:
