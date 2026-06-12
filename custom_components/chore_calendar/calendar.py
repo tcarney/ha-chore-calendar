@@ -14,7 +14,7 @@ from homeassistant.util import dt as dt_util
 from . import chore_list_device_info
 from .const import LOGGER, ChoreStatus
 from .coordinator import ChoreCalendarCoordinator
-from .models import BaseChore
+from .models import BaseChore, ScheduledChore
 
 if TYPE_CHECKING:
     from . import ChoreCalendarConfigEntry
@@ -31,13 +31,17 @@ async def async_setup_entry(
 
 
 def _make_due_event(chore: BaseChore, now: datetime.datetime) -> CalendarEvent | None:
-    """Create a zero-duration calendar event at the chore's next due time.
+    """Create a zero-duration calendar event at the chore's operative due time.
 
     Events are emitted as point-in-time markers (start == end) rather than
     spanning the grace period — long grace windows would otherwise render as
     multi-day blocks on the calendar. The entity's ``state`` property is
     overridden so the ``on``/``off`` signal still reflects "any chore due or
     overdue" despite the zero-duration events.
+
+    Scheduled-chore markers that coincide with a grid occurrence carry the
+    series ``rrule`` and the occurrence's ``recurrence_id``; a skip-shifted
+    marker is a synthetic anchor with no series identity and carries neither.
     """
     due_range = chore.compute_due_range(now)
     if due_range is None:
@@ -48,26 +52,61 @@ def _make_due_event(chore: BaseChore, now: datetime.datetime) -> CalendarEvent |
     if chore.compute_status(now) != ChoreStatus.COMPLETED or due_at > now:
         # Current period is active, or the due window is still in the future
         # (interval chores report the upcoming window even when completed).
-        return CalendarEvent(
-            summary=chore.chore_name,
-            start=due_at,
-            end=due_at,
-            description=chore.description,
-            uid=chore.uid,
-        )
+        return _due_marker(chore, due_at)
 
     # Current period is completed — show the next one. Ask for next_due from
     # after the current period ends so we skip past it.
     next_due = chore.compute_next_due(overdue_at)
     if next_due is None or next_due <= due_at:
         return None
+    return _due_marker(chore, next_due)
+
+
+def _due_marker(chore: BaseChore, start: datetime.datetime) -> CalendarEvent:
+    """Build a zero-duration due event, attaching series fields when on-grid."""
+    rrule: str | None = None
+    recurrence_id: str | None = None
+    if isinstance(chore, ScheduledChore):
+        recurrence_id = chore.occurrence_recurrence_id(start)
+        if recurrence_id is not None:
+            rrule = chore.rrule
     return CalendarEvent(
         summary=chore.chore_name,
-        start=next_due,
-        end=next_due,
+        start=start,
+        end=start,
         description=chore.description,
         uid=chore.uid,
+        rrule=rrule,
+        recurrence_id=recurrence_id,
     )
+
+
+def _expand_future_occurrences(
+    chore: ScheduledChore,
+    operative_start: datetime.datetime,
+    now: datetime.datetime,
+    start_date: datetime.datetime,
+    end_date: datetime.datetime,
+) -> list[CalendarEvent]:
+    """Expand grid occurrences beyond the operative marker within the window.
+
+    The operative marker (pinned / skip-aware) represents the current
+    period; everything strictly after ``max(now, operative)`` is pure rrule
+    expansion, which also keeps occurrences deferred by an active
+    ``skipped_until`` out of the window. Past grid occurrences are
+    deliberately not re-emitted: history is represented by the completion
+    markers and the pinned operative period, so the raw grid would only add
+    phantom "missed" duplicates.
+    """
+    threshold = max(now, operative_start)
+    window_start = max(start_date, threshold)
+    if window_start >= end_date:
+        return []
+    return [
+        _due_marker(chore, occurrence)
+        for occurrence in chore.occurrences_between(window_start, end_date)
+        if occurrence > threshold
+    ]
 
 
 def _make_completed_event(
@@ -156,7 +195,13 @@ class ChoreCalendarListEntity(CoordinatorEntity[ChoreCalendarCoordinator], Calen
         start_date: datetime.datetime,
         end_date: datetime.datetime,
     ) -> list[CalendarEvent]:
-        """Return calendar events within a datetime range."""
+        """Return calendar events within a datetime range.
+
+        Per the HA calendar contract, recurring chores are returned
+        flattened: the operative (pinned / skip-aware) marker plus every
+        future grid occurrence inside the window, each carrying ``uid``,
+        the series ``rrule``, and its ``recurrence_id``.
+        """
         if self.coordinator.data is None:
             return []
         now = dt_util.now()
@@ -168,10 +213,18 @@ class ChoreCalendarListEntity(CoordinatorEntity[ChoreCalendarCoordinator], Calen
             completed_evt = _make_completed_event(chore, cleared_at)
             if completed_evt is not None and _overlaps(completed_evt, start_date, end_date):
                 events.append(completed_evt)
-            # Next due event.
+            # Operative due event (current period).
             due_evt = _make_due_event(chore, now)
-            if due_evt is not None and _overlaps(due_evt, start_date, end_date):
+            if due_evt is None:
+                continue
+            if _overlaps(due_evt, start_date, end_date):
                 events.append(due_evt)
+            # Future occurrences beyond the operative marker — scheduled
+            # chores only; interval/oneshot chores have no grid to expand.
+            # (The isinstance check on start narrows CalendarEvent's
+            # date | datetime union; due markers are always datetimes.)
+            if isinstance(chore, ScheduledChore) and isinstance(due_evt.start, datetime.datetime):
+                events.extend(_expand_future_occurrences(chore, due_evt.start, now, start_date, end_date))
         events.sort(key=lambda e: e.start)
         LOGGER.debug(
             "%s.async_get_events(%s → %s): %d event(s) (cleared_at=%s)",

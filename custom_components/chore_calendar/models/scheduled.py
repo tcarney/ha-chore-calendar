@@ -357,6 +357,35 @@ class ScheduledChore(BaseChore):
             return None
         return found.replace(tzinfo=ts.tzinfo)
 
+    def occurrences_between(self, start: datetime, end: datetime, *, limit: int = 366) -> list[datetime]:
+        """Grid occurrences in ``[start, end)``, localized to ``start.tzinfo``.
+
+        Capped at *limit* occurrences (the 365-step guard precedent) so a
+        pathological window stays cheap. Pure rrule expansion — pinning and
+        skip handling are the caller's concern.
+        """
+        naive_start = start.replace(tzinfo=None)
+        naive_end = end.replace(tzinfo=None)
+        rule = self._build_rule(self._rebased_dtstart(naive_start))
+        occurrences: list[datetime] = []
+        for occurrence in rule.xafter(naive_start, count=limit, inc=True):
+            if occurrence >= naive_end:
+                break
+            occurrences.append(occurrence.replace(tzinfo=start.tzinfo))
+        return occurrences
+
+    def occurrence_recurrence_id(self, ts: datetime) -> str | None:
+        """Compact iCalendar RECURRENCE-ID for *ts*, or None when off-grid.
+
+        Floating local time in the form ``local_calendar`` emits
+        (``20260615T080000``) — the round-trip key for per-occurrence
+        mutations. A ``skipped_until`` marker that does not coincide with a
+        grid occurrence has no series identity and yields None.
+        """
+        if self._next_occurrence(ts, inclusive=True) != ts:
+            return None
+        return ts.replace(tzinfo=None).strftime("%Y%m%dT%H%M%S")
+
     def _build_rule(self, dtstart: datetime) -> Any:
         """Parse the stored rrule anchored at *dtstart* (naive local)."""
         return du_rrule.rrulestr(self.rrule, dtstart=dtstart)
