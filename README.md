@@ -7,13 +7,13 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 ## Features
 
 - **Service-driven management**: Create, update, delete, and complete chores via service calls
-- **Calendar entity**: Read-only calendar per list showing upcoming and recently completed chores
+- **Calendar entity**: Read-only calendar per list showing every upcoming occurrence and recently completed chores
 - **Todo entity**: One todo list per chore list, surfacing chores through HA's native todo UI and Assist pipelines
 - **Sensor entities**: One sensor per chore tracking its current status and attributes
 - **Custom Lovelace card**: Built-in timeline card with per-entity filtering, colors, detail dialog, and configurable actions
 - **Tag scan auto-completion**: Assign NFC tags to chores for tap-to-complete; shared tags automatically resolve to the correct chore based on completion windows
-- **Flexible scheduling**: Scheduled (specific days/times), interval-based, and oneshot (one-time tasks with optional due date) chore types
-- **Skip occurrences**: Defer a chore's next occurrence without touching its completion history, with an explicit datetime or a type-specific default
+- **Flexible scheduling**: Calendar-grid recurrence (daily/weekly/monthly/yearly with weekday ordinals, month days, season windows, and end conditions), interval-based ("after N hours/days/months"), and oneshot (one-time tasks with optional due date) chore types
+- **Skip occurrences**: Skip a single occurrence or defer the whole series, without touching completion history
 - **Status events**: Fires events on chore created, status change, and chore deleted for use in automations
 - **Persistent storage**: Chore data stored locally — no external API or cloud dependency
 
@@ -58,7 +58,8 @@ data:
   entity_id: calendar.daily_chores
   chore_name: "Morning Medicine"
   scheduled:
-    time: "08:00:00"
+    frequency: daily
+    dtstart: "08:00:00"
 ```
 
 ### Add a Dashboard Card
@@ -91,6 +92,7 @@ These apply to all chore types:
 | Option | Required | Default | Description |
 | --- | --- | --- | --- |
 | `chore_name` | yes | — | Display name for the chore |
+| `description` | no | — | Free-text detail, shown in the card's detail dialog and on calendar events |
 | `pending_period` | no | 3 hours | How long before the due time the chore reads as `pending` (upcoming, completable early) |
 | `grace_period` | no | 1 hour | How long after the due time before the chore becomes `overdue` |
 | `trigger_entity` | no | — | A `tag.*` entity for NFC tap-to-complete (see [Tag Triggers](#tag-triggers)) |
@@ -118,22 +120,41 @@ The chore sensor's state is the chore's current status. Additional attributes ar
 
 #### Scheduled Chores
 
-Recur at a fixed time on specific days.
+Recur on a fixed calendar grid — the same recurrence options as a calendar event's repeat rule.
 
 | Option | Required | Default | Description |
 | --- | --- | --- | --- |
-| `time` | yes | — | Time of day the chore is due (e.g. `"08:00:00"`) |
-| `active_days` | no | all days | Days the chore is active: `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun` |
+| `frequency` | yes | — | `daily`, `weekly`, `monthly`, or `yearly` |
+| `interval` | no | `1` | Repeat every N frequency units (`2` with `weekly` = every other week) |
+| `byday` | no | — | Days of the week (`mon`–`sun`). Monthly/yearly rules also accept an ordinal prefix (`-1fri` = last Friday) |
+| `bymonthday` | no | — | Days of the month (`15`, or `-1` for the last day). Monthly/yearly only |
+| `bysetpos` | no | — | Nth match of `byday` within the month (`-1` = last). Requires `byday`; monthly/yearly only |
+| `bymonth` | no | — | Season window — months (1–12) the rule is active in |
+| `dtstart` | no | `08:00:00` | Time of day for every occurrence, or a full datetime to anchor the series phase when `interval` is above 1 |
+| `until` | no | — | The series ends after this date/datetime. Mutually exclusive with `count` |
+| `count` | no | — | The series ends after this many occurrences. Mutually exclusive with `until` |
+| `persist` | no | `false` | Keep the chore once the series ends; otherwise `hide_completed_items` deletes it |
 
-A never-completed scheduled chore pins to the first active-day scheduled time at or after `created_at`. Creating a chore past today's scheduled time pins to the next active day's period (so the chore reads `pending`, never immediately `due`). If that first cycle is missed, the chore stays `overdue` until completed — it does not silently roll forward to a later period.
+The rule is stored as an RFC 5545 RRULE, and the calendar entity shows every future occurrence in the queried window.
+
+A never-completed scheduled chore pins to the first occurrence at or after `created_at`. Creating a chore past today's occurrence pins to the next one (so the chore reads `pending`, never immediately `due`). If that first cycle is missed, the chore stays `overdue` until completed — it does not silently roll forward to a later period.
+
+With `until` or `count`, completing (or skipping past) the final occurrence ends the series: the chore reports `completed` permanently and is swept by the next `hide_completed_items` call unless `persist` is set. Uncompleting the final completion — or updating the recurrence — reopens it.
 
 #### Interval Chores
 
-Recur on a fixed interval from the last completion.
+Recur a fixed period after the last completion.
 
 | Option | Required | Default | Description |
 | --- | --- | --- | --- |
-| `interval` | yes | — | Time between occurrences (duration, e.g. `days: 90`) |
+| `frequency` | yes | — | `minutely`, `hourly`, `daily`, `weekly`, `monthly`, or `yearly` |
+| `interval` | no | `1` | Due this many frequency units after the last completion (`3` with `monthly` = after 3 months) |
+| `bymonth` | no | — | Season window — out-of-season months don't count toward the interval |
+| `until` | no | — | The series ends once the next due passes this. Mutually exclusive with `count` |
+| `count` | no | — | The series ends after this many completions. Mutually exclusive with `until` |
+| `persist` | no | `false` | Keep the chore once the series ends; otherwise `hide_completed_items` deletes it |
+
+Month and year intervals track the calendar — "after 3 months" from January 31 lands April 30, not 90 fixed days. With a season window, the interval clock only runs during the allowed months (a completion out of season starts the clock at the next season opening).
 
 A never-completed interval chore reports `pending` with no `next_due` until the first completion anchors the cycle. Tag-scan auto-completion still works in this state — the first scan establishes the cycle.
 
@@ -174,19 +195,42 @@ data:
   entity_id: calendar.daily_chores
   chore_name: "Morning Medicine"
   scheduled:
-    time: "08:00:00"
-    active_days: [mon, tue, wed, thu, fri]
+    frequency: weekly
+    byday: [mon, tue, wed, thu, fri]
+    dtstart: "08:00:00"
   trigger_entity: tag.morning_medicine_nfc
 
-# Interval chore — every 90 days
+# Scheduled chore — last Friday of every month
+action: chore_calendar.create_item
+data:
+  entity_id: calendar.daily_chores
+  chore_name: "Deep-Clean the Kitchen"
+  scheduled:
+    frequency: monthly
+    byday: [fri]
+    bysetpos: [-1]
+    dtstart: "09:00:00"
+
+# Interval chore — 90 days after the last completion
 action: chore_calendar.create_item
 data:
   entity_id: calendar.daily_chores
   chore_name: "Change Water Filter"
   interval:
-    days: 90
+    frequency: daily
+    interval: 90
   grace_period:
     days: 14
+
+# Interval chore — every 3 months, only October through March
+action: chore_calendar.create_item
+data:
+  entity_id: calendar.daily_chores
+  chore_name: "Change Furnace Filter"
+  interval:
+    frequency: monthly
+    interval: 3
+    bymonth: [10, 11, 12, 1, 2, 3]
 
 # Oneshot chore — single deadline with a 7-day pending window
 action: chore_calendar.create_item
@@ -241,21 +285,28 @@ data:
 
 ### Skip a Chore
 
-Defer a chore's next occurrence without recording a completion. `last_completed` is untouched — skipping does not count as doing the chore. While the skip is in force, the chore's status reports as `completed` and `next_due` becomes `skipped_until`; the normal state machine (pending window, grace period) runs around the deferred datetime.
+Defer a chore without recording a completion. `last_completed` is untouched — skipping does not count as doing the chore. While a skip is in force, the chore's status reports as `completed` and `next_due` becomes the deferred datetime; the normal state machine (pending window, grace period) runs around it.
 
-Provide `until` to pick the exact resume datetime, or omit it to use the type-specific default:
+Two modes, selected by `range` (matching HA's calendar vocabulary):
 
-- **Scheduled chores**: next active day's scheduled time strictly after now (overdue periods are stepped past).
-- **Interval chores**: `now + interval`.
-- **Oneshot chores**: clears `due_datetime`, leaving the chore unscheduled. Use `update_item` to set a new date. Skipping a terminal-completed oneshot raises an error.
+- **`THIS`** (scheduled default): skip a single occurrence. The targeted occurrence — the next upcoming one, or a specific one named by `recurrence_id` — is excluded from the series; the following occurrence is unaffected and the occurrence disappears from the calendar. `recurrence_id` uses the value calendar events carry (e.g. `20260615T080000`). Scheduled chores only.
+- **`THISANDFUTURE`** (interval default, implied by `until`): slide the whole series. Provide `until` for an exact resume datetime, or omit it for the type default: the next occurrence past now (scheduled), `now + interval` season-filtered (interval), or clearing `due_datetime` (oneshot — use `update_item` to reschedule).
 
 ```yaml
-# Default — skip to the next occurrence
+# Default — scheduled chores skip just the next occurrence
 action: chore_calendar.skip_item
 data:
   entity_id: sensor.daily_chores_morning_medicine
 
-# Explicit until — skip to a specific datetime
+# Skip a specific future occurrence
+action: chore_calendar.skip_item
+data:
+  entity_id: calendar.daily_chores
+  item: "Take out the trash"
+  range: THIS
+  recurrence_id: "20260615T080000"
+
+# Slide to an explicit datetime
 action: chore_calendar.skip_item
 data:
   entity_id: calendar.daily_chores
@@ -263,9 +314,9 @@ data:
   until: "2026-04-28 09:00:00"
 ```
 
-`until` takes a datetime — enter it directly in YAML or use the picker in Developer Tools.
+`until` takes a datetime — enter it directly in YAML or use the picker in Developer Tools. Skipping a chore whose `until`/`count` series has ended raises an error, and skipping past the final occurrence ends the series.
 
-Completing a skipped chore clears `skipped_until` (unless `keep_skip: true`). Uncompleting that completion restores the skip — the undo is symmetric with `last_completed`.
+Completing a skipped chore clears the skip — including a `THIS`-skipped occurrence, so the completion counts for the originally-skipped occurrence (unless `keep_skip: true`). Uncompleting that completion restores the full skip state — the undo is symmetric with `last_completed`.
 
 ### Uncomplete a Chore
 
@@ -288,7 +339,7 @@ The resulting `chore_calendar_status_changed` event carries `source: uncomplete`
 
 ### Hide Completed Items
 
-Set a per-list cutoff for hiding completed items from the calendar and todo entities. Items completed *before* the cutoff are hidden but their `last_completed` timestamps are preserved (recurring chores still compute state correctly; the next cycle reappears naturally). Terminal-completed oneshot chores with `persist: false` are deleted from storage during this call — fires `chore_calendar_item_deleted` for each.
+Set a per-list cutoff for hiding completed items from the calendar and todo entities. Items completed *before* the cutoff are hidden but their `last_completed` timestamps are preserved (recurring chores still compute state correctly; the next cycle reappears naturally). Finished chores without `persist` — completed oneshots, and recurring chores whose `until`/`count` series has ended — are deleted from storage during this call, firing `chore_calendar_item_deleted` for each.
 
 ```yaml
 # Hide all completed items as of now
@@ -320,8 +371,10 @@ data:
   entity_id: sensor.daily_chores_morning_medicine
   chore_name: "Morning Vitamins"
   scheduled:
-    time: "07:30:00"
+    dtstart: "07:30:00"
 ```
+
+Passing any recurrence field (`frequency`, `byday`, `until`, …) replaces the repeat rule, with `frequency` required; `dtstart` and `persist` alone tweak the start time or lifecycle while keeping the stored rule — as above. Updating the recurrence also reopens a chore whose `until`/`count` series had ended.
 
 ### Delete a Chore
 
@@ -442,10 +495,11 @@ hold_action:
 Tapping a chore row (default behavior) opens a detail dialog showing:
 
 - List name (with entity icon)
-- Schedule description
+- Schedule description (e.g. "Every month on the last Friday at 9:00 AM")
 - Assignee(s) (if assigned)
 - Trigger tag (if configured)
 - Last completed time and by whom (if set)
+- The chore's free-text description (if set)
 
 For non-completed chores, "Skip" and "Complete" buttons appear in the dialog footer. Skip defers the chore using the type-specific default (see [Skip a Chore](#skip-a-chore)); Complete records the completion and clears any active skip. For completed chores, an "Uncomplete" button is shown when `allow_uncomplete` is enabled — uncomplete restores the skip that was cleared by the completion.
 
@@ -515,7 +569,7 @@ data:
 
 ### `chore_calendar_item_deleted`
 
-Fired when a chore is removed from storage via `delete_item`, or swept by `hide_completed_items` for terminal-completed `persist=false` oneshots. Useful for cleanup automations or external sync.
+Fired when a chore is removed from storage via `delete_item`, or swept by `hide_completed_items` for finished `persist=false` chores. Useful for cleanup automations or external sync.
 
 ```yaml
 event_type: chore_calendar_item_deleted

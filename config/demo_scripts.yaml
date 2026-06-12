@@ -45,8 +45,9 @@ populate_sample_chores:
         chore_name: "Take out the trash"
         assigned_to: [person.bob]
         scheduled:
-          time: "19:30:00"
-          active_days: [mon, thu]
+          frequency: weekly
+          byday: [mon, thu]
+          dtstart: "19:30:00"
 
     - alias: Upcoming (counters)
       action: chore_calendar.create_item
@@ -54,7 +55,8 @@ populate_sample_chores:
         entity_id: "{{ calendar_entity }}"
         chore_name: "Wipe kitchen counters"
         scheduled:
-          time: "21:00:00"
+          frequency: daily
+          dtstart: "21:00:00"
 
     # Completed — create then complete so they land in the completed section.
     - alias: Completed (medicine)
@@ -64,14 +66,16 @@ populate_sample_chores:
         chore_name: "Morning medicine"
         assigned_to: [person.alice]
         scheduled:
-          time: "08:00:00"
+          frequency: daily
+          dtstart: "08:00:00"
     - alias: Completed (filter, interval anchored by completion)
       action: chore_calendar.create_item
       data:
         entity_id: "{{ calendar_entity }}"
         chore_name: "Change HVAC filter"
         interval:
-          days: 90
+          frequency: monthly
+          interval: 3
     - alias: Mark medicine complete
       action: chore_calendar.complete_item
       data:
