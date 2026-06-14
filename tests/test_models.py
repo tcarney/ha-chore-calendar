@@ -563,6 +563,32 @@ class TestScheduledRruleRepresentation:
                 rrule="FREQ=MINUTELY",
             )
 
+    @pytest.mark.parametrize("part", ["BYHOUR=9", "BYWEEKNO=3", "BYYEARDAY=100", "WKST=SU"])
+    def test_unsupported_rrule_part_raises(self, part):
+        """Parts outside the supported subset are rejected at construction.
+
+        dateutil tolerates the full RFC 5545 vocabulary; the integration only
+        supports INTERVAL/BYDAY/BYMONTHDAY/BYMONTH/BYSETPOS/COUNT/UNTIL, so an
+        out-of-subset part must fail rather than silently change enumeration.
+        """
+        with pytest.raises(ValueError, match="Unsupported rrule part"):
+            ScheduledChore(
+                uid="x",
+                chore_name="X",
+                chore_type=ChoreType.SCHEDULED,
+                rrule=f"FREQ=DAILY;{part}",
+            )
+
+    def test_supported_rrule_parts_accepted(self):
+        """A rule using every supported part constructs cleanly."""
+        chore = ScheduledChore(
+            uid="x",
+            chore_name="X",
+            chore_type=ChoreType.SCHEDULED,
+            rrule="FREQ=MONTHLY;INTERVAL=2;BYDAY=-1FR;BYMONTHDAY=15;BYMONTH=3;BYSETPOS=-1;COUNT=5",
+        )
+        assert chore.rrule.startswith("FREQ=MONTHLY")
+
     def test_from_schedule_v4_shape(self):
         """from_schedule loads the v4 storage shape directly."""
         chore = ScheduledChore.from_schedule(

@@ -19,6 +19,14 @@ BYDAY_CODES = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
 # calendar websocket validator allows.
 _VALID_FREQS = ("DAILY", "WEEKLY", "MONTHLY", "YEARLY")
 
+# RRULE parts the integration supports (matches the structured selector and
+# the §1 supported-parts contract). dateutil tolerates the full RFC 5545
+# vocabulary, so anything outside this set is rejected at construction rather
+# than silently altering enumeration. (ical's Recur model enforces the same
+# subset structurally — see card-crud-ui.md for adopting it as the canonical
+# parse/validate layer.)
+_SUPPORTED_RRULE_PARTS = frozenset({"FREQ", "INTERVAL", "BYDAY", "BYMONTHDAY", "BYMONTH", "BYSETPOS", "COUNT", "UNTIL"})
+
 # Phase-neutral anchor date used when a chore has neither an explicit
 # ``dtstart`` nor a ``created_at`` to derive one from (direct construction in
 # tests). Any date works while INTERVAL=1: BYDAY pins the weekdays of a weekly
@@ -102,9 +110,15 @@ class ScheduledChore(BaseChore):
         # model zeroed seconds in every computation) — normalize it away.
         self.dtstart = dtstart.replace(second=0, microsecond=0)
 
-        freq = _rrule_parts(self.rrule).get("FREQ")
-        if freq not in _VALID_FREQS:
+        parts = _rrule_parts(self.rrule)
+        if parts.get("FREQ") not in _VALID_FREQS:
             msg = f"Unsupported rrule for ScheduledChore: {self.rrule!r} (FREQ must be one of {_VALID_FREQS})"
+            raise ValueError(msg)
+        if unsupported := [key for key in parts if key not in _SUPPORTED_RRULE_PARTS]:
+            msg = (
+                f"Unsupported rrule part(s) {unsupported!r} in {self.rrule!r}; "
+                f"supported parts are {sorted(_SUPPORTED_RRULE_PARTS)}"
+            )
             raise ValueError(msg)
         # Full parse so malformed parts fail at construction, not in the
         # middle of a status computation.
