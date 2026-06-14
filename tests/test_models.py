@@ -665,6 +665,32 @@ class TestScheduledFiniteRules:
         assert chore.terminal is False
         assert chore.compute_next_due(now) == datetime(2026, 6, 3, 8, 0, tzinfo=TZ)
 
+    def test_until_walkback_pins_oldest_uncompleted_when_far_past_until(self):
+        """A finite UNTIL rule queried well past UNTIL still walks back to the
+        oldest uncompleted occurrence rather than collapsing to dtstart.
+
+        Regression: ``_rebased_dtstart`` rebased UNTIL rules toward ``now``,
+        shifting dtstart beyond UNTIL into an empty rule. ``_prev_occurrence``
+        then fell back to ``self._start`` (the series start), so the
+        walk-back mis-pinned to the first occurrence.
+        """
+        # Occurrences: Jun 1-5 at 08:00 (UNTIL inclusive of Jun 5 08:00).
+        chore = ScheduledChore(
+            uid="finite",
+            chore_name="Finite",
+            chore_type=ChoreType.SCHEDULED,
+            rrule="FREQ=DAILY;UNTIL=20260605T080000",
+            dtstart=datetime(2026, 6, 1, 8, 0),
+            pending_period=timedelta(hours=3),
+            grace_period=timedelta(hours=1),
+            last_completed=datetime(2026, 6, 2, 8, 30, tzinfo=TZ),
+        )
+        # Completed Jun 2 → Jun 3 is the oldest uncompleted occurrence.
+        # now is well past UNTIL (> two daily steps), the bug's trigger.
+        now = datetime(2026, 6, 20, 12, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2026, 6, 3, 8, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.OVERDUE
+
     def test_persist_round_trips(self):
         """persist survives serialization; stored schedules without it default False."""
         chore = self._count3()
@@ -760,6 +786,11 @@ class TestIntervalFreqRepresentation:
         """An unknown freq is rejected at construction."""
         with pytest.raises(ValueError, match="freq"):
             self._make("fortnightly", 1)
+
+    def test_zero_interval_rejected(self):
+        """interval must be >= 1 — a zero interval never advances the cycle."""
+        with pytest.raises(ValueError, match="interval"):
+            self._make("minutely", 0)
 
     def test_monthly_steps_track_the_calendar(self):
         """Monthly intervals step calendar months, clamping at short month ends."""

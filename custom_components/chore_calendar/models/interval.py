@@ -66,6 +66,12 @@ class IntervalChore(BaseChore):
         if self.freq not in VALID_INTERVAL_FREQS:
             msg = f"Unsupported interval freq: {self.freq!r} (must be one of {VALID_INTERVAL_FREQS})"
             raise ValueError(msg)
+        if self.interval < 1:
+            # A zero/negative interval never advances the cycle (next_due would
+            # equal last_completed). The service guards this (minimum=1); the
+            # invariant also covers migration and hand-edited storage.
+            msg = f"Invalid interval {self.interval!r} (must be >= 1)"
+            raise ValueError(msg)
         if any(month < 1 or month > 12 for month in self.bymonth):
             msg = f"Invalid bymonth {self.bymonth!r} (months must be 1-12)"
             raise ValueError(msg)

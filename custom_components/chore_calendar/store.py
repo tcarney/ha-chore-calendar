@@ -58,13 +58,16 @@ def _migrate_v4_interval_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
 
     Maps onto the largest exactly-dividing unit; anything that doesn't
     divide falls through to ``minutely`` (lossless by construction).
-    Missing ``interval_mins`` maps to the model default (1 day).
+    Missing ``interval_mins`` maps to the model default (1 day). A
+    degenerate ``interval_mins <= 0`` (the old v4 service had no minimum
+    guard) is clamped to a valid 1-minute interval so the cycle still
+    advances — the model rejects ``interval < 1`` outright.
     """
     mins = int(schedule.get("interval_mins", 1440))
     for freq, unit in _V4_UNIT_MINS.items():
         if mins >= unit and mins % unit == 0:
             return {"freq": freq, "interval": mins // unit}
-    return {"freq": "minutely", "interval": mins}
+    return {"freq": "minutely", "interval": max(1, mins)}
 
 
 class _ChoreCalendarStore(Store[dict[str, Any]]):

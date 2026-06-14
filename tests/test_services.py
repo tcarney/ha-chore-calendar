@@ -1409,6 +1409,35 @@ async def test_skip_item_scheduled_bare_until_still_slides(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_naive_until_is_coerced_to_local(hass, config_entry):
+    """A naive `until` (the README's documented form, no tz suffix) is coerced
+    to the local timezone so later status comparisons don't raise.
+
+    Regression: skip_item stored the naive datetime verbatim; the next status
+    computation compared it against the tz-aware natural anchor and raised
+    TypeError (can't compare offset-naive and offset-aware datetimes).
+    """
+    entity_id = await _setup_with_chore(hass, config_entry)
+    sched_uid = await _add_scheduled_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "skip_item",
+        {"entity_id": entity_id, "item": sched_uid, "until": "2026-04-10T08:00:00"},
+        blocking=True,
+    )
+
+    chore = config_entry.runtime_data.store.get_chore(sched_uid)
+    assert chore.skipped_until is not None
+    # Coerced to an aware datetime, preserving the wall-clock value.
+    assert chore.skipped_until.tzinfo is not None
+    assert chore.skipped_until.replace(tzinfo=None) == datetime(2026, 4, 10, 8, 0)
+    # Status computation must not raise comparing naive vs aware datetimes.
+    assert chore.compute_status(FROZEN_NOW) is not None
+    assert chore.compute_next_due(FROZEN_NOW) is not None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_skip_item_with_recurrence_id_targets_specific_occurrence(hass, config_entry):
     """An explicit recurrence_id exdates that occurrence without deferring
     the current cycle."""

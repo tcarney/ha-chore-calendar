@@ -447,12 +447,14 @@ class ScheduledChore(BaseChore):
         ``dtstart`` by whole interval steps preserves the occurrence grid
         exactly for DAILY/WEEKLY rules. MONTHLY/YEARLY have no fixed-length
         step and use the true anchor (acceptably slow: their occurrences are
-        sparse). COUNT-bearing rules are never rebased — the count is
-        anchored at dtstart, so shifting it would change which occurrences
-        exist; their enumeration cost is bounded by the count itself.
+        sparse). Finite (COUNT/UNTIL) rules are never rebased — COUNT is
+        anchored at dtstart, and rebasing an UNTIL rule toward ``near`` can
+        push dtstart past UNTIL into an empty rule (whose enumeration would
+        wrongly fall back to the series start). Their cost is bounded by the
+        count / the UNTIL horizon.
         """
         parts = _rrule_parts(self.rrule)
-        if "COUNT" in parts:
+        if "COUNT" in parts or "UNTIL" in parts:
             return self._start
         interval = int(parts.get("INTERVAL", "1"))
         freq = parts.get("FREQ")

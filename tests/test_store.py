@@ -353,3 +353,38 @@ async def test_storage_migration_v4_to_v5(hass):
     by_uid = {item["uid"]: item for item in persisted["items"]}
     assert by_uid["fortnight-uid"]["schedule"] == {"freq": "weekly", "interval": 2, "persist": False}
     assert by_uid["hours-uid"]["schedule"] == {"freq": "hourly", "interval": 4, "persist": False}
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_storage_migration_v4_zero_interval_clamped(hass):
+    """A degenerate v4 ``interval_mins=0`` migrates to a valid (>= 1) interval.
+
+    The old v4 service had no minimum guard, so a zero interval could land in
+    storage; left as ``{freq: minutely, interval: 0}`` it would never advance
+    the cycle (perpetually due). The migration clamps it instead.
+    """
+    entry_id = "migration_zero_entry"
+    key = f"{DOMAIN}.{entry_id}"
+
+    raw_store: Store[dict] = Store(hass, 4, key)
+    await raw_store.async_save(
+        {
+            "items": [
+                {
+                    "uid": "zero-uid",
+                    "chore_name": "Broken Interval",
+                    "chore_type": "interval",
+                    "schedule": {"interval_mins": 0},
+                    "pending_period_mins": 180,
+                    "grace_period_mins": 60,
+                },
+            ],
+        }
+    )
+
+    store = ChoreStore(hass, entry_id)
+    await store.async_load()
+
+    chore = store.get_chore("zero-uid")
+    assert isinstance(chore, IntervalChore)
+    assert (chore.freq, chore.interval) == ("minutely", 1)

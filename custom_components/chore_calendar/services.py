@@ -574,6 +574,11 @@ async def _async_handle_skip(call: ServiceCall) -> None:
             msg = "'recurrence_id' is only valid with range THIS"
             raise ServiceValidationError(msg)
         if explicit_until is not None:
+            # Coerce a naive `until` (YAML without a tz suffix) to local tz so
+            # storage and the skip-anchor comparison stay tz-aware — mirrors
+            # the hide_completed_items handler below.
+            if explicit_until.tzinfo is None:
+                explicit_until = explicit_until.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
             existing.skipped_until = explicit_until
             operative_anchor = explicit_until
         else:
