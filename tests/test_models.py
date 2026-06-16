@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta, timezone
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from custom_components.chore_calendar.const import ChoreStatus, ChoreType
-from custom_components.chore_calendar.models import BaseChore, IntervalChore, ScheduledChore
+from custom_components.chore_calendar.models import BaseChore, IntervalChore, ScheduledChore, scheduled as sched_mod
 
 # Use a fixed timezone for all tests.
 TZ = timezone(timedelta(hours=-5))
@@ -582,6 +583,26 @@ class TestScheduledRruleRepresentation:
             rrule="FREQ=MONTHLY;INTERVAL=2;BYDAY=-1FR;BYMONTHDAY=15;BYMONTH=3;BYSETPOS=-1;COUNT=5",
         )
         assert chore.rrule.startswith("FREQ=MONTHLY")
+
+    def test_rrule_parsed_once_not_per_query(self):
+        """The immutable rrule is parsed once at construction; status/next-due
+        computations re-anchor the cached rule rather than re-parsing the string."""
+        with patch.object(sched_mod.du_rrule, "rrulestr", side_effect=sched_mod.du_rrule.rrulestr) as spy:
+            chore = ScheduledChore(
+                uid="x",
+                chore_name="X",
+                chore_type=ChoreType.SCHEDULED,
+                rrule="FREQ=WEEKLY;BYDAY=MO,WE,FR",
+                dtstart=datetime(2026, 1, 5, 8, 0),
+                last_completed=datetime(2026, 3, 20, 8, 30, tzinfo=TZ),
+            )
+            assert spy.call_count == 1  # parsed once in __post_init__
+
+            now = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
+            for _ in range(3):
+                chore.compute_status(now)
+                chore.compute_next_due(now)
+            assert spy.call_count == 1  # no re-parse on the query hot path
 
     def test_from_schedule_v4_shape(self):
         """from_schedule loads the v4 storage shape directly."""

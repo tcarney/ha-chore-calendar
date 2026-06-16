@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import InitVar, dataclass
+from dataclasses import InitVar, dataclass, field
 from datetime import date, datetime, time as dt_time, timedelta
 from typing import Any, Self
 
@@ -88,6 +88,13 @@ class ScheduledChore(BaseChore):
     # todo.remove_completed_items sweep — the OneshotChore lifecycle. When
     # True the chore stays in storage, re-enterable via update_item.
     persist: bool = False
+    # Cached parse of ``rrule`` (set in ``__post_init__``). The rrule string
+    # is immutable after construction, so it is parsed once and re-anchored
+    # per query via ``_rule.replace(dtstart=...)`` instead of re-parsing the
+    # string on every enumeration (``compute_status`` runs several per
+    # coordinator tick). Excluded from init / repr / equality.
+    _rule: Any = field(init=False, repr=False, compare=False, default=None)
+    _parts: dict[str, str] = field(init=False, repr=False, compare=False, default_factory=dict)
     time: InitVar[dt_time | None] = None
     active_days: InitVar[list[str] | None] = None
 
@@ -110,19 +117,20 @@ class ScheduledChore(BaseChore):
         # model zeroed seconds in every computation) — normalize it away.
         self.dtstart = dtstart.replace(second=0, microsecond=0)
 
-        parts = _rrule_parts(self.rrule)
-        if parts.get("FREQ") not in _VALID_FREQS:
+        self._parts = _rrule_parts(self.rrule)
+        if self._parts.get("FREQ") not in _VALID_FREQS:
             msg = f"Unsupported rrule for ScheduledChore: {self.rrule!r} (FREQ must be one of {_VALID_FREQS})"
             raise ValueError(msg)
-        if unsupported := [key for key in parts if key not in _SUPPORTED_RRULE_PARTS]:
+        if unsupported := [key for key in self._parts if key not in _SUPPORTED_RRULE_PARTS]:
             msg = (
                 f"Unsupported rrule part(s) {unsupported!r} in {self.rrule!r}; "
                 f"supported parts are {sorted(_SUPPORTED_RRULE_PARTS)}"
             )
             raise ValueError(msg)
-        # Full parse so malformed parts fail at construction, not in the
-        # middle of a status computation.
-        du_rrule.rrulestr(self.rrule, dtstart=self.dtstart)
+        # Parse once and cache: enumeration re-anchors this rule via
+        # ``.replace(dtstart=...)`` rather than re-parsing the string, and a
+        # malformed rule still fails here at construction (not mid-computation).
+        self._rule = du_rrule.rrulestr(self.rrule, dtstart=self.dtstart)
 
     @property
     def _start(self) -> datetime:
@@ -235,8 +243,7 @@ class ScheduledChore(BaseChore):
 
     def _is_finite(self) -> bool:
         """Return True when the rrule carries UNTIL or COUNT."""
-        parts = _rrule_parts(self.rrule)
-        return "UNTIL" in parts or "COUNT" in parts
+        return "UNTIL" in self._parts or "COUNT" in self._parts
 
     def _find_current_period(self, now: datetime) -> datetime:
         """Find the period_due for the period that *now* falls into.
@@ -382,8 +389,12 @@ class ScheduledChore(BaseChore):
         return ts.replace(tzinfo=None).strftime("%Y%m%dT%H%M%S")
 
     def _build_rule(self, dtstart: datetime) -> Any:
-        """Parse the stored rrule anchored at *dtstart* (naive local)."""
-        return du_rrule.rrulestr(self.rrule, dtstart=dtstart)
+        """Re-anchor the cached parsed rrule at *dtstart* (naive local).
+
+        ``rrule.replace`` copies the parsed options onto a new rule without
+        re-parsing the string, so the per-query hot path avoids ``rrulestr``.
+        """
+        return self._rule.replace(dtstart=dtstart)
 
     def _rebased_dtstart(self, near: datetime) -> datetime:
         """Return a phase-preserving dtstart a couple of grid steps below *near*.
@@ -401,7 +412,7 @@ class ScheduledChore(BaseChore):
         wrongly fall back to the series start). Their cost is bounded by the
         count / the UNTIL horizon.
         """
-        parts = _rrule_parts(self.rrule)
+        parts = self._parts
         if "COUNT" in parts or "UNTIL" in parts:
             return self._start
         interval = int(parts.get("INTERVAL", "1"))
@@ -441,7 +452,7 @@ class ScheduledChore(BaseChore):
 
     def _derived_active_days(self) -> list[str]:
         """Day names from a weekly rule's BYDAY (preserving order), else empty."""
-        parts = _rrule_parts(self.rrule)
+        parts = self._parts
         if parts.get("FREQ") != "WEEKLY":
             return []
         names: list[str] = []
