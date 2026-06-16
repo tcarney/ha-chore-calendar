@@ -40,7 +40,7 @@ from .const import (
     ChoreType,
 )
 from .coordinator import ChoreCalendarCoordinator
-from .models import BaseChore, OneshotChore, ScheduledChore
+from .models import BaseChore, OneshotChore
 from .recurrence import interval_selector_to_schedule, scheduled_selector_to_schedule
 from .store import ChoreStore
 
@@ -53,13 +53,8 @@ ATTR_DESCRIPTION = "description"
 ATTR_ENTITY_ID = "entity_id"
 ATTR_KEEP_FOR = "keep_for"
 ATTR_KEEP_SKIP = "keep_skip"
-ATTR_RANGE = "range"
-ATTR_RECURRENCE_ID = "recurrence_id"
 ATTR_STATUS = "status"
 ATTR_UNTIL = "until"
-
-RANGE_THIS = "THIS"
-RANGE_THISANDFUTURE = "THISANDFUTURE"
 
 # Service field keys for schedule configuration.
 ATTR_SCHEDULED = "scheduled"
@@ -127,8 +122,6 @@ SERVICE_SKIP_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
         vol.Optional(ATTR_ITEM): cv.string,
-        vol.Optional(ATTR_RANGE): vol.In([RANGE_THIS, RANGE_THISANDFUTURE]),
-        vol.Optional(ATTR_RECURRENCE_ID): cv.string,
         vol.Optional(ATTR_UNTIL): cv.datetime,
     }
 )
@@ -507,20 +500,12 @@ async def _async_handle_uncomplete(call: ServiceCall) -> None:
 async def _async_handle_skip(call: ServiceCall) -> None:
     """Handle skip_item service call.
 
-    Two modes, aligned with HA's recurrence-range vocabulary (§3 of the
-    recurrence design), with a per-type default chosen to keep each type's
-    natural semantic:
-
-    - ``THIS`` (scheduled default): exdate just the targeted occurrence —
-      the next upcoming one, or an explicit ``recurrence_id``. The
-      following occurrence is unaffected. Interval chores have no fixed
-      grid and reject this mode; oneshots have a single occurrence.
-    - ``THISANDFUTURE`` (interval default): slide the series anchor — an
-      explicit ``until`` is taken verbatim, otherwise the type's
-      ``apply_default_skip`` applies (scheduled advances one occurrence,
-      interval slides ``now + interval`` season-filtered, oneshot clears
-      its ``due_datetime``). A bare ``until`` implies this mode, so
-      pre-range automations keep their meaning.
+    Defers a chore's current occurrence. With an explicit ``until``, sets
+    ``skipped_until`` directly (a naive value is coerced to local tz so
+    storage and the skip-anchor comparison stay tz-aware). Without it,
+    delegates to the chore's ``apply_default_skip`` for type-specific
+    behavior — scheduled advances one occurrence, interval slides
+    ``now + interval`` (season-filtered), oneshot clears its ``due_datetime``.
 
     The skip surfaces via ``chore_calendar_status_changed`` with
     ``source=skip``. Skipping an already-``completed`` chore (e.g. an
@@ -546,75 +531,27 @@ async def _async_handle_skip(call: ServiceCall) -> None:
         raise ServiceValidationError(msg)
 
     explicit_until: datetime | None = call.data.get(ATTR_UNTIL)
-    recurrence_id: str | None = call.data.get(ATTR_RECURRENCE_ID)
-    skip_range: str | None = call.data.get(ATTR_RANGE)
-    if skip_range is None:
-        # Per-type default; a bare `until` keeps its pre-range slide meaning.
-        if isinstance(existing, ScheduledChore) and explicit_until is None:
-            skip_range = RANGE_THIS
-        else:
-            skip_range = RANGE_THISANDFUTURE
-
-    if skip_range == RANGE_THIS:
-        if explicit_until is not None:
-            msg = "'until' is only valid with range THISANDFUTURE"
-            raise ServiceValidationError(msg)
-        if not isinstance(existing, ScheduledChore):
-            msg = (
-                f"Range THIS is not valid for a {existing.chore_type} chore — there is no "
-                "fixed occurrence grid to exclude from. Use THISANDFUTURE (the default)."
-            )
-            raise ServiceValidationError(msg)
-        try:
-            operative_anchor = existing.apply_occurrence_skip(dt_util.now(), _parse_recurrence_id(recurrence_id))
-        except ValueError as err:
-            raise ServiceValidationError(str(err)) from err
+    if explicit_until is not None:
+        # Coerce a naive `until` (YAML without a tz suffix) to local tz so
+        # storage and the skip-anchor comparison stay tz-aware — mirrors
+        # the hide_completed_items handler below.
+        if explicit_until.tzinfo is None:
+            explicit_until = explicit_until.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+        existing.skipped_until = explicit_until
+        operative_anchor: datetime | None = explicit_until
     else:
-        if recurrence_id is not None:
-            msg = "'recurrence_id' is only valid with range THIS"
-            raise ServiceValidationError(msg)
-        if explicit_until is not None:
-            # Coerce a naive `until` (YAML without a tz suffix) to local tz so
-            # storage and the skip-anchor comparison stay tz-aware — mirrors
-            # the hide_completed_items handler below.
-            if explicit_until.tzinfo is None:
-                explicit_until = explicit_until.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
-            existing.skipped_until = explicit_until
-            operative_anchor = explicit_until
-        else:
-            operative_anchor = existing.apply_default_skip(dt_util.now())
+        operative_anchor = existing.apply_default_skip(dt_util.now())
 
     coordinator.mark_source(uid, ChoreEventSource.SKIP)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()
 
-    skipped_id = existing.skip_exdate.isoformat() if skip_range == RANGE_THIS and existing.skip_exdate else None
     LOGGER.info(
-        "skipped %s (%s) [%s, exdate=%s] until %s",
+        "skipped %s (%s) until %s",
         existing.chore_name,
         uid,
-        skip_range,
-        skipped_id,
         operative_anchor.isoformat() if operative_anchor else "(cleared)",
     )
-
-
-def _parse_recurrence_id(recurrence_id: str | None) -> datetime | None:
-    """Parse a compact iCalendar recurrence-id into the targeted occurrence.
-
-    The format is the one the calendar entity emits (``20260615T080000``,
-    floating local time). Only syntax is validated here —
-    ``apply_occurrence_skip`` checks that the timestamp is an upcoming,
-    non-excluded grid occurrence.
-    """
-    if recurrence_id is None:
-        return None
-    try:
-        naive = datetime.strptime(recurrence_id, "%Y%m%dT%H%M%S")
-    except ValueError:
-        msg = f"Invalid recurrence_id {recurrence_id!r} (expected the compact form, e.g. '20260615T080000')"
-        raise ServiceValidationError(msg) from None
-    return naive.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
 
 
 async def _async_handle_hide_completed(call: ServiceCall) -> None:

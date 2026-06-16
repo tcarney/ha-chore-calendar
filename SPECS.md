@@ -72,7 +72,7 @@ The pre-`pending_at` fallthrough (when `now < pending_at` and no completion land
 completed → pending → due → overdue → (trigger) → completed
 ```
 
-- The recurrence is an RFC 5545 RRULE (`FREQ` limited to `DAILY|WEEKLY|MONTHLY|YEARLY`) plus a `dtstart` anchor in floating local time. Occurrence enumeration runs in naive local wall clock (DST reads as wall time); the grid is treated as bi-infinite, with `created_at` pinning — not `dtstart` — governing the first valid period. Per-occurrence `exdate` entries (THIS-mode skips) are holes in the grid everywhere: stepping, the walk-back, and calendar expansion.
+- The recurrence is an RFC 5545 RRULE (`FREQ` limited to `DAILY|WEEKLY|MONTHLY|YEARLY`) plus a `dtstart` anchor in floating local time. The rrule string is parsed once at construction and cached; per-query enumeration re-anchors the cached rule via `rrule.replace(dtstart=...)` rather than re-parsing. Occurrence enumeration runs in naive local wall clock (DST reads as wall time); the grid is treated as bi-infinite, with `created_at` pinning — not `dtstart` — governing the first valid period.
 - Period rolls forward at `pending_at` (= `period_due - pending_period`)
 - Between occurrences, stays `completed` until the next occurrence's `pending_at`
 - **Initial state (never-completed)**: pins to the first occurrence's `period_due` at or after `created_at` (the chore couldn't have been done before it existed). The state machine runs `pending → due → overdue` against that pinned period and **stays `overdue`** until first completion — the cycle does not silently roll forward past a missed initial period. Creating a chore mid-day after its scheduled time pins to the next occurrence (so the chore reads `pending`, not immediately `due`).
@@ -109,14 +109,11 @@ pending → due → overdue → (trigger) → completed [terminal for current oc
 
 Each chore carries a one-level undo slot (`previous_last_completed` / `previous_last_completed_by`). Completing saves the prior `last_completed` / `last_completed_by` into the slot; `uncomplete_item` restores them and clears the slot. There is no history log — exactly one completion is undoable at any time, and the slot is refreshed on every completion.
 
-A parallel `previous_skipped_until` slot holds any `skipped_until` value that a completion cleared (see [Skip](#skip)). Likewise `skip_exdate`/`previous_exdate` track the exdate added by the most recent THIS-mode skip: a completion that clears an active skip pops it from `exdate` (completing "after all" satisfies the originally-skipped occurrence). Uncomplete restores all of it in the same step.
+A parallel `previous_skipped_until` slot holds any `skipped_until` value that a completion cleared (see [Skip](#skip)); `uncomplete_item` restores it in the same step.
 
 ### Skip
 
-`skip_item` defers a chore without touching `last_completed` — skipping is distinct from completing, preserving an accurate record of when the task was really done. Two modes, selected by `range` (HA's recurrence-range vocabulary):
-
-- **`THIS`** (scheduled default; rejected for interval — no grid): appends the targeted occurrence's `DTSTART` to `exdate` — the occurrence becomes a hole in the series, the following occurrence is unaffected. The target defaults to the next upcoming occurrence (so follow-up skips advance one step each) or is named explicitly via `recurrence_id` (the compact form calendar events carry). When the target is the upcoming occurrence, `skipped_until` re-anchors strictly past now so the deferral reads as an explicit skip (dormant `completed`) — `_skip_anchor_active` treats equality as active for exactly this case. Skipping past the final occurrence of a finite rule exhausts the series.
-- **`THISANDFUTURE`** (interval default, implied by a bare `until`): the series slide described below.
+`skip_item` defers a chore's current occurrence without touching `last_completed` — skipping is distinct from completing, preserving an accurate record of when the task was really done. It shifts the operative anchor forward; the only argument is an optional `until`. With no `until` it delegates to the type's `apply_default_skip` (see *Defaults* below); with an explicit `until` it sets `skipped_until` to that datetime (a naive value is coerced to local tz). There is no per-occurrence `range` / `recurrence_id` surface — the integration is a chore tracker, not a calendar editor.
 
 - **`skipped_until` acts as the operative anchor** for scheduled and interval state machines:
   - *Scheduled*: `pending_at = skipped_until − pending_period`, `overdue_at = skipped_until + grace_period`
@@ -190,8 +187,6 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "grace_period_mins": 60,
         "terminal": false,
         "completion_count": 12,
-        "exdate": [],
-        "rdate": [],
         "trigger_tag_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
         "assigned_to": ["person.alice"],
         "created_at": "2026-03-01T10:00:00+00:00",
@@ -214,8 +209,6 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "grace_period_mins": 20160,
         "terminal": false,
         "completion_count": 2,
-        "exdate": [],
-        "rdate": [],
         "trigger_tag_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
         "assigned_to": [],
         "created_at": "2026-01-01T12:00:00+00:00",
@@ -236,8 +229,6 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
         "grace_period_mins": 0,
         "terminal": false,
         "completion_count": 0,
-        "exdate": [],
-        "rdate": [],
         "trigger_tag_id": null,
         "assigned_to": ["person.tom"],
         "created_at": "2026-03-15T09:00:00+00:00",
@@ -250,7 +241,7 @@ File: `.storage/chore_calendar.{entry_id}` (one per list)
 }
 ```
 
-Each item also carries the internal undo-slot fields (`previous_last_completed`, `previous_last_completed_by`, `previous_skipped_until`, `skip_exdate`, `previous_exdate`), omitted above for brevity. The interval `schedule` keys `bymonth`/`until`/`count` are serialized sparsely (only when set); `persist` is always present on all three types.
+Each item also carries the internal undo-slot fields (`previous_last_completed`, `previous_last_completed_by`, `previous_skipped_until`), omitted above for brevity. The interval `schedule` keys `bymonth`/`until`/`count` are serialized sparsely (only when set); `persist` is a cross-type `BaseChore` field serialized within each type's `schedule` sub-dict, always present on all three types.
 
 `completed_cleared_at` is a per-list field (alongside `items`) holding the cutoff set by `hide_completed_items`. New keys default to `null` for backward-compat — older stores that omit them load cleanly without a version bump.
 
@@ -258,7 +249,7 @@ Each item also carries the internal undo-slot fields (`previous_last_completed`,
 
 `terminal` is a top-level item field (default `false`) introduced in v3 alongside the period promotion. It encodes "current occurrence is satisfied and won't roll forward" — set by `apply_completion` for `OneshotChore`, and by `until`/`count` exhaustion for the recurring types. Stores written before the flag existed are backfilled at load time: a oneshot whose `last_completed` falls inside the current cycle's pending window comes back `terminal=true`. The legacy `previous_due_datetime` slot (used by an earlier "synthesize due_datetime on completion" rule) was dropped at the same time and is ignored on load.
 
-The recurrence-model work bumped storage twice: v3→v4 rewrote scheduled schedules from `{time, active_days}` to `{rrule, dtstart}` (the dtstart date anchored to `created_at`), and v4→v5 rewrote interval schedules from `{interval_mins}` to `{freq, interval}` via the largest exactly-dividing unit (lossless). All other recurrence-era fields (`description`, `completion_count`, `exdate`, `rdate`, `persist`, the skip-exdate slots, and the interval season/lifecycle keys) ride on load-time defaults with no further bumps.
+The recurrence-model work bumped storage twice: v3→v4 rewrote scheduled schedules from `{time, active_days}` to `{rrule, dtstart}` (the dtstart date anchored to `created_at`), and v4→v5 rewrote interval schedules from `{interval_mins}` to `{freq, interval}` via the largest exactly-dividing unit (lossless). All other recurrence-era fields (`description`, `completion_count`, `persist`, and the interval season/lifecycle keys) ride on load-time defaults with no further bumps.
 
 ## Lovelace Card
 

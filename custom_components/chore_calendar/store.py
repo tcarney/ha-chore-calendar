@@ -98,8 +98,8 @@ class _ChoreCalendarStore(Store[dict[str, Any]]):
         comes from the item's ``created_at`` (the series phase anchor —
         irrelevant at INTERVAL=1, but it must exist). Interval and oneshot
         schedules are unchanged. The other v4 additions (``description``,
-        ``completion_count``, ``exdate``, ``rdate``) ride on load-time
-        defaults in ``BaseChore.from_dict``.
+        ``completion_count``) ride on load-time defaults in
+        ``BaseChore.from_dict``.
 
         v4 → v5: rewrite each interval item's ``schedule`` dict from
         ``{interval_mins}`` to ``{freq, interval}``, mapped onto the largest

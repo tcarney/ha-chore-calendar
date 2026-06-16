@@ -331,15 +331,10 @@ class ScheduledChore(BaseChore):
         treat a non-decreasing step as "nothing earlier exists".
         """
         naive = ts.replace(tzinfo=None)
-        excluded = self._naive_exdates()
         rule = self._build_rule(self._rebased_dtstart(naive))
         found = rule.before(naive, inc=inclusive)
-        while found is not None and found in excluded:
-            found = rule.before(found, inc=False)
         if found is None:
             found = rule.after(naive, inc=True)
-            while found is not None and found in excluded:
-                found = rule.after(found, inc=False)
         if found is None:
             # Degenerate empty rule (e.g. UNTIL before dtstart).
             found = self._start
@@ -351,11 +346,8 @@ class ScheduledChore(BaseChore):
         None when a finite (UNTIL/COUNT) rule is exhausted at *ts*.
         """
         naive = ts.replace(tzinfo=None)
-        excluded = self._naive_exdates()
         rule = self._build_rule(self._rebased_dtstart(naive))
         found = rule.after(naive, inc=inclusive)
-        while found is not None and found in excluded:
-            found = rule.after(found, inc=False)
         if found is None:
             return None
         return found.replace(tzinfo=ts.tzinfo)
@@ -369,14 +361,11 @@ class ScheduledChore(BaseChore):
         """
         naive_start = start.replace(tzinfo=None)
         naive_end = end.replace(tzinfo=None)
-        excluded = self._naive_exdates()
         rule = self._build_rule(self._rebased_dtstart(naive_start))
         occurrences: list[datetime] = []
         for occurrence in rule.xafter(naive_start, count=limit, inc=True):
             if occurrence >= naive_end:
                 break
-            if occurrence in excluded:
-                continue
             occurrences.append(occurrence.replace(tzinfo=start.tzinfo))
         return occurrences
 
@@ -391,61 +380,6 @@ class ScheduledChore(BaseChore):
         if self._next_occurrence(ts, inclusive=True) != ts:
             return None
         return ts.replace(tzinfo=None).strftime("%Y%m%dT%H%M%S")
-
-    def apply_occurrence_skip(self, now: datetime, target: datetime | None) -> datetime | None:
-        """THIS-mode skip: exdate one occurrence; return the operative anchor.
-
-        With *target* None, the targeted occurrence defaults to the next
-        upcoming one — ``compute_next_due``'s reading, so a follow-up skip
-        exdates the current skip target (one more step forward) and a
-        pinned-overdue chore skips its pinned period — snapped onto the
-        grid when the anchor is off-grid (an explicit-``until`` skip). An
-        explicit *target* must be a non-excluded grid occurrence
-        (``ValueError`` otherwise — the service layer translates it).
-
-        When the targeted occurrence is that upcoming one, ``skipped_until``
-        re-anchors strictly past *now* (mirroring ``apply_default_skip``'s
-        walk, so a deeply-pinned overdue chore goes dormant rather than
-        staying overdue on the next missed occurrence), the deferral keeps
-        reading as an explicit skip (dormant COMPLETED — see
-        ``_skip_anchor_active``), and the exdate is held in the
-        ``skip_exdate`` undo slot. Exdating a *future* occurrence instead
-        leaves the current cycle untouched (a permanent hole, no undo
-        pairing). Skipping past the final occurrence of a finite rule
-        exhausts the series, mirroring ``apply_default_skip``.
-        """
-        upcoming = self.compute_next_due(now)
-        upcoming_grid = self._next_occurrence(upcoming, inclusive=True) if upcoming is not None else None
-        if target is None:
-            if upcoming_grid is None:
-                # Nothing left to skip — the series is exhausted.
-                self.skipped_until = None
-                self.terminal = True
-                return None
-            target = upcoming_grid
-        elif self._next_occurrence(target, inclusive=True) != target:
-            msg = f"{target.isoformat()} is not an upcoming occurrence (or is already skipped)"
-            raise ValueError(msg)
-
-        self.exdate.append(target)
-        if target != upcoming_grid:
-            # Future-occurrence hole — the current cycle is unaffected.
-            return self.compute_next_due(now)
-
-        self.skip_exdate = target
-        candidate = self._next_occurrence(target, inclusive=False)
-        while candidate is not None and candidate <= now:
-            candidate = self._next_occurrence(candidate, inclusive=False)
-        if candidate is None:
-            self.skipped_until = None
-            self.terminal = True
-            return None
-        self.skipped_until = candidate
-        return candidate
-
-    def _naive_exdates(self) -> set[datetime]:
-        """Exception dates as naive wall datetimes, for grid filtering."""
-        return {entry.replace(tzinfo=None) for entry in self.exdate}
 
     def _build_rule(self, dtstart: datetime) -> Any:
         """Parse the stored rrule anchored at *dtstart* (naive local)."""

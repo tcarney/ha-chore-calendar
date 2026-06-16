@@ -471,18 +471,6 @@ skip_item:
     item:
       selector:
         text:
-    range:
-      selector:
-        select:
-          options:
-            - label: This occurrence
-              value: "THIS"
-            - label: This and future
-              value: "THISANDFUTURE"
-    recurrence_id:
-      example: "20260615T080000"
-      selector:
-        text:
     until:
       selector:
         datetime:

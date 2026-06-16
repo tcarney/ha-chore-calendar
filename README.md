@@ -13,7 +13,7 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 - **Custom Lovelace card**: Built-in timeline card with per-entity filtering, colors, detail dialog, and configurable actions
 - **Tag scan auto-completion**: Assign NFC tags to chores for tap-to-complete; shared tags automatically resolve to the correct chore based on completion windows
 - **Flexible scheduling**: Calendar-grid recurrence (daily/weekly/monthly/yearly with weekday ordinals, month days, season windows, and end conditions), interval-based ("after N hours/days/months"), and oneshot (one-time tasks with optional due date) chore types
-- **Skip occurrences**: Skip a single occurrence or defer the whole series, without touching completion history
+- **Skip occurrences**: Skip the current occurrence or defer until a later datetime, without touching completion history
 - **Status events**: Fires events on chore created, status change, and chore deleted for use in automations
 - **Persistent storage**: Chore data stored locally — no external API or cloud dependency
 
@@ -287,26 +287,19 @@ data:
 
 Defer a chore without recording a completion. `last_completed` is untouched — skipping does not count as doing the chore. While a skip is in force, the chore's status reports as `completed` and `next_due` becomes the deferred datetime; the normal state machine (pending window, grace period) runs around it.
 
-Two modes, selected by `range` (matching HA's calendar vocabulary):
+Provide `until` to pick the exact resume datetime, or omit it to use the type-specific default:
 
-- **`THIS`** (scheduled default): skip a single occurrence. The targeted occurrence — the next upcoming one, or a specific one named by `recurrence_id` — is excluded from the series; the following occurrence is unaffected and the occurrence disappears from the calendar. `recurrence_id` uses the value calendar events carry (e.g. `20260615T080000`). Scheduled chores only.
-- **`THISANDFUTURE`** (interval default, implied by `until`): slide the whole series. Provide `until` for an exact resume datetime, or omit it for the type default: the next occurrence past now (scheduled), `now + interval` season-filtered (interval), or clearing `due_datetime` (oneshot — use `update_item` to reschedule).
+- **Scheduled chores**: the next occurrence.
+- **Interval chores**: `now + interval`.
+- **Oneshot chores**: clears `due_datetime`, leaving the chore unscheduled. Use `update_item` to set a new date. Skipping a terminal-completed oneshot raises an error.
 
 ```yaml
-# Default — scheduled chores skip just the next occurrence
+# Skip the current occurrence (scheduled → next occurrence, interval → now + interval)
 action: chore_calendar.skip_item
 data:
   entity_id: sensor.daily_chores_morning_medicine
 
-# Skip a specific future occurrence
-action: chore_calendar.skip_item
-data:
-  entity_id: calendar.daily_chores
-  item: "Take out the trash"
-  range: THIS
-  recurrence_id: "20260615T080000"
-
-# Slide to an explicit datetime
+# Defer until an explicit datetime
 action: chore_calendar.skip_item
 data:
   entity_id: calendar.daily_chores
@@ -316,7 +309,7 @@ data:
 
 `until` takes a datetime — enter it directly in YAML or use the picker in Developer Tools. Skipping a chore whose `until`/`count` series has ended raises an error, and skipping past the final occurrence ends the series.
 
-Completing a skipped chore clears the skip — including a `THIS`-skipped occurrence, so the completion counts for the originally-skipped occurrence (unless `keep_skip: true`). Uncompleting that completion restores the full skip state — the undo is symmetric with `last_completed`.
+Completing a skipped chore clears the skip, so the completion counts for the current cycle (unless `keep_skip: true`). Uncompleting that completion restores the prior skip state — the undo is symmetric with `last_completed`.
 
 ### Uncomplete a Chore
 

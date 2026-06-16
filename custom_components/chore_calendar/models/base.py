@@ -51,20 +51,6 @@ class BaseChore(abc.ABC):
     # zero. Reserved for interval-chore `count` lifecycle and future
     # event/metadata exposure under the RRULE work.
     completion_count: int = 0
-    # Per-occurrence exception dates (RFC 5545 EXDATE) and extra occurrence
-    # dates (RDATE). Exdates exclude occurrences from all enumeration on
-    # scheduled chores (THIS-mode skip); rdate is reserved for a future
-    # "add a one-off occurrence" service.
-    exdate: list[datetime] = field(default_factory=list)
-    rdate: list[datetime] = field(default_factory=list)
-    # THIS-skip undo machinery, mirroring the skipped_until slots:
-    # ``skip_exdate`` is the exdate added by the most recent THIS skip while
-    # that skip still defers the current cycle; a completion that clears the
-    # skip pops it from ``exdate`` into ``previous_exdate`` so
-    # ``revert_completion`` can restore the full skip state. Internal,
-    # not user-facing.
-    skip_exdate: datetime | None = None
-    previous_exdate: datetime | None = None
     # Window before the operative due time during which a chore reads as
     # PENDING (upcoming, completable early). Shared by all chore types.
     pending_period: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_PENDING_PERIOD_MINS))
@@ -211,17 +197,7 @@ class BaseChore(abc.ABC):
         When *clear_skip* is True (the default), any active ``skipped_until`` is
         moved to the undo slot and cleared. Pass False to preserve the skip —
         e.g. when the user completed early but still wants the deferral to hold.
-
-        A THIS-skip exdate that is still deferring the current cycle
-        (``skip_exdate`` set and the skip anchor active) is treated the same
-        way: clearing the skip pops it from ``exdate`` into
-        ``previous_exdate``, so completing "after all" satisfies the
-        original occurrence and ``revert_completion`` can restore the skip.
-        A stale ``skip_exdate`` (the natural cadence overtook the skip) stays
-        in ``exdate`` as history; only the slot is dropped.
         """
-        # Evaluate before the skip fields are mutated below.
-        skip_active = self._skip_anchor_active(timestamp)
         self.previous_last_completed = self.last_completed
         self.previous_last_completed_by = self.last_completed_by
         self.last_completed = timestamp
@@ -230,15 +206,8 @@ class BaseChore(abc.ABC):
         if clear_skip:
             self.previous_skipped_until = self.skipped_until
             self.skipped_until = None
-            self.previous_exdate = None
-            if self.skip_exdate is not None:
-                if skip_active:
-                    self._remove_exdate(self.skip_exdate)
-                    self.previous_exdate = self.skip_exdate
-                self.skip_exdate = None
         else:
             self.previous_skipped_until = None
-            self.previous_exdate = None
 
     def revert_completion(self) -> None:
         """Restore the previous completion state from the undo slot.
@@ -253,24 +222,13 @@ class BaseChore(abc.ABC):
         self.last_completed = self.previous_last_completed
         self.last_completed_by = self.previous_last_completed_by
         self.skipped_until = self.previous_skipped_until
-        if self.previous_exdate is not None:
-            self.exdate.append(self.previous_exdate)
-            self.skip_exdate = self.previous_exdate
         self.previous_last_completed = None
         self.previous_last_completed_by = None
         self.previous_skipped_until = None
-        self.previous_exdate = None
         # Floor at zero: chores stored before the counter existed load with
         # completion_count=0 even when last_completed is set, so a revert of
         # such a completion must not go negative.
         self.completion_count = max(0, self.completion_count - 1)
-
-    def _remove_exdate(self, target: datetime) -> None:
-        """Remove the first exdate matching *target* (by instant), if present."""
-        for index, entry in enumerate(self.exdate):
-            if entry == target:
-                del self.exdate[index]
-                return
 
     def _skip_anchor_active(self, now: datetime) -> bool:
         """Return True while ``skipped_until`` should override the type's normal anchor.
@@ -288,19 +246,13 @@ class BaseChore(abc.ABC):
         report ``skipped_until`` once the chore goes overdue, so the card's
         "overdue by" reading starts at zero from when the skip's grace
         elapsed instead of snapping back to a stale natural anchor.
-
-        Equality counts as active: a THIS-mode skip exdates the targeted
-        occurrence, which moves the natural anchor onto the same next
-        occurrence the skip points at — and the deferral must still read as
-        an explicit skip (dormant COMPLETED), not fall through to the
-        natural never-completed PENDING.
         """
         if self.skipped_until is None:
             return False
         natural = self._anchor_due_at(now)
         if natural is None:
             return True
-        return self.skipped_until >= natural
+        return self.skipped_until > natural
 
     @abc.abstractmethod
     def _schedule_to_dict(self) -> dict[str, Any]:
@@ -332,10 +284,6 @@ class BaseChore(abc.ABC):
             "grace_period_mins": int(self.grace_period.total_seconds() // 60),
             "terminal": self.terminal,
             "completion_count": self.completion_count,
-            "exdate": [item.isoformat() for item in self.exdate],
-            "rdate": [item.isoformat() for item in self.rdate],
-            "skip_exdate": self.skip_exdate.isoformat() if self.skip_exdate else None,
-            "previous_exdate": self.previous_exdate.isoformat() if self.previous_exdate else None,
             "trigger_tag_id": self.trigger_tag_id,
             "assigned_to": list(self.assigned_to),
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -412,20 +360,6 @@ def _extract_base_kwargs(data: dict[str, Any], chore_type: ChoreType) -> dict[st
         ),
         "terminal": bool(data.get("terminal", False)),
         "completion_count": int(data.get("completion_count", 0)),
-        "exdate": _parse_datetime_list(data.get("exdate", [])),
-        "rdate": _parse_datetime_list(data.get("rdate", [])),
-        "skip_exdate": _parse_optional_datetime(data.get("skip_exdate")),
-        "previous_exdate": _parse_optional_datetime(data.get("previous_exdate")),
         "pending_period": timedelta(minutes=data.get("pending_period_mins", DEFAULT_PENDING_PERIOD_MINS)),
         "grace_period": timedelta(minutes=data.get("grace_period_mins", DEFAULT_GRACE_PERIOD_MINS)),
     }
-
-
-def _parse_datetime_list(raw: list[str]) -> list[datetime]:
-    """Parse a list of ISO datetime strings, dropping unparsable entries."""
-    return [parsed for item in raw if (parsed := dt_util.parse_datetime(item)) is not None]
-
-
-def _parse_optional_datetime(raw: str | None) -> datetime | None:
-    """Parse an optional ISO datetime string."""
-    return dt_util.parse_datetime(raw) if raw else None
