@@ -17,7 +17,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.util import dt as dt_util
 
 from .models.interval import VALID_INTERVAL_FREQS
-from .models.scheduled import BYDAY_CODES, DAY_NAMES
+from .models.scheduled import BYDAY_CODES, DAY_NAMES, DEFAULT_TIME, FALLBACK_ANCHOR_DATE
 
 _FREQUENCIES = ("daily", "weekly", "monthly", "yearly")
 
@@ -36,11 +36,6 @@ _ALLOWED_KEYS = (*_RECURRENCE_KEYS, "dtstart", "persist")
 
 # Optional signed ordinal (1-53) + day name, e.g. "fri", "2mon", "-1fri".
 _BYDAY_RE = re.compile(r"^(?P<ordinal>[+-]?(?:[1-9]|[1-4]\d|5[0-3]))?(?P<day>[a-z]{3})$")
-
-_DEFAULT_TIME = dt_time(8, 0)
-# Phase-neutral fallback when neither an existing dtstart nor a created_at
-# is available — mirrors models.scheduled._FALLBACK_ANCHOR_DATE.
-_FALLBACK_ANCHOR_DATE = date(1970, 1, 1)
 
 
 def scheduled_selector_to_schedule(
@@ -225,7 +220,7 @@ def _resolve_dtstart(raw: Any, existing_iso: str | None, created_at: datetime | 
     if raw is None:
         if existing is not None:
             return existing
-        return datetime.combine(_anchor_date(existing, created_at), _DEFAULT_TIME)
+        return datetime.combine(_anchor_date(existing, created_at), DEFAULT_TIME)
 
     if isinstance(raw, datetime):
         return _floating_local(raw)
@@ -250,7 +245,7 @@ def _anchor_date(existing: datetime | None, created_at: datetime | None) -> date
         return existing.date()
     if created_at is not None:
         return created_at.date()
-    return _FALLBACK_ANCHOR_DATE
+    return FALLBACK_ANCHOR_DATE
 
 
 def _floating_local(value: datetime) -> datetime:

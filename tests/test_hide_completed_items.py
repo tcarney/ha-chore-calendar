@@ -172,6 +172,7 @@ async def test_sweep_deletes_persist_false_completed_oneshot(hass, config_entry)
         chore_type=ChoreType.ONESHOT,
         due_datetime=FROZEN_NOW - timedelta(hours=2),
         last_completed=FROZEN_NOW - timedelta(hours=1),
+        terminal=True,
         persist=False,
     )
     await store.async_create_chore(chore)
@@ -207,6 +208,7 @@ async def test_sweep_keeps_persist_true_completed_oneshot(hass, config_entry):
         chore_type=ChoreType.ONESHOT,
         due_datetime=FROZEN_NOW - timedelta(hours=2),
         last_completed=FROZEN_NOW - timedelta(hours=1),
+        terminal=True,
         persist=True,
     )
     await store.async_create_chore(chore)
@@ -282,6 +284,37 @@ async def test_sweep_does_not_delete_active_persist_false_oneshot(hass, config_e
         )
 
     assert store.get_chore("active-1") is not None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_sweep_keeps_rescheduled_completed_oneshot(hass, config_entry):
+    """A oneshot completed then rescheduled to a future due is kept — it has an
+    upcoming occurrence (terminal cleared), even though it reads COMPLETED while
+    dormant before the new pending window."""
+    calendar_id, _ = await _setup(hass, config_entry)
+    store = config_entry.runtime_data.store
+
+    chore = OneshotChore(
+        uid="rescheduled-1",
+        chore_name="File Taxes",
+        chore_type=ChoreType.ONESHOT,
+        due_datetime=FROZEN_NOW + timedelta(days=30),  # rescheduled into the future
+        last_completed=FROZEN_NOW - timedelta(hours=1),  # prior completion, before the cutoff
+        terminal=False,  # cleared by the reschedule
+        persist=False,
+    )
+    await store.async_create_chore(chore)
+    await _refresh(hass, config_entry, FROZEN_NOW)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "hide_completed_items",
+            {"entity_id": calendar_id},
+            blocking=True,
+        )
+
+    assert store.get_chore("rescheduled-1") is not None
 
 
 # ---------------------------------------------------------------------------

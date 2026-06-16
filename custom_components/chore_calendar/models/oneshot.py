@@ -29,11 +29,6 @@ class OneshotChore(BaseChore):
     """
 
     due_datetime: datetime | None = None
-    # When False (default), a terminal-completed oneshot is deleted from
-    # storage on the next hide_completed_items / todo.remove_completed_items
-    # sweep. When True, the chore stays in storage and can be reactivated
-    # via update_item by setting a new due_datetime.
-    persist: bool = False
 
     def _anchor_due_at(self, now: datetime) -> datetime | None:
         """Return ``due_datetime`` directly — may be None for unscheduled chores."""

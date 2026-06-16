@@ -45,6 +45,12 @@ class BaseChore(abc.ABC):
     # under future RRULE work). Cleared by `revert_completion` and by reschedule
     # paths that re-enter the cycle.
     terminal: bool = False
+    # When False (default), a terminal-completed chore is deleted on the next
+    # hide_completed_items / todo.remove_completed_items sweep; when True it
+    # stays in storage, re-enterable via update_item. Cross-type lifecycle
+    # alongside `terminal` (the OneshotChore pattern, extended to UNTIL/COUNT
+    # recurring chores). Serialized within each type's `schedule` sub-dict.
+    persist: bool = False
     # Lifetime completion counter — incremented by `apply_completion` and
     # decremented by `revert_completion` so the undo path stays symmetric.
     # Not backfillable for chores predating the field; counts forward from

@@ -57,9 +57,6 @@ class IntervalChore(BaseChore):
     # ``until`` is floating local time, matching the scheduled model.
     until: datetime | None = None
     count: int | None = None
-    # When False (default), a terminal interval chore (until/count
-    # exhausted) is deleted on the next hide_completed_items sweep.
-    persist: bool = False
 
     def __post_init__(self) -> None:
         """Validate the schedule fields."""

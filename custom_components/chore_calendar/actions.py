@@ -18,7 +18,6 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .const import EVENT_ITEM_DELETED, LOGGER, ChoreEventSource, ChoreStatus
-from .models import IntervalChore, OneshotChore, ScheduledChore
 
 if TYPE_CHECKING:
     from .coordinator import ChoreCalendarCoordinator
@@ -113,19 +112,17 @@ async def async_apply_completed_cleared_at(
     now = dt_util.now()
     swept = 0
     for chore in list(store.get_all_chores().values()):
-        if isinstance(chore, (IntervalChore, ScheduledChore)):
-            # Recurring chores are only swept once their series is exhausted.
-            if not chore.terminal:
-                continue
-        elif not isinstance(chore, OneshotChore):
-            continue
-        if chore.persist:
+        # Sweep only terminal-completed chores not flagged to persist. The
+        # `terminal` gate is uniform: a completed oneshot is terminal
+        # (apply_completion sets it), and a recurring chore is terminal only
+        # once its UNTIL/COUNT series is exhausted — so a dormant-between-cycles
+        # recurring chore, or a rescheduled (re-activated) oneshot, is kept.
+        if not chore.terminal or chore.persist:
             continue
         if chore.last_completed is None or chore.last_completed >= cleared_at:
             continue
         if chore.compute_status(now) != ChoreStatus.COMPLETED:
             continue
-        # Eligible: terminal-completed, pre-cutoff, and not flagged to persist.
         await store.async_delete_chore(chore.uid)
         hass.bus.async_fire(
             EVENT_ITEM_DELETED,
@@ -137,7 +134,7 @@ async def async_apply_completed_cleared_at(
             },
         )
         LOGGER.info(
-            "deleted persist=false oneshot %s (%s)",
+            "deleted persist=false chore %s (%s)",
             chore.chore_name,
             chore.uid,
         )

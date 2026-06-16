@@ -31,8 +31,8 @@ _SUPPORTED_RRULE_PARTS = frozenset({"FREQ", "INTERVAL", "BYDAY", "BYMONTHDAY", "
 # ``dtstart`` nor a ``created_at`` to derive one from (direct construction in
 # tests). Any date works while INTERVAL=1: BYDAY pins the weekdays of a weekly
 # rule and a daily rule occurs every day.
-_FALLBACK_ANCHOR_DATE = date(1970, 1, 1)
-_DEFAULT_TIME = dt_time(8, 0)
+FALLBACK_ANCHOR_DATE = date(1970, 1, 1)
+DEFAULT_TIME = dt_time(8, 0)
 
 
 def active_days_to_rrule(active_days: list[str]) -> str:
@@ -83,11 +83,6 @@ class ScheduledChore(BaseChore):
 
     rrule: str = "FREQ=DAILY"
     dtstart: datetime | None = None
-    # When False (default), a terminal scheduled chore (UNTIL/COUNT
-    # exhausted) is deleted from storage on the next hide_completed_items /
-    # todo.remove_completed_items sweep — the OneshotChore lifecycle. When
-    # True the chore stays in storage, re-enterable via update_item.
-    persist: bool = False
     # Cached parse of ``rrule`` (set in ``__post_init__``). The rrule string
     # is immutable after construction, so it is parsed once and re-anchored
     # per query via ``_rule.replace(dtstart=...)`` instead of re-parsing the
@@ -108,8 +103,8 @@ class ScheduledChore(BaseChore):
             # dtstart is floating local time — strip a stray timezone.
             dtstart = dtstart.replace(tzinfo=None)
         if dtstart is None:
-            tod = time if time is not None else _DEFAULT_TIME
-            anchor = self.created_at.date() if self.created_at is not None else _FALLBACK_ANCHOR_DATE
+            tod = time if time is not None else DEFAULT_TIME
+            anchor = self.created_at.date() if self.created_at is not None else FALLBACK_ANCHOR_DATE
             dtstart = datetime.combine(anchor, tod)
         elif time is not None:
             dtstart = datetime.combine(dtstart.date(), time)
