@@ -40,10 +40,11 @@ class BaseChore(abc.ABC):
     previous_skipped_until: datetime | None = None
     # When True, the current occurrence is satisfied terminally — compute_status
     # short-circuits to COMPLETED and compute_due_range/compute_next_due return
-    # None. Set by `apply_completion` for types whose current occurrence does
-    # not roll forward (OneshotChore today; UNTIL/COUNT-exhausted ScheduledChore
-    # under future RRULE work). Cleared by `revert_completion` and by reschedule
-    # paths that re-enter the cycle.
+    # None. Set by `apply_completion` via the `_completion_is_terminal` hook for
+    # types whose completion does not roll forward (every OneshotChore
+    # completion; an UNTIL/COUNT-exhausted ScheduledChore or IntervalChore).
+    # Cleared by `revert_completion` and by reschedule paths that re-enter the
+    # cycle.
     terminal: bool = False
     # When False (default), a terminal-completed chore is deleted on the next
     # hide_completed_items / todo.remove_completed_items sweep; when True it
@@ -54,8 +55,8 @@ class BaseChore(abc.ABC):
     # Lifetime completion counter — incremented by `apply_completion` and
     # decremented by `revert_completion` so the undo path stays symmetric.
     # Not backfillable for chores predating the field; counts forward from
-    # zero. Reserved for interval-chore `count` lifecycle and future
-    # event/metadata exposure under the RRULE work.
+    # zero. Drives the interval-chore `count` lifecycle (an interval occurrence
+    # exists only once completed, so completions are its occurrences).
     completion_count: int = 0
     # Window before the operative due time during which a chore reads as
     # PENDING (upcoming, completable early). Shared by all chore types.
@@ -170,14 +171,19 @@ class BaseChore(abc.ABC):
             return None
         return (due_at, due_at + self.grace_period)
 
-    @abc.abstractmethod
     def compute_next_due(self, now: datetime) -> datetime | None:
-        """Compute the next due datetime, or None if not applicable.
+        """Return the next due datetime, or None when not applicable.
 
-        Per-type because the cadence-advancement rules genuinely differ:
-        scheduled walks active days, interval adds ``interval`` to
-        ``last_completed``, oneshot has no advancement (terminal).
+        Default implementation: a terminal chore has no next due; otherwise
+        the skip-aware operative anchor *is* the next due. This is exactly
+        right for ``IntervalChore`` and ``OneshotChore``, whose next due is
+        their operative anchor. ``ScheduledChore`` overrides this — its grid
+        next-due pins to the overdue period and otherwise rolls to the
+        following occurrence, semantics the operative anchor doesn't capture.
         """
+        if self.terminal:
+            return None
+        return self._operative_due_at(now)
 
     @abc.abstractmethod
     def apply_default_skip(self, now: datetime) -> datetime | None:
@@ -203,6 +209,11 @@ class BaseChore(abc.ABC):
         When *clear_skip* is True (the default), any active ``skipped_until`` is
         moved to the undo slot and cleared. Pass False to preserve the skip —
         e.g. when the user completed early but still wants the deferral to hold.
+
+        After the completion is recorded, ``_completion_is_terminal`` decides
+        whether it ends the chore's series (every oneshot completion; an
+        ``until`` / ``count``-exhausted recurring completion). The hook runs
+        last so it sees the updated ``completion_count`` and ``last_completed``.
         """
         self.previous_last_completed = self.last_completed
         self.previous_last_completed_by = self.last_completed_by
@@ -214,13 +225,29 @@ class BaseChore(abc.ABC):
             self.skipped_until = None
         else:
             self.previous_skipped_until = None
+        if self._completion_is_terminal(timestamp):
+            self.terminal = True
+
+    def _completion_is_terminal(self, timestamp: datetime) -> bool:
+        """Return True when the just-recorded completion ends the series.
+
+        Default False — a recurring chore rolls forward to its next cycle.
+        ``OneshotChore`` overrides to True (every completion is terminal);
+        ``ScheduledChore`` / ``IntervalChore`` override to test their
+        ``until`` / ``count`` lifecycle. Called by ``apply_completion`` after
+        the completion is recorded.
+        """
+        del timestamp
+        return False
 
     def revert_completion(self) -> None:
         """Restore the previous completion state from the undo slot.
 
         Also restores ``skipped_until`` if it was cleared by the completion,
-        keeping skip state symmetric with the other previous-* fields.
-        Raises ValueError if there is no completion to revert.
+        keeping skip state symmetric with the other previous-* fields, and
+        clears ``terminal`` — reverting a completion always reopens the cycle,
+        for every chore type. Raises ValueError if there is no completion to
+        revert.
         """
         if self.last_completed is None:
             msg = "Chore has no completion to revert."
@@ -231,6 +258,7 @@ class BaseChore(abc.ABC):
         self.previous_last_completed = None
         self.previous_last_completed_by = None
         self.previous_skipped_until = None
+        self.terminal = False
         # Floor at zero: chores stored before the counter existed load with
         # completion_count=0 even when last_completed is set, so a revert of
         # such a completion must not go negative.

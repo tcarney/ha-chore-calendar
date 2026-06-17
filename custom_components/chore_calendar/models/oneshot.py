@@ -35,36 +35,17 @@ class OneshotChore(BaseChore):
         del now  # oneshot's anchor is fixed; no time-relative resolution needed.
         return self.due_datetime
 
-    def compute_next_due(self, now: datetime) -> datetime | None:
-        """Return the operative due datetime, or None when terminal/unscheduled."""
-        if self.terminal:
-            return None
-        if self._skip_anchor_active(now):
-            return self.skipped_until
-        return self.due_datetime
+    def _completion_is_terminal(self, timestamp: datetime) -> bool:
+        """Every oneshot completion is terminal — there is no next occurrence.
 
-    def apply_completion(
-        self,
-        timestamp: datetime,
-        completed_by: str | None,
-        *,
-        clear_skip: bool = True,
-    ) -> None:
-        """Record a completion and mark the occurrence terminal.
-
-        ``terminal=True`` is the explicit signal that the current occurrence
-        is satisfied and won't roll forward. ``due_datetime`` is left as-is
-        — a never-scheduled completion (Path A) keeps ``due_datetime=None``,
-        and a normally-scheduled completion keeps the original date for
-        history. Reschedule via ``update_item`` clears the flag.
+        ``terminal=True`` is the explicit signal that the occurrence is
+        satisfied and won't roll forward. ``due_datetime`` is left as-is — a
+        never-scheduled completion keeps ``due_datetime=None``, a normally
+        scheduled one keeps its date for history. Reschedule via
+        ``update_item`` clears the flag.
         """
-        self.terminal = True
-        super().apply_completion(timestamp, completed_by, clear_skip=clear_skip)
-
-    def revert_completion(self) -> None:
-        """Revert a completion and clear the terminal flag."""
-        super().revert_completion()
-        self.terminal = False
+        del timestamp
+        return True
 
     def apply_default_skip(self, now: datetime) -> datetime | None:
         """Clear ``due_datetime`` rather than picking a new anchor.

@@ -184,35 +184,11 @@ class IntervalChore(BaseChore):
             return None
         return self._next_due_from(self.last_completed)
 
-    def compute_next_due(self, now: datetime) -> datetime | None:
-        """Return the next due datetime, or None when unscheduled/terminal."""
-        if self.terminal:
-            return None
-        if self._skip_anchor_active(now):
-            return self.skipped_until
-        if self.last_completed is None:
-            return None
-        return self._next_due_from(self.last_completed)
-
-    def apply_completion(
-        self,
-        timestamp: datetime,
-        completed_by: str | None,
-        *,
-        clear_skip: bool = True,
-    ) -> None:
-        """Record a completion; ``count`` / ``until`` exhaustion ends the series."""
-        super().apply_completion(timestamp, completed_by, clear_skip=clear_skip)
+    def _completion_is_terminal(self, timestamp: datetime) -> bool:
+        """End the series once ``count`` completions or the ``until`` date pass."""
         if self.count is not None and self.completion_count >= self.count:
-            self.terminal = True
-            return
-        if self.until is not None and self._next_due_from(timestamp).replace(tzinfo=None) > self.until:
-            self.terminal = True
-
-    def revert_completion(self) -> None:
-        """Revert a completion, reopening an exhausted series."""
-        super().revert_completion()
-        self.terminal = False
+            return True
+        return self.until is not None and self._next_due_from(timestamp).replace(tzinfo=None) > self.until
 
     def apply_default_skip(self, now: datetime) -> datetime | None:
         """Skip by one full (season-filtered) interval from *now*.

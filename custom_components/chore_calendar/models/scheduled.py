@@ -212,29 +212,17 @@ class ScheduledChore(BaseChore):
         self.skipped_until = candidate
         return candidate
 
-    def apply_completion(
-        self,
-        timestamp: datetime,
-        completed_by: str | None,
-        *,
-        clear_skip: bool = True,
-    ) -> None:
-        """Record a completion; exhausting a finite rule marks the chore terminal.
+    def _completion_is_terminal(self, timestamp: datetime) -> bool:
+        """End the series when the finite (UNTIL/COUNT) rule has no occurrence left.
 
         Completing the final occurrence of an UNTIL/COUNT rule ends the
-        series — ``terminal=True`` is the same "won't roll forward" signal
-        ``OneshotChore`` uses, and the persist sweep keys off it.
+        series — the same "won't roll forward" signal ``OneshotChore`` uses,
+        and the persist sweep keys off it.
         """
-        super().apply_completion(timestamp, completed_by, clear_skip=clear_skip)
-        if self._is_finite():
-            period = self._find_current_period(timestamp)
-            if self._find_next_active_day(period) is None:
-                self.terminal = True
-
-    def revert_completion(self) -> None:
-        """Revert a completion, reopening an exhausted series."""
-        super().revert_completion()
-        self.terminal = False
+        if not self._is_finite():
+            return False
+        period = self._find_current_period(timestamp)
+        return self._find_next_active_day(period) is None
 
     def _is_finite(self) -> bool:
         """Return True when the rrule carries UNTIL or COUNT."""
