@@ -287,6 +287,37 @@ async def test_sweep_does_not_delete_active_persist_false_oneshot(hass, config_e
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_sweep_keeps_terminal_completed_after_cutoff(hass, config_entry):
+    """A terminal-completed chore whose completion is after the cutoff is kept —
+    only completions strictly before the cutoff are swept."""
+    calendar_id, _ = await _setup(hass, config_entry)
+    store = config_entry.runtime_data.store
+
+    chore = OneshotChore(
+        uid="recent-1",
+        chore_name="File Taxes",
+        chore_type=ChoreType.ONESHOT,
+        due_datetime=FROZEN_NOW - timedelta(days=2),
+        last_completed=FROZEN_NOW - timedelta(hours=1),
+        terminal=True,
+        persist=False,
+    )
+    await store.async_create_chore(chore)
+    await _refresh(hass, config_entry, FROZEN_NOW)
+
+    # Cutoff months before the completion → kept (last_completed >= cleared_at).
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "hide_completed_items",
+            {"entity_id": calendar_id, "before": "2026-01-01T00:00:00-05:00"},
+            blocking=True,
+        )
+
+    assert store.get_chore("recent-1") is not None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_sweep_keeps_rescheduled_completed_oneshot(hass, config_entry):
     """A oneshot completed then rescheduled to a future due is kept — it has an
     upcoming occurrence (terminal cleared), even though it reads COMPLETED while

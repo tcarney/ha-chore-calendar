@@ -833,6 +833,15 @@ class TestIntervalFreqRepresentation:
         with pytest.raises(ValueError, match="interval"):
             self._make("minutely", 0)
 
+    def test_sub_day_freqs_step_by_unit(self):
+        """minutely / hourly intervals step by the unit (lossless-migration freqs)."""
+        hourly = self._make("hourly", 4, last_completed=datetime(2026, 3, 1, 8, 0, tzinfo=TZ))
+        assert hourly.compute_next_due(datetime(2026, 3, 1, 9, 0, tzinfo=TZ)) == datetime(2026, 3, 1, 12, 0, tzinfo=TZ)
+        minutely = self._make("minutely", 90, last_completed=datetime(2026, 3, 1, 8, 0, tzinfo=TZ))
+        assert minutely.compute_next_due(datetime(2026, 3, 1, 8, 30, tzinfo=TZ)) == datetime(
+            2026, 3, 1, 9, 30, tzinfo=TZ
+        )
+
     def test_monthly_steps_track_the_calendar(self):
         """Monthly intervals step calendar months, clamping at short month ends."""
         chore = self._make("monthly", 1, last_completed=datetime(2026, 1, 31, 9, 0, tzinfo=TZ))

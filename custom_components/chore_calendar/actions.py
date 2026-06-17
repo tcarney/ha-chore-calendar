@@ -17,7 +17,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
-from .const import EVENT_ITEM_DELETED, LOGGER, ChoreEventSource, ChoreStatus
+from .const import EVENT_ITEM_DELETED, LOGGER, ChoreEventSource
 
 if TYPE_CHECKING:
     from .coordinator import ChoreCalendarCoordinator
@@ -109,7 +109,6 @@ async def async_apply_completed_cleared_at(
         entity_id,
     )
 
-    now = dt_util.now()
     swept = 0
     for chore in list(store.get_all_chores().values()):
         # Sweep only terminal-completed chores not flagged to persist. The
@@ -120,8 +119,6 @@ async def async_apply_completed_cleared_at(
         if not chore.terminal or chore.persist:
             continue
         if chore.last_completed is None or chore.last_completed >= cleared_at:
-            continue
-        if chore.compute_status(now) != ChoreStatus.COMPLETED:
             continue
         await store.async_delete_chore(chore.uid)
         hass.bus.async_fire(
