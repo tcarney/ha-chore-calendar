@@ -47,11 +47,11 @@
       "fields": {
         "frequency": {
           "name": "Repeat",
-          "description": "How often this chore recurs."
+          "description": "The recurrence unit — daily, weekly, monthly, or yearly."
         },
         "interval": {
           "name": "Repeat interval",
-          "description": "Every N units (2 with weekly = every other week)."
+          "description": "Recur every N units (e.g. weekly + 2 = every 2 weeks)."
         },
         "byday": {
           "name": "Weekdays",
@@ -67,7 +67,7 @@
         },
         "bymonth": {
           "name": "Months",
-          "description": "Season window — occurrences only in these months."
+          "description": "Season window — the chore only recurs in these months."
         },
         "dtstart": {
           "name": "Start",
@@ -79,7 +79,7 @@
         },
         "count": {
           "name": "End after",
-          "description": "Total occurrences. Mutually exclusive with 'End on'."
+          "description": "Number of scheduled occurrences before the series ends. Mutually exclusive with 'End on'."
         },
         "persist": {
           "name": "Keep when finished",
@@ -91,15 +91,15 @@
       "fields": {
         "frequency": {
           "name": "Repeat",
-          "description": "Unit for 'Repeat interval'."
+          "description": "The recurrence unit — minutely, hourly, daily, weekly, monthly, or yearly."
         },
         "interval": {
           "name": "Repeat interval",
-          "description": "Due this many units after the last completion (e.g. 3 months)."
+          "description": "Recur after N units, counted from the last completion (e.g. daily + 5 = after 5 days)."
         },
         "bymonth": {
           "name": "Months",
-          "description": "Season window — the interval clock only runs in these months."
+          "description": "Season window — only time in these months counts toward the wait; out-of-season time doesn't count."
         },
         "until": {
           "name": "End on",
@@ -107,7 +107,7 @@
         },
         "count": {
           "name": "End after",
-          "description": "Total completions. Mutually exclusive with 'End on'."
+          "description": "Number of completions before the series ends. Mutually exclusive with 'End on'."
         },
         "persist": {
           "name": "Keep when finished",
@@ -163,11 +163,11 @@
         },
         "scheduled": {
           "name": "Scheduled",
-          "description": "A chore that repeats on a calendar grid."
+          "description": "A chore anchored to the calendar grid — it recurs every N units on fixed dates."
         },
         "interval": {
           "name": "Interval",
-          "description": "A chore due a fixed period after its last completion."
+          "description": "A chore anchored to its last completion — it comes due a set period after each one."
         },
         "oneshot": {
           "name": "Oneshot",
@@ -213,11 +213,11 @@
         },
         "scheduled": {
           "name": "Scheduled",
-          "description": "Replace the repeat rule ('Repeat' required), or pass only start/keep fields to leave the rule unchanged."
+          "description": "Replace the recurrence ('Repeat' required), or pass only start/keep fields to leave it unchanged."
         },
         "interval": {
           "name": "Interval",
-          "description": "New repeat unit and interval."
+          "description": "Replace the recurrence ('Repeat' required), or pass only 'Keep when finished' to leave it unchanged."
         },
         "oneshot": {
           "name": "Oneshot",
