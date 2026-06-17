@@ -151,11 +151,14 @@ class ScheduledChore(BaseChore):
     def compute_next_due(self, now: datetime) -> datetime | None:
         """Return the due time for the current period.
 
-        If the chore is overdue (uncompleted and past the grace period),
-        return the *overdue* period's due time — not the next period's.
-        This keeps next_due stable until the chore is completed. Returns
-        None once the series is terminal (UNTIL/COUNT exhausted) or when
-        the satisfied current period has no occurrence after it.
+        While the current cycle is unsatisfied (uncompleted), next_due stays
+        pinned to this period's due time across pending, due, and overdue — it
+        does not jump ahead to the following occurrence and then snap back when
+        the grace period elapses. Only once the cycle is satisfied (a
+        completion landed in its pending window) does next_due advance to the
+        next occurrence. Returns None once the series is terminal (UNTIL/COUNT
+        exhausted) or when the satisfied current period has no occurrence after
+        it, and ``skipped_until`` while a skip anchor is active.
         """
         if self.terminal:
             return None
@@ -163,19 +166,18 @@ class ScheduledChore(BaseChore):
             return self.skipped_until
 
         period_due = self._find_current_period(now)
-        overdue_at = period_due + self.grace_period
         pending_at = period_due - self.pending_period
-
         is_completed = bool(self.last_completed and self.last_completed >= pending_at)
 
-        if not is_completed and now >= overdue_at:
-            # Chore is overdue — return the overdue period's due time so
-            # next_due stays pinned until the chore is completed.
+        if not is_completed:
+            # Uncompleted: pin to this period's due through pending/due/overdue
+            # (matching the interval/oneshot operative-anchor behavior) instead
+            # of advancing to the next occurrence and snapping back.
             return period_due
-
         if now < period_due:
+            # Completed early, before the due time: still this period.
             return period_due
-        # Current period is past due but not yet overdue; show next occurrence.
+        # Cycle satisfied and past due: advance to the next occurrence.
         return self._find_next_active_day(period_due)
 
     def apply_default_skip(self, now: datetime) -> datetime | None:

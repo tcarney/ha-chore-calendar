@@ -140,6 +140,18 @@ MATRIX = [
         (datetime(2026, 3, 30, 8, 0, tzinfo=TZ), datetime(2026, 3, 30, 9, 0, tzinfo=TZ)),
         id="completed-early-next-due-is-satisfied-period",
     ),
+    pytest.param(
+        # DUE and uncompleted (prior cycle completed yesterday): next_due pins
+        # to the current period through the due window. The pre-rewrite model
+        # jumped next_due to tomorrow here until the chore went overdue; it now
+        # stays on the current period, consistent with the overdue pin.
+        {"last_completed": datetime(2026, 3, 29, 8, 15, tzinfo=TZ)},
+        datetime(2026, 3, 30, 8, 30, tzinfo=TZ),
+        ChoreStatus.DUE,
+        datetime(2026, 3, 30, 8, 0, tzinfo=TZ),
+        (datetime(2026, 3, 30, 8, 0, tzinfo=TZ), datetime(2026, 3, 30, 9, 0, tzinfo=TZ)),
+        id="due-uncompleted-pins-current-period",
+    ),
     # --- Skip anchor (#20) -----------------------------------------------------
     pytest.param(
         # Skip active, before its pending window: dormant COMPLETED.

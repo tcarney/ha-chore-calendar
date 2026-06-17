@@ -192,6 +192,20 @@ class TestScheduledChoreNextDue:
         expected = datetime(2026, 3, 30, 8, 0, tzinfo=TZ)
         assert chore.compute_next_due(now) == expected
 
+    def test_next_due_in_due_window_uncompleted_pins_to_current_period(self):
+        """While DUE and uncompleted, next_due stays on the current period.
+
+        Regression: next_due used to jump to the next occurrence inside the
+        due window (before grace elapsed) and then snap back once overdue. It
+        now stays pinned to the current period through pending/due/overdue,
+        matching the overdue pin and the interval/oneshot operative anchor.
+        """
+        chore = _make_scheduled(last_completed=datetime(2026, 3, 29, 8, 15, tzinfo=TZ))
+        # 08:00 due, 09:00 overdue: 08:30 is inside the due window, uncompleted.
+        now = datetime(2026, 3, 30, 8, 30, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.DUE
+        assert chore.compute_next_due(now) == datetime(2026, 3, 30, 8, 0, tzinfo=TZ)
+
     def test_next_due_never_completed_past_overdue_stays_pinned(self):
         """A never-completed chore past the grace period pins next_due to the missed period."""
         chore = _make_scheduled()
