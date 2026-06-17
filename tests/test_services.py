@@ -522,6 +522,106 @@ async def test_update_scheduled_recurrence_clears_terminal(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_scheduled_persist_or_dtstart_only_keeps_terminal(hass, config_entry):
+    """A persist- or dtstart-only tweak is not a rule change — a finished
+    scheduled series stays terminal; only a recurrence field reopens it."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "One Shot Series",
+            "scheduled": {"frequency": "daily", "count": 1, "dtstart": "2026-06-01T08:00:00"},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "One Shot Series")
+    assert isinstance(chore, ScheduledChore)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": chore.uid, "completed_at": "2026-06-01T08:30:00-05:00"},
+        blocking=True,
+    )
+    assert store.get_chore(chore.uid).terminal is True
+
+    # persist-only: the flag applies but the finished series stays terminal.
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": chore.uid, "scheduled": {"persist": True}},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert isinstance(refreshed, ScheduledChore)
+    assert refreshed.persist is True
+    assert refreshed.terminal is True
+    assert refreshed.rrule == "FREQ=DAILY;COUNT=1"
+
+    # dtstart-only: still not a rule change — no reopen.
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": chore.uid, "scheduled": {"dtstart": "09:30:00"}},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert isinstance(refreshed, ScheduledChore)
+    assert refreshed.terminal is True
+    assert refreshed.dtstart is not None
+    assert refreshed.dtstart.time().isoformat() == "09:30:00"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_interval_persist_only_keeps_terminal(hass, config_entry):
+    """A persist-only tweak does not reopen a finished interval series."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Single Refill",
+            "interval": {"frequency": "daily", "interval": 3, "count": 1},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "Single Refill")
+    assert isinstance(chore, IntervalChore)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": chore.uid, "completed_at": "2026-06-01T09:00:00-05:00"},
+        blocking=True,
+    )
+    assert store.get_chore(chore.uid).terminal is True
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": chore.uid, "interval": {"persist": True}},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert isinstance(refreshed, IntervalChore)
+    assert refreshed.persist is True
+    assert refreshed.terminal is True
+    # Rule untouched by the persist-only tweak.
+    assert (refreshed.freq, refreshed.interval, refreshed.count) == ("daily", 3, 1)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_create_item_without_description_is_none(hass, config_entry):
     """create_item leaves description as None when not provided."""
     entity_id = await _setup_with_chore(hass, config_entry)

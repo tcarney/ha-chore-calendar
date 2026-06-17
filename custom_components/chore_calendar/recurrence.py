@@ -127,6 +127,27 @@ def interval_selector_to_schedule(obj: dict[str, Any], *, existing: dict[str, An
     return schedule
 
 
+def scheduled_recurrence_changed(obj: dict[str, Any]) -> bool:
+    """Return True when *obj* changes the recurrence rule itself.
+
+    A scheduled sub-object carrying any recurrence field re-synthesizes the
+    rrule; a bare ``dtstart`` / ``persist`` tweak keeps the stored rule. The
+    update handler uses this to decide whether a finished (terminal) series
+    should re-enter its cycle — only an actual rule change reopens it.
+    """
+    return any(key in obj for key in _RECURRENCE_KEYS)
+
+
+def interval_recurrence_changed(obj: dict[str, Any]) -> bool:
+    """Return True when *obj* changes the interval recurrence rule itself.
+
+    Mirrors ``scheduled_recurrence_changed``: any recurrence field rebuilds
+    the schedule, while a bare ``persist`` tweak keeps the stored rule. Used
+    by the update handler to gate reopening a finished (terminal) series.
+    """
+    return any(key in obj for key in _INTERVAL_RECURRENCE_KEYS)
+
+
 def _synthesize_rrule(obj: dict[str, Any]) -> str:
     """Validate the recurrence fields and produce the canonical RRULE string."""
     frequency = obj.get("frequency")

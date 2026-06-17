@@ -41,7 +41,12 @@ from .const import (
 )
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore, OneshotChore
-from .recurrence import interval_selector_to_schedule, scheduled_selector_to_schedule
+from .recurrence import (
+    interval_recurrence_changed,
+    interval_selector_to_schedule,
+    scheduled_recurrence_changed,
+    scheduled_selector_to_schedule,
+)
 from .store import ChoreStore
 
 # Service-specific field keys (not shared with sensor attributes).
@@ -423,24 +428,21 @@ async def _async_handle_update(call: ServiceCall) -> None:
         updated["schedule"] = dict(updated["schedule"])
         _apply_overlays(call.data, updated, existing.chore_type)
 
-    # A oneshot reschedule (any change to due_datetime, including clearing
-    # it for Path B) re-enters the cycle — clear the terminal flag so the
-    # chore picks up window-math against the new anchor instead of staying
-    # COMPLETED via the short-circuit.
-    if (
-        existing.chore_type == ChoreType.ONESHOT
-        and ATTR_ONESHOT in call.data
-        and isinstance(call.data[ATTR_ONESHOT], dict)
-        and "due_datetime" in call.data[ATTR_ONESHOT]
-    ):
-        updated["terminal"] = False
-
-    # Likewise a recurrence update on the recurring types re-enters the
-    # cycle: an until/count-exhausted series picks up the new rule instead
-    # of staying terminal-COMPLETED.
-    if existing.chore_type == ChoreType.SCHEDULED and ATTR_SCHEDULED in call.data:
-        updated["terminal"] = False
-    if existing.chore_type == ChoreType.INTERVAL and ATTR_INTERVAL in call.data:
+    # A schedule-anchor change re-enters the cycle: a terminal-COMPLETED chore
+    # (a completed oneshot, or an until/count-exhausted recurring series) picks
+    # up the new anchor instead of staying COMPLETED via the terminal
+    # short-circuit. The per-type predicate distinguishes a real anchor change
+    # from a persist-/dtstart-only tweak — the latter leaves a finished chore
+    # finished (a oneshot reopens only on a due_datetime change; a recurring
+    # chore only on a recurrence-field change, not a bare dtstart/persist edit).
+    reopens_cycle = {
+        ChoreType.ONESHOT: lambda sub: "due_datetime" in sub,
+        ChoreType.SCHEDULED: scheduled_recurrence_changed,
+        ChoreType.INTERVAL: interval_recurrence_changed,
+    }
+    sub_dict = call.data.get(allowed_attr)
+    predicate = reopens_cycle.get(existing.chore_type)
+    if predicate is not None and isinstance(sub_dict, dict) and predicate(sub_dict):
         updated["terminal"] = False
 
     chore = BaseChore.from_dict(updated)
