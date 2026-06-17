@@ -118,21 +118,28 @@ The chore sensor's state is the chore's current status. Additional attributes ar
 
 ### Chore Types
 
+Scheduled and interval chores follow the same recurrence model — the only difference is the **anchor** they recur from:
+
+- **Scheduled chores are anchored to the calendar grid.** They recur **every** N units on fixed dates, whether or not the chore is ever completed — so a brand-new one becomes `due` on its first occurrence even before it has ever been done.
+- **Interval chores are anchored to the last completion.** They recur **after** N units have elapsed since the chore was last done — so a brand-new one stays `pending` with no due date until its first completion starts the clock.
+
+For example: the trash goes out *every* Tuesday → scheduled; the water filter is replaced 90 days *after* the last change → interval.
+
 #### Scheduled Chores
 
 Recur on a fixed calendar grid — the same recurrence options as a calendar event's repeat rule.
 
 | Option | Required | Default | Description |
 | --- | --- | --- | --- |
-| `frequency` | yes | — | `daily`, `weekly`, `monthly`, or `yearly` |
-| `interval` | no | `1` | Repeat every N frequency units (`2` with `weekly` = every other week) |
+| `frequency` | yes | — | The recurrence unit — `daily`, `weekly`, `monthly`, or `yearly` |
+| `interval` | no | `1` | Recur **every** N units (`weekly` + `2` → every 2 weeks) |
 | `byday` | no | — | Days of the week (`mon`–`sun`). Monthly/yearly rules also accept an ordinal prefix (`-1fri` = last Friday) |
 | `bymonthday` | no | — | Days of the month (`15`, or `-1` for the last day). Monthly/yearly only |
 | `bysetpos` | no | — | Nth match of `byday` within the month (`-1` = last). Requires `byday`; monthly/yearly only |
-| `bymonth` | no | — | Season window — months (1–12) the rule is active in |
+| `bymonth` | no | — | Season window — only grid occurrences in these months (1–12) are valid |
 | `dtstart` | no | `08:00:00` | Time of day for every occurrence, or a full datetime to anchor the series phase when `interval` is above 1 |
 | `until` | no | — | The series ends after this date/datetime. Mutually exclusive with `count` |
-| `count` | no | — | The series ends after this many occurrences. Mutually exclusive with `until` |
+| `count` | no | — | Ends the series after this many **occurrences** — grid points, spent as the calendar advances (a skipped or missed occurrence still counts). Mutually exclusive with `until` |
 | `persist` | no | `false` | Keep the chore once the series ends; otherwise `hide_completed_items` deletes it |
 
 The rule is stored as an RFC 5545 RRULE, and the calendar entity shows every future occurrence in the queried window.
@@ -147,11 +154,11 @@ Recur a fixed period after the last completion.
 
 | Option | Required | Default | Description |
 | --- | --- | --- | --- |
-| `frequency` | yes | — | `minutely`, `hourly`, `daily`, `weekly`, `monthly`, or `yearly` |
-| `interval` | no | `1` | Due this many frequency units after the last completion (`3` with `monthly` = after 3 months) |
-| `bymonth` | no | — | Season window — out-of-season months don't count toward the interval |
+| `frequency` | yes | — | The recurrence unit — `minutely`, `hourly`, `daily`, `weekly`, `monthly`, or `yearly` |
+| `interval` | no | `1` | Recur **after** N units (`daily` + `5` → after 5 days; `monthly` + `3` → after 3 months) |
+| `bymonth` | no | — | Season window — the **after** clock only runs in these months; out-of-season time doesn't count |
 | `until` | no | — | The series ends once the next due passes this. Mutually exclusive with `count` |
-| `count` | no | — | The series ends after this many completions. Mutually exclusive with `until` |
+| `count` | no | — | Ends the series after this many **occurrences** — and since an interval occurrence exists only once completed, this equals this many completions. Mutually exclusive with `until` |
 | `persist` | no | `false` | Keep the chore once the series ends; otherwise `hide_completed_items` deletes it |
 
 Month and year intervals track the calendar — "after 3 months" from January 31 lands April 30, not 90 fixed days. With a season window, the interval clock only runs during the allowed months (a completion out of season starts the clock at the next season opening).
