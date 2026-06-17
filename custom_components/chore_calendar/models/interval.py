@@ -144,21 +144,27 @@ class IntervalChore(BaseChore):
     def _excised_month_step(self, naive: datetime, allowed: set[int]) -> datetime:
         """Step month/year intervals across the season window.
 
-        ``monthly``: the due month is the Nth allowed month strictly after
-        the anchor month; an out-of-season anchor first slides to the next
-        season opening (preserving day and time), so the clock starts there.
-        ``yearly``: step years normally, then shift forward to the next
-        allowed month if the result lands out of season.
+        ``yearly`` reads as "once per ``interval`` calendar years in the allowed
+        month" (aligning with a scheduled ``FREQ=YEARLY;BYMONTH=...`` rule): an
+        in-season completion steps ``interval`` years, staying in its month; an
+        out-of-season completion resumes at the next season opening, **without**
+        skipping a year (so March-only, completed in July, is due next March —
+        not the March after).
+
+        ``monthly``: the due month is the Nth allowed month strictly after the
+        anchor month; an out-of-season anchor first slides to the next season
+        opening (preserving day and time), so the clock starts there. When
+        ``interval`` exceeds the allowed-month count the clock simply spans
+        multiple seasons (every N in-season months).
         """
+        if self.freq == "yearly":
+            if naive.month in allowed:
+                return naive + relativedelta(years=self.interval)
+            return _shift_to_next_allowed_month(naive, allowed)
+
         anchor = naive
         if anchor.month not in allowed:
             anchor = _shift_to_next_allowed_month(anchor, allowed)
-
-        if self.freq == "yearly":
-            result = anchor + relativedelta(years=self.interval)
-            if result.month not in allowed:
-                result = _shift_to_next_allowed_month(result, allowed)
-            return result
 
         remaining = self.interval
         cursor = anchor

@@ -939,17 +939,32 @@ class TestIntervalSeasonality:
         now = datetime(2026, 2, 1, 9, 0, tzinfo=TZ)
         assert chore.compute_next_due(now) == datetime(2026, 2, 28, 9, 0, tzinfo=TZ)
 
-    def test_yearly_out_of_season_shifts_to_allowed_month(self):
-        """A yearly chore completed out of season lands in the allowed month."""
+    def test_monthly_interval_exceeds_window_spans_seasons(self):
+        """When interval exceeds the allowed-month count the excision clock spans
+        multiple seasons (every N in-season months) — consistent, if long."""
+        chore = self._make("monthly", 6, [6, 7, 8], last_completed=datetime(2026, 6, 15, 9, 0, tzinfo=TZ))
+        now = datetime(2026, 6, 16, 9, 0, tzinfo=TZ)
+        # Jun/Jul/Aug allowed → 6 in-season months from Jun 2026 lands Jun 2028.
+        assert chore.compute_next_due(now) == datetime(2028, 6, 15, 9, 0, tzinfo=TZ)
+
+    def test_yearly_out_of_season_resumes_at_next_opening(self):
+        """A yearly chore completed out of season resumes at the next allowed
+        month — "once per calendar year in March", no year skipped."""
         chore = self._make("yearly", 1, [3], last_completed=datetime(2026, 6, 15, 9, 0, tzinfo=TZ))
         now = datetime(2026, 6, 16, 9, 0, tzinfo=TZ)
-        assert chore.compute_next_due(now) == datetime(2028, 3, 15, 9, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2027, 3, 15, 9, 0, tzinfo=TZ)
 
     def test_yearly_in_season_steps_plainly(self):
-        """An in-season yearly anchor stays in its month."""
+        """An in-season yearly anchor steps interval years, staying in its month."""
         chore = self._make("yearly", 1, OCT_MAR, last_completed=datetime(2026, 11, 5, 9, 0, tzinfo=TZ))
         now = datetime(2026, 11, 6, 9, 0, tzinfo=TZ)
         assert chore.compute_next_due(now) == datetime(2027, 11, 5, 9, 0, tzinfo=TZ)
+
+    def test_yearly_interval_steps_multiple_years(self):
+        """interval>1 steps that many calendar years from an in-season anchor."""
+        chore = self._make("yearly", 2, [3], last_completed=datetime(2026, 3, 10, 9, 0, tzinfo=TZ))
+        now = datetime(2026, 3, 11, 9, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == datetime(2028, 3, 10, 9, 0, tzinfo=TZ)
 
     def test_excision_is_wall_clock_across_dst(self):
         """The excision walk reads wall time — a DST transition inside the
