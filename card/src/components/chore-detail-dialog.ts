@@ -51,6 +51,17 @@ export class ChoreDetailDialog extends LitElement {
       white-space: nowrap;
     }
 
+    /* Free-text description: the last details block, set off by spacing
+       alone (a divider would double up with the footer border). */
+    .content > div.description {
+      display: block;
+      margin-top: 16px;
+      padding: 0;
+      font-size: 14px;
+      color: var(--primary-text-color);
+      white-space: pre-line;
+    }
+
     .footer {
       display: flex;
       justify-content: flex-end;
@@ -163,6 +174,10 @@ export class ChoreDetailDialog extends LitElement {
               </div>
             </div>
           `
+        : nothing}
+
+      ${item.description
+        ? html`<div class="description">${item.description}</div>`
         : nothing}
     `;
   }

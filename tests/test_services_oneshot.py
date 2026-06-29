@@ -152,7 +152,7 @@ async def test_create_with_multiple_schedule_keys_raises(hass, config_entry):
             {
                 "entity_id": entity_id,
                 "chore_name": "Confused Chore",
-                "scheduled": {"time": "08:00:00"},
+                "scheduled": {"frequency": "daily"},
                 "oneshot": {"due_datetime": "2026-04-15T12:00:00-05:00"},
             },
             blocking=True,
@@ -338,7 +338,7 @@ async def test_skip_completed_oneshot_raises(hass, config_entry):
         blocking=True,
     )
 
-    with pytest.raises(ServiceValidationError, match="completed oneshot"):
+    with pytest.raises(ServiceValidationError, match="completed chore"):
         await hass.services.async_call(
             DOMAIN,
             "skip_item",

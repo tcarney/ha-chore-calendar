@@ -52,7 +52,8 @@ async def _setup_with_chore(hass, entry: MockConfigEntry) -> str:
         uid=TEST_UID,
         chore_name="Test Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=3),
+        freq="daily",
+        interval=3,
         grace_period=timedelta(days=1),
     )
     await runtime_data.store.async_create_chore(chore)
@@ -94,7 +95,7 @@ async def test_create_item(hass, config_entry):
         {
             "entity_id": entity_id,
             "chore_name": "New Chore",
-            "interval": {"days": 1},
+            "interval": {"frequency": "daily"},
             "grace_period": {"hours": 1},
         },
         blocking=True,
@@ -119,7 +120,7 @@ async def test_create_item_generates_uid(hass, config_entry):
         {
             "entity_id": entity_id,
             "chore_name": "Morning Medicine",
-            "interval": {"days": 1},
+            "interval": {"frequency": "daily"},
             "grace_period": {"hours": 1},
         },
         blocking=True,
@@ -146,7 +147,7 @@ async def test_create_item_same_name_succeeds(hass, config_entry):
             {
                 "entity_id": entity_id,
                 "chore_name": "Duplicate Name",
-                "interval": {"days": 1},
+                "interval": {"frequency": "daily"},
             },
             blocking=True,
         )
@@ -170,8 +171,9 @@ async def test_create_scheduled_item(hass, config_entry):
             "entity_id": entity_id,
             "chore_name": "Morning Medicine",
             "scheduled": {
-                "time": "08:00:00",
-                "active_days": ["mon", "tue", "wed", "thu", "fri"],
+                "frequency": "weekly",
+                "byday": ["mon", "tue", "wed", "thu", "fri"],
+                "dtstart": "08:00:00",
             },
             "pending_period": {"hours": 3},
             "grace_period": {"hours": 1},
@@ -187,6 +189,503 @@ async def test_create_scheduled_item(hass, config_entry):
     assert chore is not None
     assert chore.chore_name == "Morning Medicine"
     assert chore.assigned_to == ["person.alice"]
+    # The structured selector synthesizes the canonical rrule/dtstart pair,
+    # with a time-only dtstart anchored to the creation date.
+    assert isinstance(chore, ScheduledChore)
+    assert chore.rrule == "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"
+    assert chore.created_at is not None
+    assert chore.dtstart == datetime.combine(chore.created_at.date(), dtime(8, 0))
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_item_with_description(hass, config_entry):
+    """create_item stores an optional description."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Water Plants",
+            "description": "Only the ones on the porch.",
+            "interval": {"frequency": "daily", "interval": 2},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "Water Plants")
+    assert chore is not None
+    assert chore.description == "Only the ones on the porch."
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_interval_item_structured_frequency(hass, config_entry):
+    """create_item accepts the structured {frequency, interval} shape — months expressible."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Change Furnace Filter",
+            "interval": {"frequency": "monthly", "interval": 3},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "Change Furnace Filter")
+    assert isinstance(chore, IntervalChore)
+    assert (chore.freq, chore.interval) == ("monthly", 3)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_interval_item_invalid_frequency_raises(hass, config_entry):
+    """create_item rejects an unknown interval frequency."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError, match="frequency"):
+        await hass.services.async_call(
+            DOMAIN,
+            "create_item",
+            {
+                "entity_id": entity_id,
+                "chore_name": "Bad Frequency",
+                "interval": {"frequency": "fortnightly"},
+            },
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_interval_item_unknown_fields_raise(hass, config_entry):
+    """create_item rejects stray fields in the interval object."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError, match="Unknown interval field"):
+        await hass.services.async_call(
+            DOMAIN,
+            "create_item",
+            {
+                "entity_id": entity_id,
+                "chore_name": "Mixed Shapes",
+                "interval": {"frequency": "monthly", "days": 3},
+            },
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_last_friday_of_month_chore(hass, config_entry):
+    """Checkpoint: byday + bysetpos expresses 'last Friday of the month'."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Pay Rent Reminder",
+            "scheduled": {"frequency": "monthly", "byday": ["fri"], "bysetpos": [-1], "dtstart": "09:00:00"},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    chore = _find_chore_by_name(config_entry.runtime_data.store, "Pay Rent Reminder")
+    assert isinstance(chore, ScheduledChore)
+    assert chore.rrule == "FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_every_other_monday_chore(hass, config_entry):
+    """Checkpoint: interval 2 with an explicit full-datetime dtstart sets the phase."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Recycling",
+            "scheduled": {
+                "frequency": "weekly",
+                "interval": 2,
+                "byday": ["mon"],
+                "dtstart": "2026-06-08T08:00:00",
+            },
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    chore = _find_chore_by_name(config_entry.runtime_data.store, "Recycling")
+    assert isinstance(chore, ScheduledChore)
+    assert chore.rrule == "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO"
+    assert chore.dtstart == datetime(2026, 6, 8, 8, 0)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_count_chore_goes_terminal_and_is_swept(hass, config_entry):
+    """Checkpoint: a count:3 chore goes terminal on the third completion and
+    hide_completed_items sweeps it (persist=false), leaving recurring chores alone."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Course of Medicine",
+            "scheduled": {"frequency": "daily", "count": 3, "dtstart": "2026-06-01T08:00:00"},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "Course of Medicine")
+    assert isinstance(chore, ScheduledChore)
+    assert chore.rrule == "FREQ=DAILY;COUNT=3"
+
+    for day, expect_terminal in ((1, False), (2, False), (3, True)):
+        await hass.services.async_call(
+            DOMAIN,
+            "complete_item",
+            {
+                "entity_id": entity_id,
+                "item": chore.uid,
+                "completed_at": f"2026-06-0{day}T08:30:00-05:00",
+            },
+            blocking=True,
+        )
+        refreshed = store.get_chore(chore.uid)
+        assert refreshed is not None
+        assert refreshed.terminal is expect_terminal, f"after completion {day}"
+
+    # The exhausted persist=false chore is swept; the recurring control
+    # chore (Test Chore, completed) survives.
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": TEST_UID},
+        blocking=True,
+    )
+    with patch("homeassistant.util.dt.now", return_value=datetime(2026, 6, 10, 12, 0, tzinfo=TZ)):
+        await hass.services.async_call(
+            DOMAIN,
+            "hide_completed_items",
+            {"entity_id": entity_id},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+
+    assert store.get_chore(chore.uid) is None
+    assert store.get_chore(TEST_UID) is not None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_seasonal_interval_chore(hass, config_entry):
+    """Checkpoint: an interval chore with a season window stores it, and a
+    completion in a closed month lands the next due at the season opening."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Furnace Filter",
+            "interval": {"frequency": "monthly", "interval": 2, "bymonth": [10, 11, 12, 1, 2, 3]},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "Furnace Filter")
+    assert isinstance(chore, IntervalChore)
+    assert (chore.freq, chore.interval) == ("monthly", 2)
+    assert chore.bymonth == [10, 11, 12, 1, 2, 3]
+
+    # Complete it in February — the plan's example: Mar is month 1, Oct is
+    # month 2 → due Oct 10.
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": chore.uid, "completed_at": "2026-02-10T09:00:00-05:00"},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert refreshed is not None
+    next_due = refreshed.compute_next_due(datetime(2026, 2, 11, 9, 0, tzinfo=TZ))
+    assert next_due == datetime(2026, 10, 10, 9, 0, tzinfo=TZ)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_interval_count_exhaustion_and_update_reopens(hass, config_entry):
+    """An interval count chore goes terminal on the Nth completion; a
+    recurrence update reopens it (and clears the season/end fields)."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Medication Refill",
+            "interval": {"frequency": "daily", "interval": 3, "count": 2},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "Medication Refill")
+    assert isinstance(chore, IntervalChore)
+
+    for day, expect_terminal in ((1, False), (4, True)):
+        await hass.services.async_call(
+            DOMAIN,
+            "complete_item",
+            {
+                "entity_id": entity_id,
+                "item": chore.uid,
+                "completed_at": f"2026-06-0{day}T09:00:00-05:00",
+            },
+            blocking=True,
+        )
+        refreshed = store.get_chore(chore.uid)
+        assert refreshed is not None
+        assert refreshed.terminal is expect_terminal, f"after completion on day {day}"
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": chore.uid, "interval": {"frequency": "weekly"}},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert isinstance(refreshed, IntervalChore)
+    assert refreshed.terminal is False
+    assert (refreshed.freq, refreshed.interval) == ("weekly", 1)
+    # Full-replacement semantics: the count cleared with the new rule.
+    assert refreshed.count is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_scheduled_recurrence_clears_terminal(hass, config_entry):
+    """A recurrence update re-enters an exhausted series."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "One Shot Series",
+            "scheduled": {"frequency": "daily", "count": 1, "dtstart": "2026-06-01T08:00:00"},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "One Shot Series")
+    assert isinstance(chore, ScheduledChore)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": chore.uid, "completed_at": "2026-06-01T08:30:00-05:00"},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert refreshed is not None
+    assert refreshed.terminal is True
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": chore.uid, "scheduled": {"frequency": "weekly", "byday": ["mon"]}},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert isinstance(refreshed, ScheduledChore)
+    assert refreshed.terminal is False
+    assert refreshed.rrule == "FREQ=WEEKLY;BYDAY=MO"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_scheduled_persist_or_dtstart_only_keeps_terminal(hass, config_entry):
+    """A persist- or dtstart-only tweak is not a rule change — a finished
+    scheduled series stays terminal; only a recurrence field reopens it."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "One Shot Series",
+            "scheduled": {"frequency": "daily", "count": 1, "dtstart": "2026-06-01T08:00:00"},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "One Shot Series")
+    assert isinstance(chore, ScheduledChore)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": chore.uid, "completed_at": "2026-06-01T08:30:00-05:00"},
+        blocking=True,
+    )
+    assert store.get_chore(chore.uid).terminal is True
+
+    # persist-only: the flag applies but the finished series stays terminal.
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": chore.uid, "scheduled": {"persist": True}},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert isinstance(refreshed, ScheduledChore)
+    assert refreshed.persist is True
+    assert refreshed.terminal is True
+    assert refreshed.rrule == "FREQ=DAILY;COUNT=1"
+
+    # dtstart-only: still not a rule change — no reopen.
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": chore.uid, "scheduled": {"dtstart": "09:30:00"}},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert isinstance(refreshed, ScheduledChore)
+    assert refreshed.terminal is True
+    assert refreshed.dtstart is not None
+    assert refreshed.dtstart.time().isoformat() == "09:30:00"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_interval_persist_only_keeps_terminal(hass, config_entry):
+    """A persist-only tweak does not reopen a finished interval series."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Single Refill",
+            "interval": {"frequency": "daily", "interval": 3, "count": 1},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "Single Refill")
+    assert isinstance(chore, IntervalChore)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {"entity_id": entity_id, "item": chore.uid, "completed_at": "2026-06-01T09:00:00-05:00"},
+        blocking=True,
+    )
+    assert store.get_chore(chore.uid).terminal is True
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": chore.uid, "interval": {"persist": True}},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert isinstance(refreshed, IntervalChore)
+    assert refreshed.persist is True
+    assert refreshed.terminal is True
+    # Rule untouched by the persist-only tweak.
+    assert (refreshed.freq, refreshed.interval, refreshed.count) == ("daily", 3, 1)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_create_item_without_description_is_none(hass, config_entry):
+    """create_item leaves description as None when not provided."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "No Description",
+            "interval": {"frequency": "daily", "interval": 2},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "No Description")
+    assert chore is not None
+    assert chore.description is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_item_sets_and_clears_description(hass, config_entry):
+    """update_item sets a description; an empty string clears it back to None."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    store = config_entry.runtime_data.store
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": "Test Chore",
+            "description": "Use the green bin.",
+        },
+        blocking=True,
+    )
+    assert store.get_chore(TEST_UID).description == "Use the green bin."
+
+    # An update without description leaves the stored value untouched.
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": "Test Chore",
+            "chore_name": "Test Chore",
+        },
+        blocking=True,
+    )
+    assert store.get_chore(TEST_UID).description == "Use the green bin."
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": "Test Chore",
+            "description": "",
+        },
+        blocking=True,
+    )
+    assert store.get_chore(TEST_UID).description is None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -388,6 +887,35 @@ async def test_get_items(hass, config_entry):
     assert len(response["items"]) == 1
     assert response["items"][0]["uid"] == TEST_UID
     assert response["items"][0]["status"] in ("completed", "due", "overdue", "pending")
+    # description is always present in the response — None when unset.
+    assert response["items"][0]["description"] is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_items_returns_description(hass, config_entry):
+    """get_items includes a chore's description."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": "Test Chore",
+            "description": "Use the green bin.",
+        },
+        blocking=True,
+    )
+
+    response = await hass.services.async_call(
+        DOMAIN,
+        "get_items",
+        {"entity_id": entity_id},
+        blocking=True,
+        return_response=True,
+    )
+
+    assert response["items"][0]["description"] == "Use the green bin."
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -511,7 +1039,8 @@ def _build_chore_of_type(chore_type: ChoreType, uid: str = TEST_UID):
             uid=uid,
             chore_name="Existing Chore",
             chore_type=ChoreType.INTERVAL,
-            interval=timedelta(days=3),
+            freq="daily",
+            interval=3,
         )
     if chore_type == ChoreType.SCHEDULED:
         return ScheduledChore(
@@ -532,8 +1061,8 @@ def _build_chore_of_type(chore_type: ChoreType, uid: str = TEST_UID):
 # sub-dict to update_item raises ServiceValidationError. Cover all six
 # (existing_type, requested_type) pairs.
 _TYPE_MISMATCH_BLOCKS = {
-    ChoreType.SCHEDULED: ("scheduled", {"time": "08:00:00"}),
-    ChoreType.INTERVAL: ("interval", {"days": 1}),
+    ChoreType.SCHEDULED: ("scheduled", {"frequency": "daily"}),
+    ChoreType.INTERVAL: ("interval", {"frequency": "daily"}),
     ChoreType.ONESHOT: ("oneshot", {"due_datetime": "2026-04-15T12:00:00-05:00"}),
 }
 
@@ -586,7 +1115,7 @@ async def test_update_item_same_type_succeeds(hass, config_entry):
         {
             "entity_id": entity_id,
             "item": "Test Chore",
-            "interval": {"days": 7},
+            "interval": {"frequency": "weekly"},
         },
         blocking=True,
     )
@@ -594,7 +1123,100 @@ async def test_update_item_same_type_succeeds(hass, config_entry):
     chore = config_entry.runtime_data.store.get_chore(TEST_UID)
     assert chore is not None
     assert isinstance(chore, IntervalChore)
-    assert chore.interval == timedelta(days=7)
+    assert (chore.freq, chore.interval) == ("weekly", 1)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_scheduled_dtstart_only_keeps_rule(hass, config_entry):
+    """A dtstart-only update keeps the stored rrule; a time-only dtstart keeps the anchor date."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    sched_uid = await _add_scheduled_chore(hass, config_entry)
+    store = config_entry.runtime_data.store
+
+    chore = store.get_chore(sched_uid)
+    assert isinstance(chore, ScheduledChore)
+    original_rrule = chore.rrule
+    assert chore.dtstart is not None
+    original_date = chore.dtstart.date()
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": sched_uid,
+            "scheduled": {"dtstart": "20:15:00"},
+        },
+        blocking=True,
+    )
+    chore = store.get_chore(sched_uid)
+    assert isinstance(chore, ScheduledChore)
+    assert chore.rrule == original_rrule
+    assert chore.dtstart == datetime.combine(original_date, dtime(20, 15))
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_scheduled_recurrence_replaces_rule(hass, config_entry):
+    """A recurrence update replaces the rrule entirely and keeps the stored dtstart."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    sched_uid = await _add_scheduled_chore(hass, config_entry)
+    store = config_entry.runtime_data.store
+
+    chore = store.get_chore(sched_uid)
+    assert isinstance(chore, ScheduledChore)
+    assert chore.dtstart is not None
+    original_dtstart = chore.dtstart
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": sched_uid,
+            "scheduled": {"frequency": "weekly", "byday": ["sat", "sun"]},
+        },
+        blocking=True,
+    )
+    chore = store.get_chore(sched_uid)
+    assert isinstance(chore, ScheduledChore)
+    assert chore.rrule == "FREQ=WEEKLY;BYDAY=SA,SU"
+    assert chore.dtstart == original_dtstart
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_scheduled_legacy_keys_rejected(hass, config_entry):
+    """The removed time/active_days shape fails with a pointer to the new selector."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError, match="structured selector"):
+        await hass.services.async_call(
+            DOMAIN,
+            "create_item",
+            {
+                "entity_id": entity_id,
+                "chore_name": "Old Shape",
+                "scheduled": {"time": "08:00:00", "active_days": ["mon"]},
+            },
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_interval_legacy_duration_rejected(hass, config_entry):
+    """The removed duration shape fails with a pointer to the new selector."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError, match="duration shape was replaced"):
+        await hass.services.async_call(
+            DOMAIN,
+            "create_item",
+            {
+                "entity_id": entity_id,
+                "chore_name": "Old Shape",
+                "interval": {"days": 14},
+            },
+            blocking=True,
+        )
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -747,7 +1369,7 @@ async def test_create_item_resolves_tag_id(hass, config_entry):
         {
             "entity_id": entity_id,
             "chore_name": "Tagged Chore",
-            "interval": {"days": 1},
+            "interval": {"frequency": "daily"},
             "trigger_entity": tag_entity_id,
         },
         blocking=True,
@@ -771,7 +1393,7 @@ async def test_create_item_non_tag_trigger_has_no_tag_id(hass, config_entry):
         {
             "entity_id": entity_id,
             "chore_name": "Button Chore",
-            "interval": {"days": 1},
+            "interval": {"frequency": "daily"},
             "trigger_entity": "input_button.my_button",
         },
         blocking=True,
@@ -848,7 +1470,7 @@ async def test_skip_item_interval_default_is_now_plus_interval(hass, config_entr
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_skip_item_scheduled_default_is_next_active_day(hass, config_entry):
-    """skip_item with no `until` defaults to next active day for ScheduledChore."""
+    """skip_item with no `until` slides a ScheduledChore one occurrence forward."""
     entity_id = await _setup_with_chore(hass, config_entry)
     sched_uid = await _add_scheduled_chore(hass, config_entry)
 
@@ -863,6 +1485,52 @@ async def test_skip_item_scheduled_default_is_next_active_day(hass, config_entry
 
     chore = config_entry.runtime_data.store.get_chore(sched_uid)
     assert chore.skipped_until == datetime(2026, 3, 31, 8, 0, tzinfo=TZ)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_scheduled_until_slides_to_value(hass, config_entry):
+    """An explicit `until` slides a ScheduledChore's anchor to that datetime."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    sched_uid = await _add_scheduled_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "skip_item",
+        {"entity_id": entity_id, "item": sched_uid, "until": "2026-04-10T08:00:00-05:00"},
+        blocking=True,
+    )
+
+    chore = config_entry.runtime_data.store.get_chore(sched_uid)
+    assert chore.skipped_until == datetime(2026, 4, 10, 8, 0, tzinfo=TZ)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_skip_item_naive_until_is_coerced_to_local(hass, config_entry):
+    """A naive `until` (the README's documented form, no tz suffix) is coerced
+    to the local timezone so later status comparisons don't raise.
+
+    Regression: skip_item stored the naive datetime verbatim; the next status
+    computation compared it against the tz-aware natural anchor and raised
+    TypeError (can't compare offset-naive and offset-aware datetimes).
+    """
+    entity_id = await _setup_with_chore(hass, config_entry)
+    sched_uid = await _add_scheduled_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "skip_item",
+        {"entity_id": entity_id, "item": sched_uid, "until": "2026-04-10T08:00:00"},
+        blocking=True,
+    )
+
+    chore = config_entry.runtime_data.store.get_chore(sched_uid)
+    assert chore.skipped_until is not None
+    # Coerced to an aware datetime, preserving the wall-clock value.
+    assert chore.skipped_until.tzinfo is not None
+    assert chore.skipped_until.replace(tzinfo=None) == datetime(2026, 4, 10, 8, 0)
+    # Status computation must not raise comparing naive vs aware datetimes.
+    assert chore.compute_status(FROZEN_NOW) is not None
+    assert chore.compute_next_due(FROZEN_NOW) is not None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -1049,7 +1717,7 @@ async def test_create_item_fires_item_created(hass, config_entry):
         {
             "entity_id": entity_id,
             "chore_name": "New Chore",
-            "interval": {"days": 1},
+            "interval": {"frequency": "daily"},
         },
         blocking=True,
     )
@@ -1089,7 +1757,7 @@ async def test_create_item_with_tag_seed_emits_completed_status(hass, config_ent
             "entity_id": entity_id,
             "chore_name": "Feed Cat",
             "trigger_entity": tag_entity_id,
-            "interval": {"days": 1},
+            "interval": {"frequency": "daily"},
         },
         blocking=True,
     )

@@ -23,6 +23,10 @@ class BaseChore(abc.ABC):
     uid: str
     chore_name: str
     chore_type: ChoreType
+    # Optional free-text detail, propagated to CalendarEvent.description on
+    # emitted due events. Deliberately no `location` counterpart — that is a
+    # calendar-only concept with no parallel in the todo domain.
+    description: str | None = None
     trigger_tag_id: str | None = None
     assigned_to: list[str] = field(default_factory=list)
     created_at: datetime | None = None
@@ -36,11 +40,24 @@ class BaseChore(abc.ABC):
     previous_skipped_until: datetime | None = None
     # When True, the current occurrence is satisfied terminally — compute_status
     # short-circuits to COMPLETED and compute_due_range/compute_next_due return
-    # None. Set by `apply_completion` for types whose current occurrence does
-    # not roll forward (OneshotChore today; UNTIL/COUNT-exhausted ScheduledChore
-    # under future RRULE work). Cleared by `revert_completion` and by reschedule
-    # paths that re-enter the cycle.
+    # None. Set by `apply_completion` via the `_completion_is_terminal` hook for
+    # types whose completion does not roll forward (every OneshotChore
+    # completion; an UNTIL/COUNT-exhausted ScheduledChore or IntervalChore).
+    # Cleared by `revert_completion` and by reschedule paths that re-enter the
+    # cycle.
     terminal: bool = False
+    # When False (default), a terminal-completed chore is deleted on the next
+    # hide_completed_items / todo.remove_completed_items sweep; when True it
+    # stays in storage, re-enterable via update_item. Cross-type lifecycle
+    # alongside `terminal` (the OneshotChore pattern, extended to UNTIL/COUNT
+    # recurring chores). Serialized within each type's `schedule` sub-dict.
+    persist: bool = False
+    # Lifetime completion counter — incremented by `apply_completion` and
+    # decremented by `revert_completion` so the undo path stays symmetric.
+    # Not backfillable for chores predating the field; counts forward from
+    # zero. Drives the interval-chore `count` lifecycle (an interval occurrence
+    # exists only once completed, so completions are its occurrences).
+    completion_count: int = 0
     # Window before the operative due time during which a chore reads as
     # PENDING (upcoming, completable early). Shared by all chore types.
     pending_period: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_PENDING_PERIOD_MINS))
@@ -154,14 +171,19 @@ class BaseChore(abc.ABC):
             return None
         return (due_at, due_at + self.grace_period)
 
-    @abc.abstractmethod
     def compute_next_due(self, now: datetime) -> datetime | None:
-        """Compute the next due datetime, or None if not applicable.
+        """Return the next due datetime, or None when not applicable.
 
-        Per-type because the cadence-advancement rules genuinely differ:
-        scheduled walks active days, interval adds ``interval`` to
-        ``last_completed``, oneshot has no advancement (terminal).
+        Default implementation: a terminal chore has no next due; otherwise
+        the skip-aware operative anchor *is* the next due. This is exactly
+        right for ``IntervalChore`` and ``OneshotChore``, whose next due is
+        their operative anchor. ``ScheduledChore`` overrides this — its grid
+        next-due pins to the overdue period and otherwise rolls to the
+        following occurrence, semantics the operative anchor doesn't capture.
         """
+        if self.terminal:
+            return None
+        return self._operative_due_at(now)
 
     @abc.abstractmethod
     def apply_default_skip(self, now: datetime) -> datetime | None:
@@ -187,23 +209,45 @@ class BaseChore(abc.ABC):
         When *clear_skip* is True (the default), any active ``skipped_until`` is
         moved to the undo slot and cleared. Pass False to preserve the skip —
         e.g. when the user completed early but still wants the deferral to hold.
+
+        After the completion is recorded, ``_completion_is_terminal`` decides
+        whether it ends the chore's series (every oneshot completion; an
+        ``until`` / ``count``-exhausted recurring completion). The hook runs
+        last so it sees the updated ``completion_count`` and ``last_completed``.
         """
         self.previous_last_completed = self.last_completed
         self.previous_last_completed_by = self.last_completed_by
         self.last_completed = timestamp
         self.last_completed_by = completed_by
+        self.completion_count += 1
         if clear_skip:
             self.previous_skipped_until = self.skipped_until
             self.skipped_until = None
         else:
             self.previous_skipped_until = None
+        if self._completion_is_terminal(timestamp):
+            self.terminal = True
+
+    def _completion_is_terminal(self, timestamp: datetime) -> bool:
+        """Return True when the just-recorded completion ends the series.
+
+        Default False — a recurring chore rolls forward to its next cycle.
+        ``OneshotChore`` overrides to True (every completion is terminal);
+        ``ScheduledChore`` / ``IntervalChore`` override to test their
+        ``until`` / ``count`` lifecycle. Called by ``apply_completion`` after
+        the completion is recorded.
+        """
+        del timestamp
+        return False
 
     def revert_completion(self) -> None:
         """Restore the previous completion state from the undo slot.
 
         Also restores ``skipped_until`` if it was cleared by the completion,
-        keeping skip state symmetric with the other previous-* fields.
-        Raises ValueError if there is no completion to revert.
+        keeping skip state symmetric with the other previous-* fields, and
+        clears ``terminal`` — reverting a completion always reopens the cycle,
+        for every chore type. Raises ValueError if there is no completion to
+        revert.
         """
         if self.last_completed is None:
             msg = "Chore has no completion to revert."
@@ -214,6 +258,11 @@ class BaseChore(abc.ABC):
         self.previous_last_completed = None
         self.previous_last_completed_by = None
         self.previous_skipped_until = None
+        self.terminal = False
+        # Floor at zero: chores stored before the counter existed load with
+        # completion_count=0 even when last_completed is set, so a revert of
+        # such a completion must not go negative.
+        self.completion_count = max(0, self.completion_count - 1)
 
     def _skip_anchor_active(self, now: datetime) -> bool:
         """Return True while ``skipped_until`` should override the type's normal anchor.
@@ -263,10 +312,12 @@ class BaseChore(abc.ABC):
             "uid": self.uid,
             "chore_name": self.chore_name,
             "chore_type": str(self.chore_type),
+            "description": self.description,
             "schedule": self._schedule_to_dict(),
             "pending_period_mins": int(self.pending_period.total_seconds() // 60),
             "grace_period_mins": int(self.grace_period.total_seconds() // 60),
             "terminal": self.terminal,
+            "completion_count": self.completion_count,
             "trigger_tag_id": self.trigger_tag_id,
             "assigned_to": list(self.assigned_to),
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -327,6 +378,7 @@ def _extract_base_kwargs(data: dict[str, Any], chore_type: ChoreType) -> dict[st
         "uid": data["uid"],
         "chore_name": data["chore_name"],
         "chore_type": chore_type,
+        "description": data.get("description"),
         "trigger_tag_id": data.get("trigger_tag_id"),
         "assigned_to": list(data.get("assigned_to", [])),
         "created_at": dt_util.parse_datetime(created_at_raw) if created_at_raw else None,
@@ -341,6 +393,7 @@ def _extract_base_kwargs(data: dict[str, Any], chore_type: ChoreType) -> dict[st
             dt_util.parse_datetime(previous_skipped_until_raw) if previous_skipped_until_raw else None
         ),
         "terminal": bool(data.get("terminal", False)),
+        "completion_count": int(data.get("completion_count", 0)),
         "pending_period": timedelta(minutes=data.get("pending_period_mins", DEFAULT_PENDING_PERIOD_MINS)),
         "grace_period": timedelta(minutes=data.get("grace_period_mins", DEFAULT_GRACE_PERIOD_MINS)),
     }

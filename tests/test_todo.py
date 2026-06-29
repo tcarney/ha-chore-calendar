@@ -16,7 +16,7 @@ from custom_components.chore_calendar.const import (
     ChoreType,
 )
 from custom_components.chore_calendar.models import IntervalChore, ScheduledChore
-from homeassistant.components.todo import TodoItemStatus, TodoListEntityFeature
+from homeassistant.components.todo import TodoItem, TodoItemStatus, TodoListEntityFeature
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
@@ -100,14 +100,17 @@ async def test_todo_entity_shares_device_with_calendar(hass, config_entry):
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_todo_entity_only_advertises_update(hass, config_entry):
-    """Only UPDATE_TODO_ITEM is advertised; CREATE/DELETE/MOVE are not.
+    """Only UPDATE_TODO_ITEM is advertised; CREATE/DELETE/MOVE/SET_DESCRIPTION are not.
 
     Mutation lives on chore_calendar.* services. Advertising DELETE_TODO_ITEM
     would route both todo.remove_item and todo.remove_completed_items through
     async_delete_todo_items, where we can't cleanly distinguish "permanently
     delete this chore" from "clear from completed view" — the native card's
     "permanently deleted" warning would be misleading for recurring chores
-    whose last_completed is load-bearing.
+    whose last_completed is load-bearing. SET_DESCRIPTION_ON_ITEM stays off
+    because the todo card's edit dialog submits due_datetime alongside the
+    description, which the entity cannot accept (due times are derived from
+    the chore schedule) — see the todo.py module docstring.
     """
     entity_id = await _setup_entry(hass, config_entry)
     state = hass.states.get(entity_id)
@@ -133,7 +136,8 @@ async def test_todo_items_maps_due_to_needs_action(hass, config_entry):
         uid="due-chore",
         chore_name="Take Out Trash",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=7),
     )
@@ -174,7 +178,8 @@ async def test_needs_action_item_omits_previous_period_completion(hass, config_e
         uid="recurring",
         chore_name="Recurring Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
         grace_period=timedelta(hours=1),
         last_completed=previous_completion,
     )
@@ -204,7 +209,8 @@ async def test_todo_items_maps_completed_to_completed(hass, config_entry):
         uid="done",
         chore_name="Water Plants",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=last_completed,
     )
@@ -276,7 +282,8 @@ async def test_todo_items_sort_order(hass, config_entry):
         uid="due",
         chore_name="Due Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=7),
     )
@@ -285,7 +292,8 @@ async def test_todo_items_sort_order(hass, config_entry):
         uid="overdue",
         chore_name="Overdue Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=3),
     )
@@ -306,7 +314,8 @@ async def test_todo_items_sort_order(hass, config_entry):
         uid="completed",
         chore_name="Completed Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(hours=1),
     )
@@ -334,7 +343,8 @@ async def test_todo_entity_state_counts_needs_action(hass, config_entry):
         uid="due-a",
         chore_name="Due A",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         created_at=FROZEN_NOW,
     )
@@ -342,7 +352,8 @@ async def test_todo_entity_state_counts_needs_action(hass, config_entry):
         uid="due-b",
         chore_name="Due B",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         created_at=FROZEN_NOW,
     )
@@ -350,7 +361,8 @@ async def test_todo_entity_state_counts_needs_action(hass, config_entry):
         uid="done",
         chore_name="Done",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(hours=1),
     )
@@ -379,7 +391,8 @@ async def test_update_needs_action_to_completed_records_completion(hass, config_
         uid="chore-1",
         chore_name="Test Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         created_at=FROZEN_NOW,
     )
@@ -418,7 +431,8 @@ async def test_update_completed_to_needs_action_reverts_completion(hass, config_
         uid="chore-1",
         chore_name="Test Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(hours=1),
     )
@@ -446,6 +460,92 @@ async def test_update_completed_to_needs_action_reverts_completion(hass, config_
     assert len(events) == 1
     assert events[0].data["to_status"] == "pending"
     assert events[0].data["source"] == ChoreEventSource.UNCOMPLETE
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_todo_items_carry_description(hass, config_entry):
+    """Both actionable and completed items surface the chore's description."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    due_chore = IntervalChore(
+        uid="due-chore",
+        chore_name="Take Out Trash",
+        chore_type=ChoreType.INTERVAL,
+        description="Bins go out Sunday night.",
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(days=7),
+    )
+    done_chore = IntervalChore(
+        uid="done-chore",
+        chore_name="Water Plants",
+        chore_type=ChoreType.INTERVAL,
+        description="Only the porch ones.",
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(hours=1),
+    )
+    await runtime.store.async_create_chore(due_chore)
+    await runtime.store.async_create_chore(done_chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        entity = _get_todo_entity(hass, entity_id)
+        assert entity is not None
+        items = {item.uid: item for item in entity.todo_items}
+
+    assert items["due-chore"].status == TodoItemStatus.NEEDS_ACTION
+    assert items["due-chore"].description == "Bins go out Sunday night."
+    assert items["done-chore"].status == TodoItemStatus.COMPLETED
+    assert items["done-chore"].description == "Only the porch ones."
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_description_is_ignored(hass, config_entry):
+    """A description change in the merged TodoItem payload is silently ignored.
+
+    The stored description is only writable via chore_calendar.update_item —
+    see the todo.py module docstring for why SET_DESCRIPTION_ON_ITEM is off.
+    """
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = IntervalChore(
+        uid="chore-1",
+        chore_name="Test Chore",
+        chore_type=ChoreType.INTERVAL,
+        description="Original note.",
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(days=7),
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    # Call the entity method directly with a mutated description — the
+    # todo.update_item service would reject the field outright (the entity
+    # doesn't advertise SET_DESCRIPTION_ON_ITEM), so this exercises the
+    # handler's own ignore path with a merged payload.
+    entity = _get_todo_entity(hass, entity_id)
+    assert entity is not None
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await entity.async_update_todo_item(
+            TodoItem(
+                uid="chore-1",
+                summary="Test Chore",
+                status=TodoItemStatus.NEEDS_ACTION,
+                description="Edited note.",
+            )
+        )
+        await hass.async_block_till_done()
+
+    updated = runtime.store.get_chore("chore-1")
+    assert updated is not None
+    assert updated.description == "Original note."
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -477,7 +577,8 @@ async def test_update_uncomplete_with_no_completion_raises(hass, config_entry):
         uid="never-done",
         chore_name="Never Done",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         created_at=FROZEN_NOW,
     )
@@ -508,7 +609,8 @@ async def test_update_same_status_is_noop(hass, config_entry):
         uid="chore-1",
         chore_name="Test Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(hours=1),  # COMPLETED
     )
@@ -540,7 +642,8 @@ async def test_recurring_chore_reappears_as_needs_action(hass, config_entry):
         uid="recurring",
         chore_name="Recurring Chore",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
         grace_period=timedelta(hours=1),
         created_at=FROZEN_NOW,
     )

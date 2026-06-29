@@ -1,3 +1,4 @@
+import { RRule, Weekday } from "rrule";
 import { fireEvent } from "./fire-event";
 import type {
   ActionConfig,
@@ -243,37 +244,135 @@ function formatLocalTime(timeStr: string): string {
   }).format(dt);
 }
 
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Format a season window compactly: a contiguous (possibly year-wrapping)
+ * run reads as a range ("Oct–Mar"), anything else as a list ("Oct, Dec"). */
+function formatMonthWindow(months: unknown): string {
+  const values = Array.isArray(months) ? months.map(Number).filter((m) => m >= 1 && m <= 12) : [];
+  const set = new Set(values);
+  if (set.size === 0 || set.size >= 12) return "";
+  const wrap = (m: number) => ((m - 1 + 12) % 12) + 1;
+  const starts = [...set].filter((m) => !set.has(wrap(m - 1)));
+  if (starts.length === 1 && set.size > 1) {
+    let end = starts[0];
+    while (set.has(wrap(end + 1))) end = wrap(end + 1);
+    return `${MONTH_SHORT[starts[0] - 1]}–${MONTH_SHORT[end - 1]}`;
+  }
+  return [...set]
+    .sort((a, b) => a - b)
+    .map((m) => MONTH_SHORT[m - 1])
+    .join(", ");
+}
+
+/** Format a date with the browser's locale ("Jun 30, 2027"). */
+function formatDate(date: Date, utc = false): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    ...(utc ? { timeZone: "UTC" } : {}),
+  }).format(date);
+}
+
+/** Append the shared lifecycle suffix (", until Jun 30, 2027" / ", 3 times"). */
+function lifecycleSuffix(until: string, count: unknown): string {
+  let suffix = until ? `, until ${until}` : "";
+  const n = Number(count ?? 0);
+  if (n > 0) suffix += `, ${n} time${n !== 1 ? "s" : ""}`;
+  return suffix;
+}
+
+/** Render a scheduled chore's rrule the way HA core's calendar does.
+ *
+ * Mirrors `renderRRuleAsText` (rrule.js `toText()` with the
+ * `isFullyConvertibleToText` guard and a raw-string fallback), with two
+ * display normalizations: a single BYSETPOS folds onto the weekday (toText
+ * silently drops a bare BYSETPOS — "last Friday" would read "Friday"), and
+ * UNTIL/COUNT are lifted out so the time-of-day reads before the lifecycle
+ * suffix.
+ */
+function formatRRuleSchedule(schedule: Record<string, unknown>): string {
+  const rruleStr = String(schedule.rrule ?? "");
+  const time = formatLocalTime(String(schedule.time ?? ""));
+
+  // Plain daily/weekly shapes keep the card's compact rendering.
+  if (rruleStr === "FREQ=DAILY") return `Daily at ${time}`;
+  if (/^FREQ=WEEKLY;BYDAY=[A-Z,]+$/.test(rruleStr)) {
+    const days = (schedule.active_days as string[] | undefined) ?? [];
+    if (days.length > 0 && days.length < 7) return `${days.join(", ")} at ${time}`;
+    return `Daily at ${time}`;
+  }
+
+  try {
+    const opts = { ...RRule.fromString(`RRULE:${rruleStr}`).origOptions };
+    const pos = Array.isArray(opts.bysetpos) ? opts.bysetpos : opts.bysetpos != null ? [opts.bysetpos] : [];
+    if (pos.length === 1 && opts.byweekday) {
+      const weekdays = Array.isArray(opts.byweekday) ? opts.byweekday : [opts.byweekday];
+      opts.byweekday = weekdays.map((day) =>
+        day instanceof Weekday
+          ? new Weekday(day.weekday, pos[0])
+          : typeof day === "number"
+            ? new Weekday(day, pos[0])
+            : day,
+      );
+      delete opts.bysetpos;
+    }
+    const { until, count } = opts;
+    delete opts.until;
+    delete opts.count;
+
+    const display = new RRule(opts);
+    if (!display.isFullyConvertibleToText()) return `${rruleStr} at ${time}`;
+    const text = display.toText();
+    // rrule.js parses UNTIL as UTC — format it as such to keep the wall date.
+    return (
+      `${text.charAt(0).toUpperCase()}${text.slice(1)} at ${time}` +
+      lifecycleSuffix(until ? formatDate(until, true) : "", count)
+    );
+  } catch {
+    return rruleStr;
+  }
+}
+
+const INTERVAL_UNITS: Record<string, string> = {
+  minutely: "minute",
+  hourly: "hour",
+  daily: "day",
+  weekly: "week",
+  monthly: "month",
+  yearly: "year",
+};
+
+/** Render an interval chore from freq/interval with season and lifecycle suffixes. */
+function formatIntervalSchedule(schedule: Record<string, unknown>): string {
+  const unit = INTERVAL_UNITS[String(schedule.freq)] ?? String(schedule.freq);
+  const n = Number(schedule.interval ?? 1);
+  let text = n === 1 ? `Every ${unit}` : `Every ${n} ${unit}s`;
+  const window = formatMonthWindow(schedule.bymonth);
+  if (window) text += `, ${window}`;
+  // until is naive local ISO — Date() parses it in the local zone.
+  const until = schedule.until ? formatDate(new Date(String(schedule.until))) : "";
+  return text + lifecycleSuffix(until, schedule.count);
+}
+
 /** Format a schedule object (dict) into a human-readable string. */
 export function formatSchedule(
   schedule: string | Record<string, unknown>,
 ): string {
   if (typeof schedule === "string") return schedule;
 
-  // Scheduled chore: { time, active_days, early_window_mins, grace_period_mins }
-  if ("time" in schedule) {
-    const time = formatLocalTime(String(schedule.time ?? ""));
-    const days = schedule.active_days as string[] | undefined;
-    if (days && days.length > 0 && days.length < 7) {
-      return `${days.join(", ")} at ${time}`;
-    }
-    return `Daily at ${time}`;
+  // Scheduled chore: { rrule, dtstart, time, active_days, ... }
+  if ("rrule" in schedule) {
+    return formatRRuleSchedule(schedule);
   }
 
-  // Interval chore: { interval_mins, grace_period_mins }
-  if ("interval_mins" in schedule) {
-    const mins = Number(schedule.interval_mins);
-    if (mins >= 1440 && mins % 1440 === 0) {
-      const days = mins / 1440;
-      return `Every ${days} day${days !== 1 ? "s" : ""}`;
-    }
-    if (mins >= 60 && mins % 60 === 0) {
-      const hrs = mins / 60;
-      return `Every ${hrs} hour${hrs !== 1 ? "s" : ""}`;
-    }
-    return `Every ${mins} minute${mins !== 1 ? "s" : ""}`;
+  // Interval chore: { freq, interval, bymonth?, until?, count?, ... }
+  if ("freq" in schedule) {
+    return formatIntervalSchedule(schedule);
   }
 
-  // Oneshot chore: { due_datetime, early_window_mins, grace_period_mins }
+  // Oneshot chore: { due_datetime, pending_period_mins, grace_period_mins }
   if ("due_datetime" in schedule) {
     const due = schedule.due_datetime as string | null | undefined;
     if (!due) return "Unscheduled";

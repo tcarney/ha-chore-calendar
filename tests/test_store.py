@@ -30,7 +30,8 @@ async def test_store_create_and_get(hass):
         uid="water_filter",
         chore_name="Change Water Filter",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=90),
+        freq="daily",
+        interval=90,
         grace_period=timedelta(days=14),
     )
     await store.async_create_chore(chore)
@@ -50,7 +51,8 @@ async def test_store_update_chore(hass):
         uid="water_filter",
         chore_name="Change Water Filter",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=90),
+        freq="daily",
+        interval=90,
     )
     await store.async_create_chore(chore)
 
@@ -72,7 +74,8 @@ async def test_store_delete_chore(hass):
         uid="water_filter",
         chore_name="Change Water Filter",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=90),
+        freq="daily",
+        interval=90,
     )
     await store.async_create_chore(chore)
     await store.async_delete_chore("water_filter")
@@ -114,7 +117,8 @@ async def test_store_get_all_returns_copy(hass):
         uid="test",
         chore_name="Test",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=1),
+        freq="daily",
+        interval=1,
     )
     await store.async_create_chore(chore)
 
@@ -135,8 +139,9 @@ async def test_store_delete_nonexistent_is_noop(hass):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_storage_migration_v2_to_v3(hass):
-    """v2→v3 migration lifts early_window/grace mins out of schedule and renames the former."""
+async def test_storage_migration_v2_to_v5(hass):
+    """v2 payloads migrate through every step: the v3 window-field lift, the v4
+    scheduled rrule rewrite, and the v5 interval freq rewrite."""
     entry_id = "migration_entry"
     key = f"{DOMAIN}.{entry_id}"
 
@@ -200,15 +205,186 @@ async def test_storage_migration_v2_to_v3(hass):
     assert oneshot.pending_period == timedelta(minutes=60)
     assert oneshot.grace_period == timedelta(minutes=30)
 
-    # After save, the on-disk payload uses the new top-level keys and the
-    # schedule dicts no longer carry the old window fields.
+    # After save, the on-disk payload uses the new top-level keys, the
+    # schedule dicts no longer carry the old window fields, and the per-type
+    # schedules use the current {rrule, dtstart} / {freq, interval} shapes.
     await store.async_save()
-    persisted = await Store(hass, 3, key).async_load()
+    persisted = await Store(hass, 5, key).async_load()
     assert persisted is not None
     by_uid = {item["uid"]: item for item in persisted["items"]}
     assert by_uid["scheduled-uid"]["pending_period_mins"] == 240
     assert by_uid["scheduled-uid"]["grace_period_mins"] == 90
-    assert "early_window_mins" not in by_uid["scheduled-uid"]["schedule"]
-    assert "grace_period_mins" not in by_uid["scheduled-uid"]["schedule"]
+    assert by_uid["scheduled-uid"]["schedule"] == {
+        "rrule": "FREQ=DAILY",
+        # No created_at in the v2 payload — dtstart falls back to the
+        # phase-neutral anchor date.
+        "dtstart": "1970-01-01T08:00:00",
+        "persist": False,
+    }
     assert by_uid["interval-uid"]["pending_period_mins"] == DEFAULT_PENDING_PERIOD_MINS
-    assert "grace_period_mins" not in by_uid["interval-uid"]["schedule"]
+    # 129600 minutes = 90 days (not a whole number of weeks).
+    assert by_uid["interval-uid"]["schedule"] == {"freq": "daily", "interval": 90, "persist": False}
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_storage_migration_v3_to_v5(hass):
+    """v3 payloads rewrite scheduled schedules to {rrule, dtstart} and interval
+    schedules to {freq, interval}."""
+    entry_id = "migration_v4_entry"
+    key = f"{DOMAIN}.{entry_id}"
+
+    raw_store: Store[dict] = Store(hass, 3, key)
+    await raw_store.async_save(
+        {
+            "items": [
+                {
+                    "uid": "weekly-uid",
+                    "chore_name": "Trash Night",
+                    "chore_type": "scheduled",
+                    "schedule": {
+                        "time": "19:30:00",
+                        "active_days": ["mon", "thu"],
+                    },
+                    "pending_period_mins": 180,
+                    "grace_period_mins": 60,
+                    "created_at": "2026-05-04T10:15:00-04:00",
+                },
+                {
+                    "uid": "interval-uid",
+                    "chore_name": "Change Filter",
+                    "chore_type": "interval",
+                    "schedule": {
+                        "interval_mins": 129600,
+                    },
+                    "pending_period_mins": 180,
+                    "grace_period_mins": 1440,
+                },
+            ],
+        }
+    )
+
+    store = ChoreStore(hass, entry_id)
+    await store.async_load()
+
+    weekly = store.get_chore("weekly-uid")
+    assert isinstance(weekly, ScheduledChore)
+    assert weekly.rrule == "FREQ=WEEKLY;BYDAY=MO,TH"
+    # dtstart anchors to created_at's date at the legacy time-of-day.
+    assert weekly.dtstart is not None
+    assert weekly.dtstart.isoformat() == "2026-05-04T19:30:00"
+
+    interval = store.get_chore("interval-uid")
+    assert isinstance(interval, IntervalChore)
+    # 129600 minutes = 90 days (not a whole number of weeks).
+    assert (interval.freq, interval.interval) == ("daily", 90)
+
+    await store.async_save()
+    persisted = await Store(hass, 5, key).async_load()
+    assert persisted is not None
+    by_uid = {item["uid"]: item for item in persisted["items"]}
+    assert by_uid["weekly-uid"]["schedule"] == {
+        "rrule": "FREQ=WEEKLY;BYDAY=MO,TH",
+        "dtstart": "2026-05-04T19:30:00",
+        "persist": False,
+    }
+    assert by_uid["interval-uid"]["schedule"] == {"freq": "daily", "interval": 90, "persist": False}
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_storage_migration_v4_to_v5(hass):
+    """v4→v5 rewrites interval schedules onto the largest exactly-dividing unit."""
+    entry_id = "migration_v5_entry"
+    key = f"{DOMAIN}.{entry_id}"
+
+    raw_store: Store[dict] = Store(hass, 4, key)
+    await raw_store.async_save(
+        {
+            "items": [
+                {
+                    "uid": "fortnight-uid",
+                    "chore_name": "Flip Mattress",
+                    "chore_type": "interval",
+                    "schedule": {"interval_mins": 20160},
+                    "pending_period_mins": 180,
+                    "grace_period_mins": 1440,
+                },
+                {
+                    "uid": "hours-uid",
+                    "chore_name": "Stretch Break",
+                    "chore_type": "interval",
+                    "schedule": {"interval_mins": 240},
+                    "pending_period_mins": 30,
+                    "grace_period_mins": 30,
+                },
+                {
+                    "uid": "scheduled-uid",
+                    "chore_name": "Trash Night",
+                    "chore_type": "scheduled",
+                    "schedule": {
+                        "rrule": "FREQ=DAILY",
+                        "dtstart": "2026-05-04T08:00:00",
+                    },
+                    "pending_period_mins": 180,
+                    "grace_period_mins": 60,
+                },
+            ],
+        }
+    )
+
+    store = ChoreStore(hass, entry_id)
+    await store.async_load()
+
+    fortnight = store.get_chore("fortnight-uid")
+    assert isinstance(fortnight, IntervalChore)
+    assert (fortnight.freq, fortnight.interval) == ("weekly", 2)
+
+    hours = store.get_chore("hours-uid")
+    assert isinstance(hours, IntervalChore)
+    assert (hours.freq, hours.interval) == ("hourly", 4)
+
+    # Scheduled schedules pass through v5 untouched.
+    scheduled = store.get_chore("scheduled-uid")
+    assert isinstance(scheduled, ScheduledChore)
+    assert scheduled.rrule == "FREQ=DAILY"
+
+    await store.async_save()
+    persisted = await Store(hass, 5, key).async_load()
+    assert persisted is not None
+    by_uid = {item["uid"]: item for item in persisted["items"]}
+    assert by_uid["fortnight-uid"]["schedule"] == {"freq": "weekly", "interval": 2, "persist": False}
+    assert by_uid["hours-uid"]["schedule"] == {"freq": "hourly", "interval": 4, "persist": False}
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_storage_migration_v4_zero_interval_clamped(hass):
+    """A degenerate v4 ``interval_mins=0`` migrates to a valid (>= 1) interval.
+
+    The old v4 service had no minimum guard, so a zero interval could land in
+    storage; left as ``{freq: minutely, interval: 0}`` it would never advance
+    the cycle (perpetually due). The migration clamps it instead.
+    """
+    entry_id = "migration_zero_entry"
+    key = f"{DOMAIN}.{entry_id}"
+
+    raw_store: Store[dict] = Store(hass, 4, key)
+    await raw_store.async_save(
+        {
+            "items": [
+                {
+                    "uid": "zero-uid",
+                    "chore_name": "Broken Interval",
+                    "chore_type": "interval",
+                    "schedule": {"interval_mins": 0},
+                    "pending_period_mins": 180,
+                    "grace_period_mins": 60,
+                },
+            ],
+        }
+    )
+
+    store = ChoreStore(hass, entry_id)
+    await store.async_load()
+
+    chore = store.get_chore("zero-uid")
+    assert isinstance(chore, IntervalChore)
+    assert (chore.freq, chore.interval) == ("minutely", 1)

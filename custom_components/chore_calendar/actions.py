@@ -17,8 +17,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
-from .const import EVENT_ITEM_DELETED, LOGGER, ChoreEventSource, ChoreStatus
-from .models import OneshotChore
+from .const import EVENT_ITEM_DELETED, LOGGER, ChoreEventSource
 
 if TYPE_CHECKING:
     from .coordinator import ChoreCalendarCoordinator
@@ -90,13 +89,16 @@ async def async_apply_completed_cleared_at(
     entity_id: str,
     cleared_at: datetime,
 ) -> None:
-    """Set the per-list completed-items cutoff and sweep persist=false oneshots.
+    """Set the per-list completed-items cutoff and sweep persist=false chores.
 
     Used by both the ``hide_completed_items`` service handler and the todo
     entity's ``async_remove_completed_items``. After updating the cutoff,
-    deletes any terminal-completed oneshot whose ``last_completed`` precedes
-    the new cutoff and whose ``persist`` flag is False — these chores are
-    "done with" by user intent. Each deletion fires
+    deletes any terminal-completed oneshot — and any until/count-exhausted
+    (``terminal``) scheduled or interval chore — whose ``last_completed``
+    precedes the new cutoff and whose ``persist`` flag is False; these
+    chores are "done with" by user intent. A recurring chore that is merely
+    completed for the current cycle is never swept: only the ``terminal``
+    flag makes it eligible. Each deletion fires
     ``chore_calendar_item_deleted`` with the supplied *entity_id* in the
     payload.
     """
@@ -107,18 +109,17 @@ async def async_apply_completed_cleared_at(
         entity_id,
     )
 
-    now = dt_util.now()
     swept = 0
     for chore in list(store.get_all_chores().values()):
-        if not isinstance(chore, OneshotChore):
-            continue
-        if chore.persist:
+        # Sweep only terminal-completed chores not flagged to persist. The
+        # `terminal` gate is uniform: a completed oneshot is terminal
+        # (apply_completion sets it), and a recurring chore is terminal only
+        # once its UNTIL/COUNT series is exhausted — so a dormant-between-cycles
+        # recurring chore, or a rescheduled (re-activated) oneshot, is kept.
+        if not chore.terminal or chore.persist:
             continue
         if chore.last_completed is None or chore.last_completed >= cleared_at:
             continue
-        if chore.compute_status(now) != ChoreStatus.COMPLETED:
-            continue
-        # Eligible: terminal-completed, pre-cutoff, and not flagged to persist.
         await store.async_delete_chore(chore.uid)
         hass.bus.async_fire(
             EVENT_ITEM_DELETED,
@@ -130,7 +131,7 @@ async def async_apply_completed_cleared_at(
             },
         )
         LOGGER.info(
-            "deleted persist=false oneshot %s (%s)",
+            "deleted persist=false chore %s (%s)",
             chore.chore_name,
             chore.uid,
         )

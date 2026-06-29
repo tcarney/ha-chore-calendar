@@ -9,8 +9,65 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import DEFAULT_PENDING_PERIOD_MINS, DOMAIN, STORAGE_VERSION
+from .const import DEFAULT_PENDING_PERIOD_MINS, DOMAIN, STORAGE_VERSION, ChoreType
 from .models import BaseChore
+
+# ---------------------------------------------------------------------------
+# Frozen migration translation helpers.
+#
+# These encode the exact v3→v4 / v4→v5 schedule rewrites and deliberately do
+# NOT import live model code — a migration must keep producing byte-identical
+# output even as the models evolve.
+# ---------------------------------------------------------------------------
+
+_V3_DAY_TO_BYDAY = {
+    "mon": "MO",
+    "tue": "TU",
+    "wed": "WE",
+    "thu": "TH",
+    "fri": "FR",
+    "sat": "SA",
+    "sun": "SU",
+}
+# Phase-neutral dtstart date when a v3 item carries no created_at.
+_V3_FALLBACK_ANCHOR = datetime(1970, 1, 1)
+# Largest-first minute table for the v4→v5 interval rewrite.
+_V4_UNIT_MINS = {"weekly": 10080, "daily": 1440, "hourly": 60, "minutely": 1}
+
+
+def _migrate_v3_scheduled_schedule(schedule: dict[str, Any], created_at: datetime | None) -> dict[str, Any]:
+    """Translate a v3 ``{time, active_days}`` schedule to v4 ``{rrule, dtstart}``.
+
+    Empty (or unrecognized — v3 never validated day names) ``active_days``
+    means every day. ``dtstart``'s date comes from ``created_at`` — phase is
+    irrelevant at INTERVAL=1, but the anchor must exist.
+    """
+    parts = str(schedule.get("time", "08:00:00")).split(":")
+    hour, minute = int(parts[0]), int(parts[1])
+    codes = [_V3_DAY_TO_BYDAY[day] for day in schedule.get("active_days", []) if day in _V3_DAY_TO_BYDAY]
+    rrule = "FREQ=WEEKLY;BYDAY=" + ",".join(codes) if codes else "FREQ=DAILY"
+    anchor = created_at.date() if created_at is not None else _V3_FALLBACK_ANCHOR.date()
+    return {
+        "rrule": rrule,
+        "dtstart": datetime(anchor.year, anchor.month, anchor.day, hour, minute).isoformat(),
+    }
+
+
+def _migrate_v4_interval_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
+    """Translate a v4 ``{interval_mins}`` schedule to v5 ``{freq, interval}``.
+
+    Maps onto the largest exactly-dividing unit; anything that doesn't
+    divide falls through to ``minutely`` (lossless by construction).
+    Missing ``interval_mins`` maps to the model default (1 day). A
+    degenerate ``interval_mins <= 0`` (the old v4 service had no minimum
+    guard) is clamped to a valid 1-minute interval so the cycle still
+    advances — the model rejects ``interval < 1`` outright.
+    """
+    mins = int(schedule.get("interval_mins", 1440))
+    for freq, unit in _V4_UNIT_MINS.items():
+        if mins >= unit and mins % unit == 0:
+            return {"freq": freq, "interval": mins // unit}
+    return {"freq": "minutely", "interval": max(1, mins)}
 
 
 class _ChoreCalendarStore(Store[dict[str, Any]]):
@@ -35,6 +92,19 @@ class _ChoreCalendarStore(Store[dict[str, Any]]):
         load time by ``BaseChore.from_dict`` (terminal is backfilled from
         the completion-vs-pending-window relationship; the dropped field is
         ignored), so no work is needed here.
+
+        v3 → v4: rewrite each scheduled item's ``schedule`` dict from
+        ``{time, active_days}`` to ``{rrule, dtstart}``. ``dtstart``'s date
+        comes from the item's ``created_at`` (the series phase anchor —
+        irrelevant at INTERVAL=1, but it must exist). Interval and oneshot
+        schedules are unchanged. The other v4 additions (``description``,
+        ``completion_count``) ride on load-time defaults in
+        ``BaseChore.from_dict``.
+
+        v4 → v5: rewrite each interval item's ``schedule`` dict from
+        ``{interval_mins}`` to ``{freq, interval}``, mapped onto the largest
+        exactly-dividing unit (lossless by construction — anything that
+        doesn't divide falls through to ``minutely``).
         """
         if old_major_version < 3:
             for item in old_data.get("items", []):
@@ -44,6 +114,18 @@ class _ChoreCalendarStore(Store[dict[str, Any]]):
                 item["pending_period_mins"] = pending_mins
                 if grace_mins is not None:
                     item["grace_period_mins"] = grace_mins
+        if old_major_version < 4:
+            for item in old_data.get("items", []):
+                if item.get("chore_type") != str(ChoreType.SCHEDULED):
+                    continue
+                created_raw = item.get("created_at")
+                created_at = dt_util.parse_datetime(created_raw) if created_raw else None
+                item["schedule"] = _migrate_v3_scheduled_schedule(item.get("schedule", {}), created_at)
+        if old_major_version < 5:
+            for item in old_data.get("items", []):
+                if item.get("chore_type") != str(ChoreType.INTERVAL):
+                    continue
+                item["schedule"] = _migrate_v4_interval_schedule(item.get("schedule", {}))
         return old_data
 
 

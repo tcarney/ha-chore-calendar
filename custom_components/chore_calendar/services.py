@@ -41,6 +41,12 @@ from .const import (
 )
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore, OneshotChore
+from .recurrence import (
+    interval_recurrence_changed,
+    interval_selector_to_schedule,
+    scheduled_recurrence_changed,
+    scheduled_selector_to_schedule,
+)
 from .store import ChoreStore
 
 # Service-specific field keys (not shared with sensor attributes).
@@ -48,6 +54,7 @@ ATTR_BEFORE = "before"
 ATTR_CHORE_NAME = "chore_name"
 ATTR_COMPLETED_AT = "completed_at"
 ATTR_COMPLETED_BY = "completed_by"
+ATTR_DESCRIPTION = "description"
 ATTR_ENTITY_ID = "entity_id"
 ATTR_KEEP_FOR = "keep_for"
 ATTR_KEEP_SKIP = "keep_skip"
@@ -65,6 +72,7 @@ SERVICE_CREATE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
         vol.Required(ATTR_CHORE_NAME): cv.string,
+        vol.Optional(ATTR_DESCRIPTION): cv.string,
         vol.Optional(ATTR_TRIGGER_ENTITY): cv.entity_id,
         vol.Optional(ATTR_ASSIGNED_TO, default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
         vol.Optional(ATTR_SCHEDULED): dict,
@@ -80,6 +88,7 @@ SERVICE_UPDATE_SCHEMA = vol.Schema(
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
         vol.Optional(ATTR_ITEM): cv.string,
         vol.Optional(ATTR_CHORE_NAME): cv.string,
+        vol.Optional(ATTR_DESCRIPTION): cv.string,
         vol.Optional(ATTR_TRIGGER_ENTITY): cv.entity_id,
         vol.Optional(ATTR_ASSIGNED_TO): vol.All(cv.ensure_list, [cv.entity_id]),
         vol.Optional(ATTR_SCHEDULED): dict,
@@ -276,13 +285,21 @@ def _apply_overlays(
     """
     schedule = chore_dict.setdefault("schedule", {})
     if chore_type == ChoreType.SCHEDULED and ATTR_SCHEDULED in data:
-        obj = data[ATTR_SCHEDULED]
-        if "time" in obj:
-            schedule["time"] = obj["time"]
-        if "active_days" in obj:
-            schedule["active_days"] = obj["active_days"]
+        # The structured selector is a full recurrence specification — the
+        # synthesized schedule replaces the stored one (dtstart / persist
+        # carry over when omitted; see recurrence.py).
+        created_raw = chore_dict.get("created_at")
+        new_schedule = scheduled_selector_to_schedule(
+            data[ATTR_SCHEDULED],
+            existing=dict(schedule),
+            created_at=dt_util.parse_datetime(created_raw) if created_raw else None,
+        )
+        schedule.clear()
+        schedule.update(new_schedule)
     elif chore_type == ChoreType.INTERVAL and ATTR_INTERVAL in data:
-        schedule["interval_mins"] = _duration_to_mins(data[ATTR_INTERVAL])
+        new_schedule = interval_selector_to_schedule(data[ATTR_INTERVAL], existing=dict(schedule))
+        schedule.clear()
+        schedule.update(new_schedule)
     elif chore_type == ChoreType.ONESHOT and ATTR_ONESHOT in data:
         obj = data[ATTR_ONESHOT]
         if "due_datetime" in obj:
@@ -306,8 +323,12 @@ def _build_chore_from_data(data: dict[str, Any]) -> BaseChore:
         "uid": data["uid"],
         "chore_name": data[ATTR_CHORE_NAME],
         "chore_type": str(chore_type),
+        # Normalize empty string to None — the UI text selector submits ""
+        # for a cleared field.
+        "description": data.get(ATTR_DESCRIPTION) or None,
         "schedule": {},
         "assigned_to": list(data.get(ATTR_ASSIGNED_TO, [])),
+        "created_at": data.get("created_at"),
     }
     _apply_overlays(data, chore_dict, chore_type)
     return BaseChore.from_dict(chore_dict)
@@ -322,11 +343,12 @@ async def _async_handle_create(call: ServiceCall) -> None:
     # Resolve tag UUID if trigger_entity is a tag.
     trigger_tag_id = _resolve_trigger_tag_id(call.hass, call.data.get(ATTR_TRIGGER_ENTITY))
 
-    # Inject the generated uid for _build_chore_from_data.
-    data = {**call.data, "uid": uid}
+    # Inject the generated uid and creation timestamp for
+    # _build_chore_from_data — created_at must be present at construction
+    # time so a scheduled chore's dtstart anchors to the creation date.
+    data = {**call.data, "uid": uid, "created_at": dt_util.now().isoformat()}
     chore = _build_chore_from_data(data)
     chore.trigger_tag_id = trigger_tag_id
-    chore.created_at = dt_util.now()
 
     # Seed last_completed from the tag's last-scanned time so existing tag
     # systems transfer state into chore calendar on creation. Side effect:
@@ -372,6 +394,9 @@ async def _async_handle_update(call: ServiceCall) -> None:
     updated = existing.to_dict()
     if ATTR_CHORE_NAME in call.data:
         updated["chore_name"] = call.data[ATTR_CHORE_NAME]
+    if ATTR_DESCRIPTION in call.data:
+        # Empty string clears the description (None in storage).
+        updated["description"] = call.data[ATTR_DESCRIPTION] or None
     if ATTR_TRIGGER_ENTITY in call.data:
         updated["trigger_tag_id"] = _resolve_trigger_tag_id(call.hass, call.data[ATTR_TRIGGER_ENTITY])
     if ATTR_ASSIGNED_TO in call.data:
@@ -403,16 +428,21 @@ async def _async_handle_update(call: ServiceCall) -> None:
         updated["schedule"] = dict(updated["schedule"])
         _apply_overlays(call.data, updated, existing.chore_type)
 
-    # A oneshot reschedule (any change to due_datetime, including clearing
-    # it for Path B) re-enters the cycle — clear the terminal flag so the
-    # chore picks up window-math against the new anchor instead of staying
-    # COMPLETED via the short-circuit.
-    if (
-        existing.chore_type == ChoreType.ONESHOT
-        and ATTR_ONESHOT in call.data
-        and isinstance(call.data[ATTR_ONESHOT], dict)
-        and "due_datetime" in call.data[ATTR_ONESHOT]
-    ):
+    # A schedule-anchor change re-enters the cycle: a terminal-COMPLETED chore
+    # (a completed oneshot, or an until/count-exhausted recurring series) picks
+    # up the new anchor instead of staying COMPLETED via the terminal
+    # short-circuit. The per-type predicate distinguishes a real anchor change
+    # from a persist-/dtstart-only tweak — the latter leaves a finished chore
+    # finished (a oneshot reopens only on a due_datetime change; a recurring
+    # chore only on a recurrence-field change, not a bare dtstart/persist edit).
+    reopens_cycle = {
+        ChoreType.ONESHOT: lambda sub: "due_datetime" in sub,
+        ChoreType.SCHEDULED: scheduled_recurrence_changed,
+        ChoreType.INTERVAL: interval_recurrence_changed,
+    }
+    sub_dict = call.data.get(allowed_attr)
+    predicate = reopens_cycle.get(existing.chore_type)
+    if predicate is not None and isinstance(sub_dict, dict) and predicate(sub_dict):
         updated["terminal"] = False
 
     chore = BaseChore.from_dict(updated)
@@ -472,10 +502,12 @@ async def _async_handle_uncomplete(call: ServiceCall) -> None:
 async def _async_handle_skip(call: ServiceCall) -> None:
     """Handle skip_item service call.
 
-    Defers a chore's next occurrence. With explicit ``until``, sets
-    ``skipped_until`` directly. Without it, delegates to the chore's
-    ``apply_default_skip`` for type-specific default behavior — which may
-    set ``skipped_until`` (scheduled/interval) or clear another anchor.
+    Defers a chore's current occurrence. With an explicit ``until``, sets
+    ``skipped_until`` directly (a naive value is coerced to local tz so
+    storage and the skip-anchor comparison stay tz-aware). Without it,
+    delegates to the chore's ``apply_default_skip`` for type-specific
+    behavior — scheduled advances one occurrence, interval slides
+    ``now + interval`` (season-filtered), oneshot clears its ``due_datetime``.
 
     The skip surfaces via ``chore_calendar_status_changed`` with
     ``source=skip``. Skipping an already-``completed`` chore (e.g. an
@@ -491,15 +523,22 @@ async def _async_handle_skip(call: ServiceCall) -> None:
         msg = f"Chore '{uid}' not found"
         raise ServiceValidationError(msg)
 
-    # Skipping a terminal-completed oneshot has no meaningful semantics —
+    # Skipping a terminal-completed chore has no meaningful semantics —
     # there's no "next occurrence" to defer. Reject explicitly rather than
     # silently mutating fields the chore won't react to.
-    if isinstance(existing, OneshotChore) and existing.compute_status(dt_util.now()) == ChoreStatus.COMPLETED:
-        msg = f"Cannot skip completed oneshot chore '{existing.chore_name}'"
+    if existing.terminal or (
+        isinstance(existing, OneshotChore) and existing.compute_status(dt_util.now()) == ChoreStatus.COMPLETED
+    ):
+        msg = f"Cannot skip completed chore '{existing.chore_name}'"
         raise ServiceValidationError(msg)
 
     explicit_until: datetime | None = call.data.get(ATTR_UNTIL)
     if explicit_until is not None:
+        # Coerce a naive `until` (YAML without a tz suffix) to local tz so
+        # storage and the skip-anchor comparison stay tz-aware — mirrors
+        # the hide_completed_items handler below.
+        if explicit_until.tzinfo is None:
+            explicit_until = explicit_until.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
         existing.skipped_until = explicit_until
         operative_anchor: datetime | None = explicit_until
     else:
@@ -587,6 +626,7 @@ async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
                 "uid": chore.uid,
                 "chore_name": chore.chore_name,
                 "chore_type": str(chore.chore_type),
+                "description": chore.description,
                 "status": current_status,
                 "next_due": next_due.isoformat() if next_due else None,
                 "last_completed": chore.last_completed.isoformat() if chore.last_completed else None,

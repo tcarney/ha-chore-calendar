@@ -161,7 +161,8 @@ async def test_event_property_skips_interval_no_anchor(hass, config_entry):
         uid="no_anchor",
         chore_name="No Anchor",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=3),
+        freq="daily",
+        interval=3,
         grace_period=timedelta(days=1),
     )
     await runtime.store.async_create_chore(chore)
@@ -188,7 +189,8 @@ async def test_event_property_interval_with_created_at(hass, config_entry):
         uid="with_created",
         chore_name="With Created",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=3),
+        freq="daily",
+        interval=3,
         grace_period=timedelta(days=1),
         created_at=created,
     )
@@ -241,6 +243,8 @@ async def test_get_events_returns_due_event(hass, config_entry):
     assert events[0].start == datetime(2026, 3, 30, 8, 0, tzinfo=TZ)
     # Due events are zero-duration markers at the due time.
     assert events[0].end == events[0].start
+    # Every emitted event carries the chore's uid as the join key.
+    assert events[0].uid == "med"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -398,6 +402,77 @@ async def test_get_events_empty_when_no_chores(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_events_carries_uid_and_description(hass, config_entry):
+    """Due events carry uid and description; completed markers carry uid only."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    completed_at = datetime(2026, 3, 30, 7, 30, tzinfo=TZ)
+    chore = ScheduledChore(
+        uid="med",
+        chore_name="Medicine",
+        chore_type=ChoreType.SCHEDULED,
+        description="Take with food.",
+        time=time(8, 0),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        last_completed=completed_at,
+    )
+    await runtime.store.async_create_chore(chore)
+
+    frozen = datetime(2026, 3, 30, 9, 0, tzinfo=TZ)
+    with patch("homeassistant.util.dt.now", return_value=frozen):
+        await runtime.coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+        entity = _get_calendar_entity(hass, entity_id)
+        start = datetime(2026, 3, 30, 0, 0, tzinfo=TZ)
+        end = datetime(2026, 4, 1, 0, 0, tzinfo=TZ)
+        events = await entity.async_get_events(hass, start, end)
+
+    due_events = [e for e in events if "✓" not in e.summary]
+    completed_events = [e for e in events if "✓" in e.summary]
+    assert len(due_events) == 1
+    assert due_events[0].uid == "med"
+    assert due_events[0].description == "Take with food."
+    assert len(completed_events) == 1
+    assert completed_events[0].uid == "med"
+    # The completed marker is a synthetic history event — no description.
+    assert completed_events[0].description is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_events_description_none_when_unset(hass, config_entry):
+    """A chore without a description emits due events with description=None."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = ScheduledChore(
+        uid="med",
+        chore_name="Medicine",
+        chore_type=ChoreType.SCHEDULED,
+        time=time(8, 0),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+    )
+    await runtime.store.async_create_chore(chore)
+
+    frozen = datetime(2026, 3, 30, 7, 0, tzinfo=TZ)
+    with patch("homeassistant.util.dt.now", return_value=frozen):
+        await runtime.coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+        entity = _get_calendar_entity(hass, entity_id)
+        start = datetime(2026, 3, 30, 0, 0, tzinfo=TZ)
+        end = datetime(2026, 3, 31, 0, 0, tzinfo=TZ)
+        events = await entity.async_get_events(hass, start, end)
+
+    assert len(events) == 1
+    assert events[0].uid == "med"
+    assert events[0].description is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_get_events_sorted_by_start(hass, config_entry):
     """Events are returned sorted by start time."""
     entity_id = await _setup_entry(hass, config_entry)
@@ -436,3 +511,245 @@ async def test_get_events_sorted_by_start(hass, config_entry):
     assert len(events) == 2
     assert events[0].summary == "Early"
     assert events[1].summary == "Late"
+
+
+# ---------------------------------------------------------------------------
+# async_get_events — occurrence expansion (recurrence model §6)
+# ---------------------------------------------------------------------------
+
+
+def _due_events(events):
+    """Filter out the synthetic '✓' completion markers."""
+    return [e for e in events if not e.summary.startswith("✓")]
+
+
+async def _events_for(hass, config_entry, chore, frozen, start, end):
+    """Create *chore*, freeze time at *frozen*, and query [start, end)."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+    await runtime.store.async_create_chore(chore)
+    with patch("homeassistant.util.dt.now", return_value=frozen):
+        await runtime.coordinator.async_refresh()
+        await hass.async_block_till_done()
+        entity = _get_calendar_entity(hass, entity_id)
+        return await entity.async_get_events(hass, start, end)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_events_expands_future_occurrences(hass, config_entry):
+    """A daily chore expands across the window; every marker carries series fields."""
+    chore = ScheduledChore(
+        uid="daily",
+        chore_name="Daily Chore",
+        chore_type=ChoreType.SCHEDULED,
+        time=time(8, 0),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        last_completed=datetime(2026, 3, 30, 8, 30, tzinfo=TZ),
+    )
+    events = await _events_for(
+        hass,
+        config_entry,
+        chore,
+        frozen=datetime(2026, 3, 30, 12, 0, tzinfo=TZ),
+        start=datetime(2026, 3, 30, 0, 0, tzinfo=TZ),
+        end=datetime(2026, 4, 4, 0, 0, tzinfo=TZ),
+    )
+
+    due = _due_events(events)
+    assert [e.start for e in due] == [
+        datetime(2026, 3, 31, 8, 0, tzinfo=TZ),
+        datetime(2026, 4, 1, 8, 0, tzinfo=TZ),
+        datetime(2026, 4, 2, 8, 0, tzinfo=TZ),
+        datetime(2026, 4, 3, 8, 0, tzinfo=TZ),
+    ]
+    for event in due:
+        assert event.uid == "daily"
+        assert event.rrule == "FREQ=DAILY"
+    assert due[0].recurrence_id == "20260331T080000"
+    assert due[1].recurrence_id == "20260401T080000"
+    # The completion marker is a synthetic history event — no series fields.
+    completed = [e for e in events if e.summary.startswith("✓")]
+    assert len(completed) == 1
+    assert completed[0].rrule is None
+    assert completed[0].recurrence_id is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_events_every_other_monday_phase(hass, config_entry):
+    """INTERVAL=2 expansion alternates weeks anchored on dtstart."""
+    chore = ScheduledChore(
+        uid="biweekly",
+        chore_name="Recycling",
+        chore_type=ChoreType.SCHEDULED,
+        rrule="FREQ=WEEKLY;INTERVAL=2;BYDAY=MO",
+        dtstart=datetime(2026, 6, 8, 8, 0),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        last_completed=datetime(2026, 6, 8, 8, 30, tzinfo=TZ),
+    )
+    events = await _events_for(
+        hass,
+        config_entry,
+        chore,
+        frozen=datetime(2026, 6, 9, 12, 0, tzinfo=TZ),
+        start=datetime(2026, 6, 9, 0, 0, tzinfo=TZ),
+        end=datetime(2026, 7, 31, 0, 0, tzinfo=TZ),
+    )
+
+    assert [e.start for e in _due_events(events)] == [
+        datetime(2026, 6, 22, 8, 0, tzinfo=TZ),
+        datetime(2026, 7, 6, 8, 0, tzinfo=TZ),
+        datetime(2026, 7, 20, 8, 0, tzinfo=TZ),
+    ]
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_events_last_friday_of_month(hass, config_entry):
+    """FREQ=MONTHLY;BYDAY=-1FR expands to the last Friday of each month."""
+    chore = ScheduledChore(
+        uid="lastfri",
+        chore_name="Deep Clean",
+        chore_type=ChoreType.SCHEDULED,
+        rrule="FREQ=MONTHLY;BYDAY=-1FR",
+        dtstart=datetime(2026, 1, 1, 8, 0),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        created_at=datetime(2026, 3, 1, 12, 0, tzinfo=TZ),
+    )
+    events = await _events_for(
+        hass,
+        config_entry,
+        chore,
+        frozen=datetime(2026, 3, 10, 12, 0, tzinfo=TZ),
+        start=datetime(2026, 3, 1, 0, 0, tzinfo=TZ),
+        end=datetime(2026, 5, 31, 0, 0, tzinfo=TZ),
+    )
+
+    assert [e.start for e in _due_events(events)] == [
+        datetime(2026, 3, 27, 8, 0, tzinfo=TZ),
+        datetime(2026, 4, 24, 8, 0, tzinfo=TZ),
+        datetime(2026, 5, 29, 8, 0, tzinfo=TZ),
+    ]
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_events_skip_hides_deferred_occurrences(hass, config_entry):
+    """Grid occurrences covered by an active skip stay out; the off-grid skip
+    marker carries no series fields; expansion resumes after it."""
+    chore = ScheduledChore(
+        uid="skipped",
+        chore_name="Skipped Chore",
+        chore_type=ChoreType.SCHEDULED,
+        time=time(8, 0),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        last_completed=datetime(2026, 3, 29, 8, 30, tzinfo=TZ),
+        skipped_until=datetime(2026, 4, 2, 14, 30, tzinfo=TZ),
+    )
+    events = await _events_for(
+        hass,
+        config_entry,
+        chore,
+        frozen=datetime(2026, 3, 31, 12, 0, tzinfo=TZ),
+        start=datetime(2026, 3, 30, 0, 0, tzinfo=TZ),
+        end=datetime(2026, 4, 5, 0, 0, tzinfo=TZ),
+    )
+
+    due = _due_events(events)
+    assert [e.start for e in due] == [
+        datetime(2026, 4, 2, 14, 30, tzinfo=TZ),
+        datetime(2026, 4, 3, 8, 0, tzinfo=TZ),
+        datetime(2026, 4, 4, 8, 0, tzinfo=TZ),
+    ]
+    # The skip marker is synthetic — uid only, no series identity.
+    assert due[0].uid == "skipped"
+    assert due[0].rrule is None
+    assert due[0].recurrence_id is None
+    assert due[1].recurrence_id == "20260403T080000"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_events_pinned_overdue_with_future_occurrences(hass, config_entry):
+    """A pinned-overdue marker appears alongside future expansion; the missed
+    occurrences between them are not re-emitted."""
+    chore = ScheduledChore(
+        uid="pinned",
+        chore_name="Pinned Chore",
+        chore_type=ChoreType.SCHEDULED,
+        time=time(8, 0),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        created_at=datetime(2026, 3, 30, 4, 0, tzinfo=TZ),
+    )
+    events = await _events_for(
+        hass,
+        config_entry,
+        chore,
+        frozen=datetime(2026, 4, 2, 12, 0, tzinfo=TZ),
+        start=datetime(2026, 3, 29, 0, 0, tzinfo=TZ),
+        end=datetime(2026, 4, 5, 0, 0, tzinfo=TZ),
+    )
+
+    assert [e.start for e in _due_events(events)] == [
+        datetime(2026, 3, 30, 8, 0, tzinfo=TZ),  # pinned overdue period
+        datetime(2026, 4, 3, 8, 0, tzinfo=TZ),
+        datetime(2026, 4, 4, 8, 0, tzinfo=TZ),
+    ]
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_events_count_rule_stops_at_series_end(hass, config_entry):
+    """Expansion of a COUNT rule ends with the final occurrence."""
+    chore = ScheduledChore(
+        uid="finite",
+        chore_name="Course of Medicine",
+        chore_type=ChoreType.SCHEDULED,
+        rrule="FREQ=DAILY;COUNT=3",
+        dtstart=datetime(2026, 6, 1, 8, 0),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        created_at=datetime(2026, 5, 31, 12, 0, tzinfo=TZ),
+        last_completed=datetime(2026, 6, 1, 8, 30, tzinfo=TZ),
+    )
+    events = await _events_for(
+        hass,
+        config_entry,
+        chore,
+        frozen=datetime(2026, 6, 1, 12, 0, tzinfo=TZ),
+        start=datetime(2026, 6, 1, 0, 0, tzinfo=TZ),
+        end=datetime(2026, 6, 30, 0, 0, tzinfo=TZ),
+    )
+
+    assert [e.start for e in _due_events(events)] == [
+        datetime(2026, 6, 2, 8, 0, tzinfo=TZ),
+        datetime(2026, 6, 3, 8, 0, tzinfo=TZ),
+    ]
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_events_interval_chore_single_event_no_rrule(hass, config_entry):
+    """Interval chores keep a single projected event with no series fields."""
+    chore = IntervalChore(
+        uid="interval",
+        chore_name="Water Filter",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=3,
+        grace_period=timedelta(days=1),
+        last_completed=datetime(2026, 3, 28, 12, 0, tzinfo=TZ),
+    )
+    events = await _events_for(
+        hass,
+        config_entry,
+        chore,
+        frozen=datetime(2026, 3, 30, 12, 0, tzinfo=TZ),
+        start=datetime(2026, 3, 28, 0, 0, tzinfo=TZ),
+        end=datetime(2026, 4, 30, 0, 0, tzinfo=TZ),
+    )
+
+    due = _due_events(events)
+    assert len(due) == 1
+    assert due[0].start == datetime(2026, 3, 31, 12, 0, tzinfo=TZ)
+    assert due[0].rrule is None
+    assert due[0].recurrence_id is None

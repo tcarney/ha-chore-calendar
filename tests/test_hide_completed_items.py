@@ -172,6 +172,7 @@ async def test_sweep_deletes_persist_false_completed_oneshot(hass, config_entry)
         chore_type=ChoreType.ONESHOT,
         due_datetime=FROZEN_NOW - timedelta(hours=2),
         last_completed=FROZEN_NOW - timedelta(hours=1),
+        terminal=True,
         persist=False,
     )
     await store.async_create_chore(chore)
@@ -207,6 +208,7 @@ async def test_sweep_keeps_persist_true_completed_oneshot(hass, config_entry):
         chore_type=ChoreType.ONESHOT,
         due_datetime=FROZEN_NOW - timedelta(hours=2),
         last_completed=FROZEN_NOW - timedelta(hours=1),
+        terminal=True,
         persist=True,
     )
     await store.async_create_chore(chore)
@@ -237,7 +239,8 @@ async def test_sweep_keeps_recurring_chore(hass, config_entry):
         uid="interval-1",
         chore_name="Water Plants",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(hours=1),
     )
@@ -283,6 +286,68 @@ async def test_sweep_does_not_delete_active_persist_false_oneshot(hass, config_e
     assert store.get_chore("active-1") is not None
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_sweep_keeps_terminal_completed_after_cutoff(hass, config_entry):
+    """A terminal-completed chore whose completion is after the cutoff is kept —
+    only completions strictly before the cutoff are swept."""
+    calendar_id, _ = await _setup(hass, config_entry)
+    store = config_entry.runtime_data.store
+
+    chore = OneshotChore(
+        uid="recent-1",
+        chore_name="File Taxes",
+        chore_type=ChoreType.ONESHOT,
+        due_datetime=FROZEN_NOW - timedelta(days=2),
+        last_completed=FROZEN_NOW - timedelta(hours=1),
+        terminal=True,
+        persist=False,
+    )
+    await store.async_create_chore(chore)
+    await _refresh(hass, config_entry, FROZEN_NOW)
+
+    # Cutoff months before the completion → kept (last_completed >= cleared_at).
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "hide_completed_items",
+            {"entity_id": calendar_id, "before": "2026-01-01T00:00:00-05:00"},
+            blocking=True,
+        )
+
+    assert store.get_chore("recent-1") is not None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_sweep_keeps_rescheduled_completed_oneshot(hass, config_entry):
+    """A oneshot completed then rescheduled to a future due is kept — it has an
+    upcoming occurrence (terminal cleared), even though it reads COMPLETED while
+    dormant before the new pending window."""
+    calendar_id, _ = await _setup(hass, config_entry)
+    store = config_entry.runtime_data.store
+
+    chore = OneshotChore(
+        uid="rescheduled-1",
+        chore_name="File Taxes",
+        chore_type=ChoreType.ONESHOT,
+        due_datetime=FROZEN_NOW + timedelta(days=30),  # rescheduled into the future
+        last_completed=FROZEN_NOW - timedelta(hours=1),  # prior completion, before the cutoff
+        terminal=False,  # cleared by the reschedule
+        persist=False,
+    )
+    await store.async_create_chore(chore)
+    await _refresh(hass, config_entry, FROZEN_NOW)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "hide_completed_items",
+            {"entity_id": calendar_id},
+            blocking=True,
+        )
+
+    assert store.get_chore("rescheduled-1") is not None
+
+
 # ---------------------------------------------------------------------------
 # Visibility filter (calendar + todo)
 # ---------------------------------------------------------------------------
@@ -299,7 +364,8 @@ async def test_calendar_hides_pre_cutoff_completed_event(hass, config_entry):
         uid="recurring",
         chore_name="Water Plants",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=1),
     )
@@ -330,7 +396,8 @@ async def test_todo_hides_pre_cutoff_completed_item(hass, config_entry):
         uid="recurring",
         chore_name="Water Plants",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=1),
     )
@@ -356,7 +423,8 @@ async def test_post_cutoff_completion_reappears(hass, config_entry):
         uid="recurring",
         chore_name="Water Plants",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW + timedelta(minutes=5),  # post-cutoff
     )
@@ -439,7 +507,8 @@ async def test_get_items_does_not_filter_by_cutoff(hass, config_entry):
         uid="recurring",
         chore_name="Water Plants",
         chore_type=ChoreType.INTERVAL,
-        interval=timedelta(days=7),
+        freq="daily",
+        interval=7,
         grace_period=timedelta(hours=1),
         last_completed=FROZEN_NOW - timedelta(days=1),
     )
