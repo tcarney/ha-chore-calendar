@@ -8,7 +8,11 @@ import pytest
 
 from custom_components.chore_calendar.const import ChoreType
 from custom_components.chore_calendar.models import ScheduledChore
-from custom_components.chore_calendar.recurrence import interval_selector_to_schedule, scheduled_selector_to_schedule
+from custom_components.chore_calendar.recurrence import (
+    interval_selector_to_schedule,
+    schedule_to_selector,
+    scheduled_selector_to_schedule,
+)
 from homeassistant.exceptions import ServiceValidationError
 
 TZ = timezone(timedelta(hours=-5))
@@ -214,3 +218,73 @@ def test_interval_validation_rejections(obj, match):
     """Invalid interval objects raise ServiceValidationError."""
     with pytest.raises(ServiceValidationError, match=match):
         _translate_interval(obj)
+
+
+# ---------------------------------------------------------------------------
+# schedule_to_selector — the storage → selector inverse
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [
+        {"frequency": "daily", "dtstart": "08:00:00"},
+        {"frequency": "weekly", "byday": ["mon", "wed", "fri"], "interval": 2, "dtstart": "09:00:00"},
+        {"frequency": "monthly", "byday": ["fri"], "bysetpos": [-1], "count": 10},
+        {"frequency": "monthly", "byday": ["2mon"]},
+        {"frequency": "monthly", "byday": ["-1fri"]},
+        {"frequency": "yearly", "bymonth": [3, 6, 9, 12], "bymonthday": [15]},
+        {"frequency": "daily", "bymonth": [4, 5, 6]},
+        {"frequency": "weekly", "until": "2026-12-31"},
+    ],
+)
+def test_scheduled_round_trip(selector):
+    """schedule → selector → schedule is stable for scheduled chores."""
+    schedule = scheduled_selector_to_schedule(selector, existing={}, created_at=CREATED_AT)
+    inverse = schedule_to_selector("scheduled", schedule)
+    assert scheduled_selector_to_schedule(inverse, existing={}, created_at=CREATED_AT) == schedule
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [
+        {"frequency": "daily", "interval": 14},
+        {"frequency": "weekly", "bymonth": [6, 7, 8], "count": 5},
+        {"frequency": "monthly", "interval": 2, "until": "2027-03-31"},
+        {"frequency": "hourly"},
+    ],
+)
+def test_interval_round_trip(selector):
+    """schedule → selector → schedule is stable for interval chores."""
+    schedule = interval_selector_to_schedule(selector, existing={})
+    inverse = schedule_to_selector("interval", schedule)
+    assert interval_selector_to_schedule(inverse, existing={}) == schedule
+
+
+def test_oneshot_selector():
+    """Oneshot decomposes to its due_datetime and persist flag."""
+    assert schedule_to_selector("oneshot", {"due_datetime": "2026-07-15T14:30:00", "persist": True}) == {
+        "due_datetime": "2026-07-15T14:30:00",
+        "persist": True,
+    }
+    assert schedule_to_selector("oneshot", {"due_datetime": None, "persist": False}) == {
+        "due_datetime": None,
+        "persist": False,
+    }
+
+
+def test_scheduled_selector_separates_ordinal_byday_from_bysetpos():
+    """BYDAY=2MO stays an ordinal byday; BYDAY=FR;BYSETPOS=-1 stays bysetpos."""
+    ordinal = schedule_to_selector("scheduled", {"rrule": "FREQ=MONTHLY;BYDAY=2MO", "persist": False})
+    assert ordinal["byday"] == ["2mon"]
+    assert "bysetpos" not in ordinal
+
+    setpos = schedule_to_selector("scheduled", {"rrule": "FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1", "persist": False})
+    assert setpos["byday"] == ["fri"]
+    assert setpos["bysetpos"] == [-1]
+
+
+def test_schedule_to_selector_unknown_type_raises():
+    """An unknown chore type is a programming error, not a user error."""
+    with pytest.raises(ValueError, match="unknown chore type"):
+        schedule_to_selector("nonsense", {})

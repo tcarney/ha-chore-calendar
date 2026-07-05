@@ -892,6 +892,23 @@ async def test_get_items(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_items_includes_structured_selector(hass, config_entry):
+    """get_items emits the structured selector the card's edit form pre-fills from."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    response = await hass.services.async_call(
+        DOMAIN,
+        "get_items",
+        {"entity_id": entity_id},
+        blocking=True,
+        return_response=True,
+    )
+
+    # The default fixture chore is an interval chore (daily, every 3).
+    assert response["items"][0]["selector"] == {"frequency": "daily", "interval": 3, "persist": False}
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_get_items_returns_description(hass, config_entry):
     """get_items includes a chore's description."""
     entity_id = await _setup_with_chore(hass, config_entry)
@@ -1057,12 +1074,11 @@ def _build_chore_of_type(chore_type: ChoreType, uid: str = TEST_UID):
     )
 
 
-# Cross-type conversion is disallowed: passing a non-matching schedule
-# sub-dict to update_item raises ServiceValidationError. Cover all six
-# (existing_type, requested_type) pairs.
-_TYPE_MISMATCH_BLOCKS = {
-    ChoreType.SCHEDULED: ("scheduled", {"frequency": "daily"}),
-    ChoreType.INTERVAL: ("interval", {"frequency": "daily"}),
+# A per-type selector for each target type, used to drive cross-type
+# conversion through update_item across all six (existing, requested) pairs.
+_TYPE_SELECTOR_BLOCKS = {
+    ChoreType.SCHEDULED: ("scheduled", {"frequency": "weekly", "byday": ["mon"]}),
+    ChoreType.INTERVAL: ("interval", {"frequency": "weekly", "interval": 2}),
     ChoreType.ONESHOT: ("oneshot", {"due_datetime": "2026-04-15T12:00:00-05:00"}),
 }
 
@@ -1072,36 +1088,118 @@ _TYPE_MISMATCH_BLOCKS = {
     ("existing_type", "requested_type"),
     [(existing, requested) for existing in ChoreType for requested in ChoreType if existing != requested],
 )
-async def test_update_item_rejects_cross_type_conversion(hass, config_entry, existing_type, requested_type):
-    """update_item rejects every (existing_type, requested_type) cross-pair.
+async def test_update_item_converts_chore_type(hass, config_entry, existing_type, requested_type):
+    """update_item converts a chore to a new type, preserving identity.
 
-    Each pair has different semantics for how to handle last_completed,
-    previous_*, and the type-specific anchor fields. We disallow the
-    conversion entirely; users must delete + re-create to change type.
+    Covers all six (existing_type, requested_type) pairs. Conversion keeps the
+    uid, name, and description; it rebuilds the schedule from the new selector
+    and resets the terminal / skip state and the completion cycle (last_completed
+    / completion_count don't translate across schedule types).
     """
     config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
     chore = _build_chore_of_type(existing_type)
+    chore.description = "Carry me across the conversion."
+    chore.last_completed = datetime(2026, 3, 1, 9, 0, tzinfo=TZ)
+    chore.completion_count = 4
+    chore.terminal = True
     await config_entry.runtime_data.store.async_create_chore(chore)
     await config_entry.runtime_data.coordinator.async_refresh()
     registry = er.async_get(hass)
     entity_id = registry.async_get_entity_id("calendar", DOMAIN, config_entry.entry_id)
     assert entity_id is not None
 
-    requested_attr, requested_payload = _TYPE_MISMATCH_BLOCKS[requested_type]
+    requested_attr, requested_payload = _TYPE_SELECTOR_BLOCKS[requested_type]
 
-    with pytest.raises(ServiceValidationError, match="delete and re-create"):
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {
+            "entity_id": entity_id,
+            "item": "Existing Chore",
+            requested_attr: requested_payload,
+        },
+        blocking=True,
+    )
+
+    converted = config_entry.runtime_data.store.get_chore(TEST_UID)
+    assert converted is not None
+    # Identity preserved.
+    assert converted.chore_type == requested_type
+    assert converted.uid == TEST_UID
+    assert converted.chore_name == "Existing Chore"
+    assert converted.description == "Carry me across the conversion."
+    # Cycle re-enters fresh: the new schedule supersedes the old terminal state,
+    # and the completion cycle resets (an interval target would otherwise anchor
+    # on the stale last_completed / terminate early on the carried count).
+    assert converted.terminal is False
+    assert converted.skipped_until is None
+    assert converted.last_completed is None
+    assert converted.completion_count == 0
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_item_rejects_multiple_selectors(hass, config_entry):
+    """update_item rejects more than one per-type selector in a single call."""
+    config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    chore = _build_chore_of_type(ChoreType.INTERVAL)
+    await config_entry.runtime_data.store.async_create_chore(chore)
+    await config_entry.runtime_data.coordinator.async_refresh()
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id("calendar", DOMAIN, config_entry.entry_id)
+    assert entity_id is not None
+
+    with pytest.raises(ServiceValidationError, match="more than one"):
         await hass.services.async_call(
             DOMAIN,
             "update_item",
             {
                 "entity_id": entity_id,
                 "item": "Existing Chore",
-                requested_attr: requested_payload,
+                "scheduled": {"frequency": "daily"},
+                "oneshot": {"due_datetime": "2026-04-15T12:00:00-05:00"},
             },
             blocking=True,
         )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_item_oneshot_conversion_requires_due_datetime(hass, config_entry):
+    """Converting a recurring chore to oneshot without due_datetime is rejected.
+
+    Without the guard this silently wipes the recurrence into an unscheduled
+    chore; the key must be present (an explicit null is allowed).
+    """
+    config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    chore = _build_chore_of_type(ChoreType.SCHEDULED)
+    await config_entry.runtime_data.store.async_create_chore(chore)
+    await config_entry.runtime_data.coordinator.async_refresh()
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id("calendar", DOMAIN, config_entry.entry_id)
+    assert entity_id is not None
+
+    with pytest.raises(ServiceValidationError, match="requires 'due_datetime'"):
+        await hass.services.async_call(
+            DOMAIN,
+            "update_item",
+            {"entity_id": entity_id, "item": "Existing Chore", "oneshot": {"persist": True}},
+            blocking=True,
+        )
+
+    # An explicit null due is a legitimate unscheduled oneshot.
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": "Existing Chore", "oneshot": {"due_datetime": None}},
+        blocking=True,
+    )
+    converted = config_entry.runtime_data.store.get_chore(TEST_UID)
+    assert converted.chore_type == ChoreType.ONESHOT
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -1426,6 +1524,31 @@ async def test_update_item_resolves_tag_id(hass, config_entry):
     store = config_entry.runtime_data.store
     chore = store.get_chore(TEST_UID)
     assert chore.trigger_tag_id == TAG_UUID
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_item_clears_trigger_with_empty_string(hass, config_entry):
+    """update_item with trigger_entity='' removes the stored trigger tag."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    tag_entity_id = _register_tag_entity(hass)
+    store = config_entry.runtime_data.store
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": "Test Chore", "trigger_entity": tag_entity_id},
+        blocking=True,
+    )
+    assert store.get_chore(TEST_UID).trigger_tag_id == TAG_UUID
+
+    # An empty string clears it (cv.entity_id would reject "").
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": "Test Chore", "trigger_entity": ""},
+        blocking=True,
+    )
+    assert store.get_chore(TEST_UID).trigger_tag_id is None
 
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 - **Calendar entity**: Read-only calendar per list showing every upcoming occurrence and recently completed chores
 - **Todo entity**: One todo list per chore list, surfacing chores through HA's native todo UI and Assist pipelines
 - **Sensor entities**: One sensor per chore tracking its current status and attributes
-- **Custom Lovelace card**: Built-in timeline card with per-entity filtering, colors, detail dialog, and configurable actions
+- **Custom Lovelace card**: Built-in timeline card with per-entity filtering, colors, a detail dialog, create/edit/delete dialogs, and configurable actions
 - **Tag scan auto-completion**: Assign NFC tags to chores for tap-to-complete; shared tags automatically resolve to the correct chore based on completion windows
 - **Flexible scheduling**: Calendar-grid recurrence (daily/weekly/monthly/yearly with weekday ordinals, month days, season windows, and end conditions), interval-based ("after N hours/days/months"), and oneshot (one-time tasks with optional due date) chore types
 - **Skip occurrences**: Skip the current occurrence or defer until a later datetime, without touching completion history
@@ -111,7 +111,7 @@ The chore sensor's state is the chore's current status. Additional attributes ar
 | Attribute | Description |
 | --- | --- |
 | `uid` | Stable UUID assigned at creation. Used as the `item` argument when targeting a specific chore via the calendar entity in service calls. |
-| `chore_type` | The chore type set at creation by which sub-dict is passed; not changeable via `update_item`. |
+| `chore_type` | The chore type, set at creation by which sub-dict is passed. Changeable later by passing a different type's sub-dict to `update_item` (see [Update a Chore](#update-a-chore)). |
 | `next_due` | When the chore is next due (ISO 8601). `null` for unscheduled chores. Stays pinned to the uncompleted period while `overdue`. |
 | `last_completed` | When the chore was last completed (ISO 8601), or `null` if never completed. |
 | `last_completed_by` | The `person.*` entity that completed the chore, or `null`. Populated via the optional `completed_by` parameter on `chore_calendar.complete_item`; shown in the card detail dialog and included in status events. |
@@ -376,6 +376,21 @@ data:
 
 Passing any recurrence field (`frequency`, `byday`, `until`, …) replaces the repeat rule, with `frequency` required; `dtstart` and `persist` alone tweak the start time or lifecycle while keeping the stored rule — as above. Updating the recurrence also reopens a chore whose `until`/`count` series had ended.
 
+#### Convert Between Chore Types
+
+Passing a sub-dict for a **different** type converts the chore in place:
+
+```yaml
+# Convert an interval chore into a fixed-deadline oneshot
+action: chore_calendar.update_item
+data:
+  entity_id: sensor.daily_chores_change_water_filter
+  oneshot:
+    due_datetime: "2026-05-01T09:00:00-04:00"
+```
+
+Conversion preserves the chore's identity (`uid`), name, description, tag trigger, assignees, and pending/grace windows. It rebuilds the schedule from the new selector and starts a **fresh cycle** — completion history (`last_completed`, completion count) and any active skip are cleared, since neither carries meaning across schedule types (an interval chore, for example, anchors its next due on the last completion, so a stale timestamp would read as immediately overdue). Only one type sub-dict may be passed per call, and converting **to** a oneshot requires a `due_datetime` key (it may be `null` for an unscheduled oneshot).
+
 ### Delete a Chore
 
 ```yaml
@@ -425,6 +440,8 @@ entities:
 | `hide_section_headers` | `false` | Hide section headings (Overdue, Due, Upcoming, Completed) |
 | `hide_card_background` | `false` | Hide the card background (transparent) |
 | `allow_uncomplete` | `false` | Show an "Uncomplete" button on completed rows in the detail dialog |
+| `hide_add_button` | `false` | Hide the header "+" button that opens the create-chore dialog |
+| `hide_edit_button` | `false` | Hide the "Edit" button in the chore detail dialog |
 | `update_interval` | `60` | Seconds between data refreshes |
 | `tap_action` | `details` | [Action](#action-configuration) on row tap |
 | `hold_action` | `none` | [Action](#action-configuration) on row hold (500ms) |
@@ -469,6 +486,7 @@ Chore rows support configurable tap, hold, and double-tap actions:
 | Action | Behavior |
 | --- | --- |
 | `details` | Open the chore detail dialog (default for tap) |
+| `edit` | Open the create/edit dialog for the chore |
 | `complete` | Complete the chore directly, no dialog |
 | `more-info` | Open HA's more-info panel for the calendar entity |
 | `navigate` | Navigate to a dashboard path |
@@ -495,13 +513,25 @@ hold_action:
 Tapping a chore row (default behavior) opens a detail dialog showing:
 
 - List name (with entity icon)
-- Schedule description (e.g. "Every month on the last Friday at 9:00 AM")
+- Schedule description (e.g. "Last Friday at 9:00 AM")
 - Assignee(s) (if assigned)
 - Trigger tag (if configured)
 - Last completed time and by whom (if set)
 - The chore's free-text description (if set)
 
-For non-completed chores, "Skip" and "Complete" buttons appear in the dialog footer. Skip defers the chore using the type-specific default (see [Skip a Chore](#skip-a-chore)); Complete records the completion and clears any active skip. For completed chores, an "Uncomplete" button is shown when `allow_uncomplete` is enabled — uncomplete restores the skip that was cleared by the completion.
+An "Edit" button in the dialog footer opens the create/edit dialog for the chore (hidden when `hide_edit_button` is set). For non-completed chores, "Skip" and "Complete" buttons also appear. Skip defers the chore using the type-specific default (see [Skip a Chore](#skip-a-chore)); Complete records the completion and clears any active skip. For completed chores, an "Uncomplete" button is shown when `allow_uncomplete` is enabled — uncomplete restores the skip that was cleared by the completion.
+
+### Creating & Editing Chores
+
+The card manages chore definitions directly — no service calls required for everyday changes.
+
+- **Create**: the header "+" button opens a dialog to add a chore (hidden when `hide_add_button` is set).
+- **Edit**: the detail dialog's "Edit" button — or an `edit` [row action](#action-configuration) — opens the same form pre-filled for the chore.
+- **Delete**: the edit dialog has a "Delete" button with an inline confirmation step.
+
+The form covers the common fields plus a **Type** toggle (Scheduled / Interval / Oneshot) that drives per-type recurrence inputs mirroring HA's calendar repeat editor: frequency, an interval with a dynamic unit, weekday toggles, a computed monthly mode (day-of-month vs Nth weekday) derived from the Start date, a Start date/time, the interval season window, the oneshot due date, and the `until` / `count` lifecycle with a persist toggle. Pending/grace periods, the tag trigger, assignees, and a target-list dropdown (shown only when more than one list is configured) round it out.
+
+Changing the Type toggle on an existing chore converts it on save, backed by the same [cross-type conversion](#convert-between-chore-types) as `update_item`. A few advanced scheduled options — the season window (`bymonth`) and yearly day-of-month (`bymonthday`) — are set via the service only; the edit form preserves any stored values through a round-trip rather than dropping them.
 
 ### Visual Editor
 

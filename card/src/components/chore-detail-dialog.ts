@@ -11,6 +11,7 @@ export class ChoreDetailDialog extends LitElement {
   @property({ attribute: false }) item?: EnrichedChoreItem;
   @property({ type: Boolean }) open = false;
   @property({ type: Boolean, attribute: "allow-uncomplete" }) allowUncomplete = false;
+  @property({ type: Boolean, attribute: "allow-edit" }) allowEdit = true;
   @state() private _loading = false;
 
   static styles = css`
@@ -64,10 +65,16 @@ export class ChoreDetailDialog extends LitElement {
 
     .footer {
       display: flex;
-      justify-content: flex-end;
+      align-items: center;
+      justify-content: space-between;
       gap: 8px;
       padding: 16px;
       border-top: 1px solid var(--divider-color);
+    }
+
+    .status-actions {
+      display: flex;
+      gap: 8px;
     }
   `;
 
@@ -75,6 +82,11 @@ export class ChoreDetailDialog extends LitElement {
     if (!this.item) return nothing;
 
     const isCompleted = this.item.status === "completed";
+    // The footer holds the Edit button and the status actions (Skip/Complete, or
+    // Uncomplete on a completed chore). When none apply, omit the footer entirely
+    // rather than render an empty bordered/padded bar.
+    const hasStatusActions = !isCompleted || (this.allowUncomplete && !!this.item.last_completed);
+    const showFooter = this.allowEdit || hasStatusActions;
 
     return html`
       <ha-dialog
@@ -92,39 +104,47 @@ export class ChoreDetailDialog extends LitElement {
         <div class="content">
           ${this._renderDetails()}
         </div>
-        ${!isCompleted
+        ${showFooter
           ? html`
               <div slot="footer" class="footer">
-                <ha-button
-                  variant="neutral"
-                  appearance="plain"
-                  ?disabled=${this._loading}
-                  @click=${this._onSkip}
-                >
-                  ${this._loading ? "Skipping..." : "Skip"}
-                </ha-button>
-                <ha-button
-                  ?disabled=${this._loading}
-                  @click=${this._onComplete}
-                >
-                  ${this._loading ? "Completing..." : "Complete"}
-                </ha-button>
+                ${this.allowEdit
+                  ? html`
+                      <ha-button variant="neutral" appearance="plain" @click=${this._onEdit}>
+                        Edit
+                      </ha-button>
+                    `
+                  : html`<span></span>`}
+                <span class="status-actions">
+                  ${!isCompleted
+                    ? html`
+                        <ha-button
+                          variant="neutral"
+                          appearance="plain"
+                          ?disabled=${this._loading}
+                          @click=${this._onSkip}
+                        >
+                          ${this._loading ? "Skipping..." : "Skip"}
+                        </ha-button>
+                        <ha-button ?disabled=${this._loading} @click=${this._onComplete}>
+                          ${this._loading ? "Completing..." : "Complete"}
+                        </ha-button>
+                      `
+                    : hasStatusActions
+                      ? html`
+                          <ha-button
+                            variant="neutral"
+                            appearance="plain"
+                            ?disabled=${this._loading}
+                            @click=${this._onUncomplete}
+                          >
+                            ${this._loading ? "Uncompleting..." : "Uncomplete"}
+                          </ha-button>
+                        `
+                      : nothing}
+                </span>
               </div>
             `
-          : this.allowUncomplete && this.item?.last_completed
-            ? html`
-                <div slot="footer" class="footer">
-                  <ha-button
-                    variant="neutral"
-                    appearance="plain"
-                    ?disabled=${this._loading}
-                    @click=${this._onUncomplete}
-                  >
-                    ${this._loading ? "Uncompleting..." : "Uncomplete"}
-                  </ha-button>
-                </div>
-              `
-            : nothing}
+          : nothing}
       </ha-dialog>
     `;
   }
@@ -140,7 +160,7 @@ export class ChoreDetailDialog extends LitElement {
 
       <div class="schedule">
         <ha-icon icon="mdi:calendar-clock"></ha-icon>
-        <div class="info">${formatSchedule(item.schedule)}</div>
+        <div class="info">${formatSchedule(item.schedule, item.selector)}</div>
       </div>
 
       ${item.assigned_to.length > 0
@@ -288,6 +308,17 @@ export class ChoreDetailDialog extends LitElement {
   private _resolveEntityName(entityId: string): string {
     const entity = this.hass?.states?.[entityId];
     return (entity?.attributes?.friendly_name as string) ?? entityId;
+  }
+
+  private _onEdit() {
+    if (!this.item) return;
+    this.dispatchEvent(
+      new CustomEvent("chore-edit", {
+        detail: { item: this.item },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   private _onClosed() {

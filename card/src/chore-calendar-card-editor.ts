@@ -18,13 +18,18 @@ interface HaFormSchema {
   required?: boolean;
 }
 
-/** Options above the period rows (title + toggles up through allow_uncomplete). */
-const OPTIONS_SCHEMA_TOP: HaFormSchema[] = [
-  { name: "title", selector: { text: {} } },
-  { name: "hide_completed", selector: { boolean: {} }, default: false },
-  { name: "hide_section_headers", selector: { boolean: {} }, default: false },
-  { name: "hide_card_background", selector: { boolean: {} }, default: false },
-  { name: "allow_uncomplete", selector: { boolean: {} }, default: false },
+/** Just the title; the boolean toggles render as a compact custom grid below. */
+const OPTIONS_SCHEMA_TOP: HaFormSchema[] = [{ name: "title", selector: { text: {} } }];
+
+/** Boolean card options, rendered as a tight toggle grid (ha-form's per-row
+ *  gap is too tall for a column of switches and lives in its shadow DOM). */
+const TOGGLE_OPTIONS: { key: keyof ChoreCalendarCardConfig; label: string }[] = [
+  { key: "hide_completed", label: "Hide completed section" },
+  { key: "hide_section_headers", label: "Hide section headings" },
+  { key: "hide_card_background", label: "Hide card background" },
+  { key: "allow_uncomplete", label: "Allow uncomplete" },
+  { key: "hide_add_button", label: "Hide add button" },
+  { key: "hide_edit_button", label: "Hide edit button" },
 ];
 
 /** Options below the period rows. */
@@ -44,6 +49,7 @@ const PERIOD_ROWS: { key: "due_date_period" | "completed_period"; label: string 
 
 const ACTION_OPTIONS = [
   { value: "details", label: "Chore Details" },
+  { value: "edit", label: "Edit Chore" },
   { value: "complete", label: "Complete Chore" },
   { value: "more-info", label: "More Info" },
   { value: "navigate", label: "Navigate" },
@@ -93,6 +99,8 @@ const LABELS: Record<string, string> = {
   hide_section_headers: "Hide section headings",
   hide_card_background: "Hide card background",
   allow_uncomplete: "Allow uncomplete",
+  hide_add_button: "Hide add button",
+  hide_edit_button: "Hide edit button",
   update_interval: "Update interval (seconds)",
   tap_action: "Tap action",
   hold_action: "Hold action",
@@ -243,6 +251,19 @@ export class ChoreCalendarCardEditor extends LitElement {
     .period-inputs ha-input {
       width: 88px;
     }
+
+    .toggles {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+      column-gap: 16px;
+      row-gap: 0;
+      margin: 4px 0 16px;
+    }
+
+    .toggles ha-formfield {
+      width: 100%;
+      min-height: 40px;
+    }
   `;
 
   protected render() {
@@ -342,6 +363,19 @@ export class ChoreCalendarCardEditor extends LitElement {
         .computeLabel=${this._computeLabel}
         @value-changed=${this._optionsChanged}
       ></ha-form>
+
+      <div class="toggles">
+        ${TOGGLE_OPTIONS.map(
+          (opt) => html`
+            <ha-formfield alignEnd spaceBetween .label=${opt.label}>
+              <ha-switch
+                .checked=${!!this._config[opt.key]}
+                @change=${(ev: Event) => this._toggleChanged(opt.key, ev)}
+              ></ha-switch>
+            </ha-formfield>
+          `,
+        )}
+      </div>
 
       <div class="period-group">
         ${PERIOD_ROWS.map((row) => this._renderPeriodRow(row.key, row.label))}
@@ -454,10 +488,12 @@ export class ChoreCalendarCardEditor extends LitElement {
 
   /** Build flat form data for the actions ha-form (strings, not ActionConfig objects). */
   private _actionsFormData(): Record<string, string> {
+    // Fall back to the card's own action defaults so the editor shows what an
+    // unset action actually does (tap → details, hold → edit).
     return {
-      tap_action: this._actionToString(this._config.tap_action),
-      hold_action: this._actionToString(this._config.hold_action),
-      double_tap_action: this._actionToString(this._config.double_tap_action),
+      tap_action: this._actionToString(this._config.tap_action) || "details",
+      hold_action: this._actionToString(this._config.hold_action) || "none",
+      double_tap_action: this._actionToString(this._config.double_tap_action) || "none",
     };
   }
 
@@ -526,6 +562,13 @@ export class ChoreCalendarCardEditor extends LitElement {
     if (!next.hours) delete next.hours;
     const hasValue = Object.keys(next).length > 0;
     this._config = { ...this._config, [key]: hasValue ? next : undefined };
+    this._dispatch();
+  }
+
+  private _toggleChanged(key: keyof ChoreCalendarCardConfig, ev: Event) {
+    if (!this._config) return;
+    const checked = (ev.target as HTMLInputElement).checked;
+    this._config = { ...this._config, [key]: checked };
     this._dispatch();
   }
 

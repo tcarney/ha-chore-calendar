@@ -1,3 +1,22 @@
+/**
+ * Structured recurrence selector, the inverse of the create/update service
+ * selector. Emitted by get_items so the card renders and edits a chore from
+ * structured fields — no client-side RRULE parsing.
+ */
+export interface ChoreSelector {
+  frequency?: string;
+  interval?: number;
+  byday?: string[];
+  bymonthday?: number[];
+  bysetpos?: number[];
+  bymonth?: number[];
+  until?: string;
+  count?: number;
+  dtstart?: string;
+  due_datetime?: string | null;
+  persist?: boolean;
+}
+
 /** Chore item as returned by chore_calendar.get_items service. */
 export interface ChoreItem {
   uid: string;
@@ -11,6 +30,8 @@ export interface ChoreItem {
   assigned_to: string[];
   trigger_entity: string | null;
   schedule: string | Record<string, unknown>;
+  /** Structured recurrence fields for display and editing. */
+  selector?: ChoreSelector;
 }
 
 export type ChoreStatus = "completed" | "pending" | "due" | "overdue";
@@ -76,6 +97,10 @@ export interface ChoreCalendarCardConfig {
   compact?: boolean;
   hide_card_background?: boolean;
   allow_uncomplete?: boolean;
+  /** Hide the header "+" button that opens the create-chore dialog. */
+  hide_add_button?: boolean;
+  /** Hide the Edit button in the chore detail dialog. */
+  hide_edit_button?: boolean;
   tap_action?: ActionConfig;
   hold_action?: ActionConfig;
   double_tap_action?: ActionConfig;
@@ -103,6 +128,8 @@ export interface HomeAssistant {
   connection: HassConnection;
   states: Record<string, HassEntity>;
   language: string;
+  /** Frontend locale data (date/time formatting) — passed to HA date/time inputs. */
+  locale?: unknown;
 }
 
 export interface HassConnection {

@@ -22,7 +22,9 @@ import {
 // Import sub-components so they register.
 import "./components/chore-row";
 import "./components/chore-detail-dialog";
+import "./components/chore-edit-dialog";
 import "./chore-calendar-card-editor";
+import type { TargetOption } from "./components/chore-edit-dialog";
 
 import { version } from "../../custom_components/chore_calendar/manifest.json";
 
@@ -46,6 +48,8 @@ export class ChoreCalendarCard extends LitElement {
   @state() private _loading = true;
   @state() private _dialogItem?: EnrichedChoreItem;
   @state() private _dialogOpen = false;
+  @state() private _editItem?: EnrichedChoreItem;
+  @state() private _editOpen = false;
 
   private _entityConfigs: (EntityConfig & { color: string })[] = [];
   private _refreshTimer?: ReturnType<typeof setInterval>;
@@ -241,6 +245,11 @@ export class ChoreCalendarCard extends LitElement {
       color: var(--primary-text-color);
     }
 
+    .header .add {
+      margin: -8px -8px -8px 0;
+      color: var(--secondary-text-color);
+    }
+
     .section-header {
       padding: 8px 0 4px;
       font-size: 11px;
@@ -315,15 +324,24 @@ export class ChoreCalendarCard extends LitElement {
     }
 
     const title = this._config.title;
+    const showAdd = !this._config.hide_add_button;
     return html`
       <ha-card
         @chore-detail=${this._onChoreDetail}
+        @chore-edit=${this._onChoreEdit}
         @chore-completed=${this._onChoreCompleted}
       >
-        ${title
+        ${title || showAdd
           ? html`
-              <div class="header">
-                <span class="title">${title}</span>
+              <div class="header" part="header">
+                ${title ? html`<span class="title" part="title">${title}</span>` : html`<span></span>`}
+                ${showAdd
+                  ? html`
+                      <ha-icon-button class="add" part="add-button" title="Add chore" @click=${this._onAddChore}>
+                        <ha-icon icon="mdi:plus"></ha-icon>
+                      </ha-icon-button>
+                    `
+                  : nothing}
               </div>
             `
           : nothing}
@@ -336,11 +354,22 @@ export class ChoreCalendarCard extends LitElement {
         .item=${this._dialogItem}
         .open=${this._dialogOpen}
         .allowUncomplete=${!!this._config.allow_uncomplete}
+        .allowEdit=${!this._config.hide_edit_button}
         @detail-dialog-closed=${this._onDialogClosed}
+        @chore-edit=${this._onChoreEdit}
         @chore-completed=${this._onChoreCompleted}
         @chore-uncompleted=${this._onChoreCompleted}
         @chore-skipped=${this._onChoreCompleted}
       ></chore-detail-dialog>
+      <chore-edit-dialog
+        .hass=${this.hass}
+        .item=${this._editItem}
+        .open=${this._editOpen}
+        .targets=${this._targetOptions()}
+        .defaultTarget=${this._entityConfigs[0]?.entity}
+        @edit-dialog-closed=${this._onEditClosed}
+        @chore-saved=${this._onChoreSaved}
+      ></chore-edit-dialog>
     `;
   }
 
@@ -371,7 +400,7 @@ export class ChoreCalendarCard extends LitElement {
         const items = groups.get(status)!;
         return html`
           ${!hideSections
-            ? html`<div class="section-header ${status}">
+            ? html`<div class="section-header ${status}" part="section-header section-header-${status}">
                 ${SECTION_LABELS[status]}
               </div>`
             : nothing}
@@ -403,6 +432,37 @@ export class ChoreCalendarCard extends LitElement {
   private _onChoreCompleted() {
     this._dialogOpen = false;
     this._refreshData();
+  }
+
+  private _onAddChore() {
+    this._editItem = undefined;
+    this._editOpen = true;
+  }
+
+  private _onChoreEdit(e: CustomEvent<{ item: EnrichedChoreItem }>) {
+    // Close the detail view and open the editor for the same chore.
+    this._dialogOpen = false;
+    this._editItem = e.detail.item;
+    this._editOpen = true;
+  }
+
+  private _onEditClosed() {
+    this._editOpen = false;
+  }
+
+  private _onChoreSaved() {
+    this._editOpen = false;
+    this._refreshData();
+  }
+
+  /** Configured lists as edit-dialog target options, labelled by friendly name. */
+  private _targetOptions(): TargetOption[] {
+    return this._entityConfigs.map((cfg) => ({
+      value: cfg.entity,
+      label:
+        (this.hass?.states?.[cfg.entity]?.attributes?.friendly_name as string) ??
+        cfg.entity,
+    }));
   }
 }
 

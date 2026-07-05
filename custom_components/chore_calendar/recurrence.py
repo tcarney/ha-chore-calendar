@@ -13,6 +13,8 @@ from datetime import date, datetime, time as dt_time
 import re
 from typing import Any
 
+from ical.types.recur import Recur
+
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.util import dt as dt_util
 
@@ -125,6 +127,82 @@ def interval_selector_to_schedule(obj: dict[str, Any], *, existing: dict[str, An
     if "count" in obj:
         schedule["count"] = _coerce_int(obj["count"], "count", minimum=1)
     return schedule
+
+
+def schedule_to_selector(chore_type: str, schedule: dict[str, Any]) -> dict[str, Any]:
+    """Decompose a stored schedule back into structured selector fields.
+
+    The inverse of ``scheduled_selector_to_schedule`` /
+    ``interval_selector_to_schedule``: given a chore's stored schedule, produce
+    the structured selector the card's edit form pre-fills from. Fields are
+    emitted sparsely (defaults omitted) so a ``schedule → selector → schedule``
+    round-trip is stable.
+    """
+    if chore_type == "scheduled":
+        return _scheduled_schedule_to_selector(schedule)
+    if chore_type == "interval":
+        return _interval_schedule_to_selector(schedule)
+    if chore_type == "oneshot":
+        return {
+            "due_datetime": schedule.get("due_datetime"),
+            "persist": bool(schedule.get("persist", False)),
+        }
+    msg = f"Cannot build selector for unknown chore type {chore_type!r}"
+    raise ValueError(msg)
+
+
+def _scheduled_schedule_to_selector(schedule: dict[str, Any]) -> dict[str, Any]:
+    """Decompose a stored scheduled schedule (rrule + dtstart) to a selector."""
+    recur = Recur.from_rrule(schedule.get("rrule", ""))
+    selector: dict[str, Any] = {"frequency": recur.freq.value.lower()}
+    if recur.interval > 1:
+        selector["interval"] = recur.interval
+    byday = _byday_from_recur(recur.by_weekday)
+    if byday:
+        selector["byday"] = byday
+    if recur.by_month_day:
+        selector["bymonthday"] = list(recur.by_month_day)
+    if recur.by_setpos:
+        selector["bysetpos"] = list(recur.by_setpos)
+    if recur.by_month:
+        selector["bymonth"] = list(recur.by_month)
+    if recur.count is not None:
+        selector["count"] = recur.count
+    if recur.until is not None:
+        selector["until"] = recur.until.isoformat()
+    if schedule.get("dtstart"):
+        selector["dtstart"] = schedule["dtstart"]
+    selector["persist"] = bool(schedule.get("persist", False))
+    return selector
+
+
+def _interval_schedule_to_selector(schedule: dict[str, Any]) -> dict[str, Any]:
+    """Decompose a stored interval schedule to a selector (mostly pass-through)."""
+    selector: dict[str, Any] = {"frequency": schedule.get("freq")}
+    if schedule.get("interval", 1) > 1:
+        selector["interval"] = schedule["interval"]
+    if schedule.get("bymonth"):
+        selector["bymonth"] = list(schedule["bymonth"])
+    if schedule.get("until"):
+        selector["until"] = schedule["until"]
+    if schedule.get("count") is not None:
+        selector["count"] = schedule["count"]
+    selector["persist"] = bool(schedule.get("persist", False))
+    return selector
+
+
+def _byday_from_recur(by_weekday: list[Any]) -> list[str]:
+    """Map ``ical`` weekday values back to selector byday entries.
+
+    The inverse of ``_parse_byday``: ``WeekdayValue(weekday=MO, occurrence=2)``
+    becomes ``"2mon"``; a plain weekday becomes ``"mon"``.
+    """
+    entries: list[str] = []
+    for value in by_weekday:
+        name = DAY_NAMES[BYDAY_CODES.index(value.weekday.value)]
+        prefix = str(value.occurrence) if value.occurrence is not None else ""
+        entries.append(f"{prefix}{name}")
+    return entries
 
 
 def scheduled_recurrence_changed(obj: dict[str, Any]) -> bool:

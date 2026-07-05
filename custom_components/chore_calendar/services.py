@@ -44,6 +44,7 @@ from .models import BaseChore, OneshotChore
 from .recurrence import (
     interval_recurrence_changed,
     interval_selector_to_schedule,
+    schedule_to_selector,
     scheduled_recurrence_changed,
     scheduled_selector_to_schedule,
 )
@@ -89,7 +90,8 @@ SERVICE_UPDATE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_ITEM): cv.string,
         vol.Optional(ATTR_CHORE_NAME): cv.string,
         vol.Optional(ATTR_DESCRIPTION): cv.string,
-        vol.Optional(ATTR_TRIGGER_ENTITY): cv.entity_id,
+        # An empty string clears the trigger tag (cv.entity_id rejects "").
+        vol.Optional(ATTR_TRIGGER_ENTITY): vol.Any(cv.entity_id, ""),
         vol.Optional(ATTR_ASSIGNED_TO): vol.All(cv.ensure_list, [cv.entity_id]),
         vol.Optional(ATTR_SCHEDULED): dict,
         vol.Optional(ATTR_INTERVAL): dict,
@@ -316,6 +318,45 @@ def _apply_overlays(
     return chore_dict
 
 
+# Fields carried across a cross-type conversion: identity, assignment, and the
+# cross-type window metadata. Everything absent from this allowlist — the
+# completion cycle, terminal / skip state, and the old type's schedule — resets
+# to the model's default, so a field added to a chore type in the future is
+# dropped by default rather than silently leaking onto an incompatible type.
+_CONVERSION_PRESERVED_KEYS = (
+    "uid",
+    "chore_name",
+    "description",
+    "trigger_tag_id",
+    "assigned_to",
+    "created_at",
+    "pending_period_mins",
+    "grace_period_mins",
+)
+
+
+def _convert_chore_type(existing: dict[str, Any], target_type: ChoreType) -> dict[str, Any]:
+    """Re-base a chore dict onto a new type for cross-type conversion.
+
+    Returns a fresh dict carrying only the allowlisted identity / assignment /
+    window fields, with the new ``chore_type`` and an empty schedule for the
+    caller to fill via ``_apply_overlays``. Building from an allowlist rather than
+    deleting known fields from a copy resets the completion cycle, ``terminal``
+    flag, and skip anchors to their defaults for free, and keeps future fields
+    from carrying across by default.
+
+    The completion cycle can't translate between schedule types: ``IntervalChore``
+    anchors its next due entirely on ``last_completed`` (a stale value would make
+    the converted chore immediately overdue) and ends the series once
+    ``completion_count`` reaches ``count`` (a carried count would terminate it
+    early). The converted chore therefore starts a fresh cycle.
+    """
+    converted: dict[str, Any] = {key: existing[key] for key in _CONVERSION_PRESERVED_KEYS if key in existing}
+    converted["chore_type"] = str(target_type)
+    converted["schedule"] = {}
+    return converted
+
+
 def _build_chore_from_data(data: dict[str, Any]) -> BaseChore:
     """Build a chore model from service call data."""
     chore_type = _infer_chore_type(data)
@@ -402,48 +443,58 @@ async def _async_handle_update(call: ServiceCall) -> None:
     if ATTR_ASSIGNED_TO in call.data:
         updated["assigned_to"] = list(call.data[ATTR_ASSIGNED_TO])
 
-    # update_item is type-locked: passing a per-type sub-dict that doesn't
-    # match the chore's existing type is rejected. Cross-type conversion is
-    # not supported because each pair (oneshot ↔ scheduled, scheduled ↔ interval,
-    # ...) has different semantics for what to do with last_completed,
-    # previous_*, and the type-specific anchor fields. Delete and re-create
-    # the chore to change its type.
+    # At most one per-type selector may be present. When the one provided
+    # differs from the chore's current type, this is a cross-type conversion;
+    # otherwise it's a same-type update.
     type_to_attr = {
         ChoreType.SCHEDULED: ATTR_SCHEDULED,
         ChoreType.INTERVAL: ATTR_INTERVAL,
         ChoreType.ONESHOT: ATTR_ONESHOT,
     }
+    attr_to_type = {attr: chore_type for chore_type, attr in type_to_attr.items()}
     allowed_attr = type_to_attr[existing.chore_type]
-    for attr in (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT):
-        if attr != allowed_attr and attr in call.data:
-            msg = (
-                f"Cannot update chore '{existing.chore_name}' with '{attr}' — "
-                f"chore type is '{existing.chore_type}'. Use '{allowed_attr}' for "
-                f"type-matching updates, or delete and re-create the chore to change its type."
-            )
+    present = [attr for attr in (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT) if attr in call.data]
+    if len(present) > 1:
+        msg = f"Cannot specify more than one of {[ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT]!r}; got {present!r}"
+        raise ServiceValidationError(msg)
+
+    if present and present[0] != allowed_attr:
+        # Cross-type conversion: re-base the dict onto the new type, then build
+        # its schedule from the new selector. Identity / assignment / windows are
+        # preserved; the schedule, terminal flag, skip anchors, and completion
+        # cycle are reset.
+        target_type = attr_to_type[present[0]]
+        # Converting to oneshot requires an explicit due_datetime key (may be
+        # null for an intentional unscheduled chore); without it the conversion
+        # would silently wipe the recurrence — mirror the scheduled/interval
+        # "requires 'frequency'" guard.
+        if target_type == ChoreType.ONESHOT and "due_datetime" not in call.data[ATTR_ONESHOT]:
+            msg = "Converting a chore to a oneshot requires 'due_datetime'"
             raise ServiceValidationError(msg)
+        updated = _convert_chore_type(updated, target_type)
+        _apply_overlays(call.data, updated, target_type)
+    else:
+        overlay_keys = (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT, ATTR_PENDING_PERIOD, ATTR_GRACE_PERIOD)
+        if any(k in call.data for k in overlay_keys):
+            updated["schedule"] = dict(updated["schedule"])
+            _apply_overlays(call.data, updated, existing.chore_type)
 
-    overlay_keys = (ATTR_SCHEDULED, ATTR_INTERVAL, ATTR_ONESHOT, ATTR_PENDING_PERIOD, ATTR_GRACE_PERIOD)
-    if any(k in call.data for k in overlay_keys):
-        updated["schedule"] = dict(updated["schedule"])
-        _apply_overlays(call.data, updated, existing.chore_type)
-
-    # A schedule-anchor change re-enters the cycle: a terminal-COMPLETED chore
-    # (a completed oneshot, or an until/count-exhausted recurring series) picks
-    # up the new anchor instead of staying COMPLETED via the terminal
-    # short-circuit. The per-type predicate distinguishes a real anchor change
-    # from a persist-/dtstart-only tweak — the latter leaves a finished chore
-    # finished (a oneshot reopens only on a due_datetime change; a recurring
-    # chore only on a recurrence-field change, not a bare dtstart/persist edit).
-    reopens_cycle = {
-        ChoreType.ONESHOT: lambda sub: "due_datetime" in sub,
-        ChoreType.SCHEDULED: scheduled_recurrence_changed,
-        ChoreType.INTERVAL: interval_recurrence_changed,
-    }
-    sub_dict = call.data.get(allowed_attr)
-    predicate = reopens_cycle.get(existing.chore_type)
-    if predicate is not None and isinstance(sub_dict, dict) and predicate(sub_dict):
-        updated["terminal"] = False
+        # A schedule-anchor change re-enters the cycle: a terminal-COMPLETED chore
+        # (a completed oneshot, or an until/count-exhausted recurring series) picks
+        # up the new anchor instead of staying COMPLETED via the terminal
+        # short-circuit. The per-type predicate distinguishes a real anchor change
+        # from a persist-/dtstart-only tweak — the latter leaves a finished chore
+        # finished (a oneshot reopens only on a due_datetime change; a recurring
+        # chore only on a recurrence-field change, not a bare dtstart/persist edit).
+        reopens_cycle = {
+            ChoreType.ONESHOT: lambda sub: "due_datetime" in sub,
+            ChoreType.SCHEDULED: scheduled_recurrence_changed,
+            ChoreType.INTERVAL: interval_recurrence_changed,
+        }
+        sub_dict = call.data.get(allowed_attr)
+        predicate = reopens_cycle.get(existing.chore_type)
+        if predicate is not None and isinstance(sub_dict, dict) and predicate(sub_dict):
+            updated["terminal"] = False
 
     chore = BaseChore.from_dict(updated)
     coordinator.mark_source(uid, ChoreEventSource.UPDATE)
@@ -621,6 +672,7 @@ async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
         if status_filter and current_status != status_filter:
             continue
         next_due = chore.compute_next_due(now)
+        schedule = chore.schedule_description()
         items.append(
             {
                 "uid": chore.uid,
@@ -633,7 +685,11 @@ async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
                 "last_completed_by": chore.last_completed_by,
                 "assigned_to": list(chore.assigned_to),
                 "trigger_entity": resolve_tag_entity_id(call.hass, chore.trigger_tag_id),
-                "schedule": chore.schedule_description(),
+                "schedule": schedule,
+                # Structured selector for the card's edit form — the inverse of
+                # the create/update selector, so editing pre-fills without any
+                # client-side RRULE parsing.
+                "selector": schedule_to_selector(str(chore.chore_type), schedule),
             }
         )
 

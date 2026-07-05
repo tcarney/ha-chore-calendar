@@ -25,23 +25,21 @@ export class ChoreRow extends LitElement {
       margin-bottom: 5px;
     }
 
-    .card {
-      background: var(--card-background-color, var(--ha-card-background, white));
-      border-radius: 0 5px 5px 0;
-      overflow: hidden;
-    }
-
-    .row {
+    .chore {
       display: flex;
       align-items: center;
-      padding: 10px;
-      cursor: pointer;
-      transition: background-color 0.15s ease;
       gap: 12px;
       min-height: 0;
+      padding: 10px;
+      cursor: pointer;
+      background: var(--card-background-color, var(--ha-card-background, white));
+      border-left: 5px solid var(--border-color, var(--divider-color, rgba(0, 0, 0, 0.12)));
+      border-radius: 0 5px 5px 0;
+      overflow: hidden;
+      transition: background-color 0.15s ease;
     }
 
-    .row:hover {
+    .chore:hover {
       background-color: var(--secondary-background-color, rgba(0, 0, 0, 0.05));
     }
 
@@ -70,7 +68,7 @@ export class ChoreRow extends LitElement {
       white-space: nowrap;
     }
 
-    :host([status="completed"]) .card {
+    :host([status="completed"]) .chore {
       opacity: 0.6;
     }
 
@@ -85,21 +83,17 @@ export class ChoreRow extends LitElement {
 
     return html`
       <div
-        class="card"
-        style="border-left: 5px solid ${themeColorToCss(this.item.source_color)}"
+        class="chore"
+        style="--border-color: ${themeColorToCss(this.item.source_color)}"
+        ${actionHandler({
+          hasHold: hasAction(this.holdAction),
+          hasDoubleClick: hasAction(this.doubleTapAction),
+        })}
+        @action=${this._handleAction}
       >
-        <div
-          class="row"
-          ${actionHandler({
-            hasHold: hasAction(this.holdAction),
-            hasDoubleClick: hasAction(this.doubleTapAction),
-          })}
-          @action=${this._handleAction}
-        >
-          <span class="status-indicator">${STATUS_ICON[this.item.status]}</span>
-          <span class="name">${this.item.chore_name}</span>
-          <span class="time">${timeText}</span>
-        </div>
+        <span class="status-indicator">${STATUS_ICON[this.item.status]}</span>
+        <span class="name">${this.item.chore_name}</span>
+        <span class="time">${timeText}</span>
       </div>
     `;
   }
