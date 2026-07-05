@@ -2,6 +2,28 @@
 
 # Changelog
 
+## [0.11.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.10.1...v0.11.0) (2026-07-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* create_item/update_item require the structured scheduled:/ interval: selectors; the legacy {time, active_days} and {days: N} shapes are rejected. Stored data is migrated automatically. The calendar entity now emits future occurrences of scheduled chores instead of only the next due marker.
+
+### Features
+
+* chore create/edit/delete from the lovelace card ([#30](https://github.com/tcarney/ha-chore-calendar/issues/30)) ([cfdb5f7](https://github.com/tcarney/ha-chore-calendar/commit/cfdb5f7e64446fc46ba7be2c82545ed6991b5c9b))
+* RRULE-based recurrence model ([#29](https://github.com/tcarney/ha-chore-calendar/issues/29)) ([f8e1929](https://github.com/tcarney/ha-chore-calendar/commit/f8e19291c3ae677d9f555895b033f253327248dc))
+
+
+### Documentation
+
+* updated dashboard image to use theme, added a chore-calendar only card image ([39a1bf2](https://github.com/tcarney/ha-chore-calendar/commit/39a1bf2b97352e5d35cbd78abbf449a3d270231f))
+
+
+### Miscellaneous Chores
+
+* release v0.11.0 ([c7a4783](https://github.com/tcarney/ha-chore-calendar/commit/c7a478317c3cdc4b27b54e0081d74c30057430b3))
+
 ## [0.10.1](https://github.com/tcarney/ha-chore-calendar/compare/v0.10.0...v0.10.1) (2026-05-28)
 
 
