@@ -1,7 +1,7 @@
-import { RRule, Weekday } from "rrule";
 import { fireEvent } from "./fire-event";
 import type {
   ActionConfig,
+  ChoreSelector,
   ChoreStatus,
   DurationConfig,
   EnrichedChoreItem,
@@ -283,56 +283,141 @@ function lifecycleSuffix(until: string, count: unknown): string {
   return suffix;
 }
 
-/** Render a scheduled chore's rrule the way HA core's calendar does.
+/** Full weekday name by lowercase day code ("mon" → "Monday"). */
+export const DAY_FULL: Record<string, string> = {
+  mon: "Monday",
+  tue: "Tuesday",
+  wed: "Wednesday",
+  thu: "Thursday",
+  fri: "Friday",
+  sat: "Saturday",
+  sun: "Sunday",
+};
+
+const POS_WORDS: Record<number, string> = {
+  1: "first",
+  2: "second",
+  3: "third",
+  4: "fourth",
+  5: "fifth",
+  [-1]: "last",
+  [-2]: "second-to-last",
+  [-3]: "third-to-last",
+};
+
+/** Capitalize the first character of a string. */
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** Coerce a selector value (scalar or array) to a number array. */
+function asNumbers(raw: unknown): number[] {
+  if (Array.isArray(raw)) return raw.map(Number);
+  return raw != null ? [Number(raw)] : [];
+}
+
+/** Parse a selector byday entry ("mon", "2mon", "-1fri") into its parts. */
+export function parseByday(raw: unknown): { ordinal: number | null; code: string }[] {
+  const list = Array.isArray(raw) ? raw : raw != null ? [raw] : [];
+  return list.map((entry) => {
+    const match = /^([+-]?\d+)?([a-z]{3})$/.exec(String(entry).toLowerCase());
+    if (!match) return { ordinal: null, code: String(entry) };
+    return { ordinal: match[1] ? Number(match[1]) : null, code: match[2] };
+  });
+}
+
+/** Ordinal English for a positional value: 1 → "first", -1 → "last". */
+export function positionWord(n: number): string {
+  return POS_WORDS[n] ?? (n > 0 ? ordinalNumber(n) : `${ordinalNumber(-n)}-to-last`);
+}
+
+/** Ordinal English for a day-of-month: 1 → "1st", 15 → "15th". */
+export function ordinalNumber(n: number): string {
+  const v = n % 100;
+  const suffix = v >= 11 && v <= 13 ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th");
+  return `${n}${suffix}`;
+}
+
+/** Phrase the monthly/yearly weekday spec: "last Friday", "second Monday". */
+function bydayPhrase(byday: { ordinal: number | null; code: string }[], bysetpos: number[]): string {
+  const dayName = (code: string) => DAY_FULL[code] ?? code;
+  if (bysetpos.length) {
+    return `${bysetpos.map(positionWord).join(", ")} ${byday.map((e) => dayName(e.code)).join(", ")}`;
+  }
+  if (byday.some((e) => e.ordinal != null)) {
+    return byday
+      .map((e) => (e.ordinal != null ? `${positionWord(e.ordinal)} ${dayName(e.code)}` : dayName(e.code)))
+      .join(", ");
+  }
+  return byday.map((e) => dayName(e.code)).join(", ");
+}
+
+/** Render a scheduled chore from its structured selector fields.
  *
- * Mirrors `renderRRuleAsText` (rrule.js `toText()` with the
- * `isFullyConvertibleToText` guard and a raw-string fallback), with two
- * display normalizations: a single BYSETPOS folds onto the weekday (toText
- * silently drops a bare BYSETPOS — "last Friday" would read "Friday"), and
- * UNTIL/COUNT are lifted out so the time-of-day reads before the lifecycle
- * suffix.
+ * Replaces the former rrule.js `toText()` path: the backend now decomposes the
+ * stored rrule into selector fields, so display and the edit form share one
+ * source of truth and there's no second client-side RRULE parser.
  */
-function formatRRuleSchedule(schedule: Record<string, unknown>): string {
-  const rruleStr = String(schedule.rrule ?? "");
-  const time = formatLocalTime(String(schedule.time ?? ""));
+function formatScheduledSelector(selector: ChoreSelector | undefined, timeRaw: unknown): string {
+  const time = formatLocalTime(String(timeRaw ?? ""));
+  if (!selector?.frequency) return `${String(timeRaw ?? "")}`.trim() ? `At ${time}` : "";
 
-  // Plain daily/weekly shapes keep the card's compact rendering.
-  if (rruleStr === "FREQ=DAILY") return `Daily at ${time}`;
-  if (/^FREQ=WEEKLY;BYDAY=[A-Z,]+$/.test(rruleStr)) {
-    const days = (schedule.active_days as string[] | undefined) ?? [];
-    if (days.length > 0 && days.length < 7) return `${days.join(", ")} at ${time}`;
-    return `Daily at ${time}`;
-  }
+  const freq = selector.frequency;
+  const interval = Number(selector.interval ?? 1);
+  const byday = parseByday(selector.byday);
+  const bysetpos = asNumbers(selector.bysetpos);
+  const bymonthday = asNumbers(selector.bymonthday);
+  const bymonth = asNumbers(selector.bymonth);
 
-  try {
-    const opts = { ...RRule.fromString(`RRULE:${rruleStr}`).origOptions };
-    const pos = Array.isArray(opts.bysetpos) ? opts.bysetpos : opts.bysetpos != null ? [opts.bysetpos] : [];
-    if (pos.length === 1 && opts.byweekday) {
-      const weekdays = Array.isArray(opts.byweekday) ? opts.byweekday : [opts.byweekday];
-      opts.byweekday = weekdays.map((day) =>
-        day instanceof Weekday
-          ? new Weekday(day.weekday, pos[0])
-          : typeof day === "number"
-            ? new Weekday(day, pos[0])
-            : day,
-      );
-      delete opts.bysetpos;
+  let base: string;
+  if (freq === "daily") {
+    base = interval === 1 ? "Daily" : `Every ${interval} days`;
+  } else if (freq === "weekly") {
+    if (interval === 1 && new Set(byday.map((e) => e.code)).size === 7) {
+      // A weekly rule covering all seven days is just "Daily".
+      base = "Daily";
+    } else if (byday.length) {
+      const days = byday.map((e) => DAY_FULL[e.code] ?? e.code).join(", ");
+      base = interval === 1 ? days : `Every ${interval} weeks on ${days}`;
+    } else {
+      base = interval === 1 ? "Weekly" : `Every ${interval} weeks`;
     }
-    const { until, count } = opts;
-    delete opts.until;
-    delete opts.count;
-
-    const display = new RRule(opts);
-    if (!display.isFullyConvertibleToText()) return `${rruleStr} at ${time}`;
-    const text = display.toText();
-    // rrule.js parses UNTIL as UTC — format it as such to keep the wall date.
-    return (
-      `${text.charAt(0).toUpperCase()}${text.slice(1)} at ${time}` +
-      lifecycleSuffix(until ? formatDate(until, true) : "", count)
-    );
-  } catch {
-    return rruleStr;
+  } else if (freq === "monthly") {
+    const lead = interval === 1 ? "Monthly" : `Every ${interval} months`;
+    if (byday.length) {
+      const phrase = bydayPhrase(byday, bysetpos);
+      base = interval === 1 ? capitalize(phrase) : `${lead} on the ${phrase}`;
+    } else if (bymonthday.length) {
+      base = `${lead} on the ${bymonthday.map((d) => (d === -1 ? "last day" : ordinalNumber(d))).join(", ")}`;
+    } else {
+      base = lead;
+    }
+  } else if (freq === "yearly") {
+    let text = interval === 1 ? "Annually" : `Every ${interval} years`;
+    if (bymonth.length) {
+      text += ` in ${bymonth.map((m) => MONTH_SHORT[m - 1]).join(", ")}`;
+    }
+    if (byday.length) {
+      text += ` on the ${bydayPhrase(byday, bysetpos)}`;
+    } else if (bymonthday.length) {
+      text += ` on the ${bymonthday.map((d) => (d === -1 ? "last day" : ordinalNumber(d))).join(", ")}`;
+    }
+    base = text;
+  } else {
+    base = freq;
   }
+
+  let suffix = "";
+  // On a non-yearly frequency, bymonth is a season window ("Oct–Mar").
+  if (freq !== "yearly") {
+    const window = formatMonthWindow(bymonth);
+    if (window) suffix += `, ${window}`;
+  }
+  // until is naive local ISO — Date() parses it in the local zone.
+  const until = selector.until ? formatDate(new Date(String(selector.until))) : "";
+  suffix += lifecycleSuffix(until, selector.count);
+
+  return `${base} at ${time}${suffix}`;
 }
 
 const INTERVAL_UNITS: Record<string, string> = {
@@ -359,12 +444,14 @@ function formatIntervalSchedule(schedule: Record<string, unknown>): string {
 /** Format a schedule object (dict) into a human-readable string. */
 export function formatSchedule(
   schedule: string | Record<string, unknown>,
+  selector?: ChoreSelector,
 ): string {
   if (typeof schedule === "string") return schedule;
 
-  // Scheduled chore: { rrule, dtstart, time, active_days, ... }
+  // Scheduled chore: render from the structured selector ({ rrule } marks the
+  // type; the recurrence text comes from selector fields, not the rrule string).
   if ("rrule" in schedule) {
-    return formatRRuleSchedule(schedule);
+    return formatScheduledSelector(selector, schedule.time);
   }
 
   // Interval chore: { freq, interval, bymonth?, until?, count?, ... }
@@ -422,6 +509,10 @@ export async function handleChoreAction(
       fireEvent(element, "chore-detail" as keyof HASSDomEvents, { item });
       break;
 
+    case "edit":
+      fireEvent(element, "chore-edit" as keyof HASSDomEvents, { item });
+      break;
+
     case "complete":
       try {
         await hass.callWS({
@@ -458,6 +549,7 @@ export async function handleChoreAction(
 declare global {
   interface HASSDomEvents {
     "chore-detail": { item: EnrichedChoreItem };
+    "chore-edit": { item: EnrichedChoreItem };
     "chore-completed": { item: EnrichedChoreItem };
     "hass-action": { config: Record<string, unknown>; action: string };
   }
