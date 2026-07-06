@@ -8,7 +8,7 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 
 - **Service-driven management**: Create, update, delete, and complete chores via service calls
 - **Calendar entity**: Read-only calendar per list showing every upcoming occurrence and recently completed chores
-- **Todo entity**: One todo list per chore list, surfacing chores through HA's native todo UI and Assist pipelines
+- **Todo entity**: One todo list per chore list, surfacing chores through HA's native todo UI and Assist pipelines — complete, rename, edit descriptions, and reschedule the current occurrence right from the card
 - **Sensor entities**: One sensor per chore tracking its current status and attributes
 - **Custom Lovelace card**: Built-in timeline card with per-entity filtering, colors, a detail dialog, create/edit/delete dialogs, and configurable actions
 - **Tag scan auto-completion**: Assign NFC tags to chores for tap-to-complete; shared tags automatically resolve to the correct chore based on completion windows
@@ -314,7 +314,9 @@ data:
   until: "2026-04-28 09:00:00"
 ```
 
-`until` takes a datetime — enter it directly in YAML or use the picker in Developer Tools. Skipping a chore whose `until`/`count` series has ended raises an error, and skipping past the final occurrence ends the series.
+`until` takes a datetime — enter it directly in YAML or use the picker in Developer Tools — and works in both directions: a value *earlier* than the natural due pulls the occurrence forward ("do it tomorrow instead of Monday"), and re-skipping with a new value moves an existing skip. Skipping a chore whose `until`/`count` series has ended raises an error, and skipping past the final occurrence ends the series.
+
+To undo a skip, re-skip with a new `until`, or clear the item's due date from the [native todo card](#native-todo-card) to drop the override entirely and return to the normal schedule.
 
 Completing a skipped chore clears the skip, so the completion counts for the current cycle (unless `keep_skip: true`). Uncompleting that completion restores the prior skip state — the undo is symmetric with `last_completed`.
 
@@ -539,15 +541,19 @@ All options are configurable through the visual editor — no YAML required. Eac
 
 ### Native Todo Card
 
-Each chore list also works with HA's built-in [todo-list card](https://www.home-assistant.io/dashboards/todo-list/). Set `item_tap_action: toggle` so tapping a chore toggles completion:
+Each chore list also works with HA's built-in [todo-list card](https://www.home-assistant.io/dashboards/todo-list/):
 
 ```yaml
 type: todo-list
 entity: todo.daily_chores
-item_tap_action: toggle
 ```
 
-The default tap action (`edit`) opens HA's item editor, which is not fully supported.  Every save from that dialog fails with a validation error; `toggle` avoids the dialog entirely. To rename a chore or edit its description, use [`chore_calendar.update_item`](#update-a-chore).
+The default tap action (`edit`) opens HA's item editor, where you can rename a chore, edit its description, and change its due date; set `item_tap_action: toggle` if you'd rather have tapping toggle completion directly. Due edits reschedule the **current occurrence only** — never the recurrence:
+
+- **One-shot chores**: the due date is edited directly; clearing it leaves the chore unscheduled, and setting a date on a completed one-shot reopens it.
+- **Scheduled / interval chores**: a changed due date acts like [`skip_item`](#skip-a-chore) with an explicit `until` — later defers the occurrence, earlier pulls it forward. A skipped chore shows in the completed section with its deferred date as the due; clearing that due date undoes the skip and returns the chore to its normal schedule. Clearing the due of a chore with no skip in force is rejected (the due comes from the schedule).
+
+To change a chore's recurrence, use [`chore_calendar.update_item`](#update-a-chore) or the chore card's edit dialog. Adding and deleting items from the todo card is not supported — use the [services](#services) or the chore card.
 
 ## Automation Events
 

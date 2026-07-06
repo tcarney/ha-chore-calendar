@@ -179,17 +179,19 @@ MATRIX = [
         id="skip-held-through-overdue",
     ),
     pytest.param(
-        # Skip overtaken by the natural anchor: a stale skipped_until in the
-        # past falls through to normal scheduling.
+        # Due override earlier than the natural anchor: skipped_until is an
+        # unconditional occurrence-due override, so it keeps anchoring the
+        # chore (status, next_due, due_range) even when the natural cadence
+        # has caught up — only a completion or explicit clear releases it.
         {
             "created_at": datetime(2026, 3, 29, 2, 0, tzinfo=TZ),
             "skipped_until": datetime(2026, 3, 28, 8, 0, tzinfo=TZ),
         },
         datetime(2026, 3, 30, 6, 0, tzinfo=TZ),
         ChoreStatus.OVERDUE,
-        datetime(2026, 3, 29, 8, 0, tzinfo=TZ),
-        (datetime(2026, 3, 29, 8, 0, tzinfo=TZ), datetime(2026, 3, 29, 9, 0, tzinfo=TZ)),
-        id="skip-overtaken-by-natural-anchor",
+        datetime(2026, 3, 28, 8, 0, tzinfo=TZ),
+        (datetime(2026, 3, 28, 8, 0, tzinfo=TZ), datetime(2026, 3, 28, 9, 0, tzinfo=TZ)),
+        id="override-earlier-than-natural-anchor-holds",
     ),
     # --- Week wrap (Sun → Mon) -------------------------------------------------
     pytest.param(

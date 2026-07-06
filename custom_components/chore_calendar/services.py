@@ -486,6 +486,8 @@ async def _async_handle_update(call: ServiceCall) -> None:
         # from a persist-/dtstart-only tweak — the latter leaves a finished chore
         # finished (a oneshot reopens only on a due_datetime change; a recurring
         # chore only on a recurrence-field change, not a bare dtstart/persist edit).
+        # The same change releases any due override: ``skipped_until`` rescheduled
+        # the *old* occurrence and would otherwise shadow the new anchor.
         reopens_cycle = {
             ChoreType.ONESHOT: lambda sub: "due_datetime" in sub,
             ChoreType.SCHEDULED: scheduled_recurrence_changed,
@@ -495,6 +497,7 @@ async def _async_handle_update(call: ServiceCall) -> None:
         predicate = reopens_cycle.get(existing.chore_type)
         if predicate is not None and isinstance(sub_dict, dict) and predicate(sub_dict):
             updated["terminal"] = False
+            updated["skipped_until"] = None
 
     chore = BaseChore.from_dict(updated)
     coordinator.mark_source(uid, ChoreEventSource.UPDATE)
@@ -553,12 +556,15 @@ async def _async_handle_uncomplete(call: ServiceCall) -> None:
 async def _async_handle_skip(call: ServiceCall) -> None:
     """Handle skip_item service call.
 
-    Defers a chore's current occurrence. With an explicit ``until``, sets
-    ``skipped_until`` directly (a naive value is coerced to local tz so
-    storage and the skip-anchor comparison stay tz-aware). Without it,
-    delegates to the chore's ``apply_default_skip`` for type-specific
-    behavior — scheduled advances one occurrence, interval slides
-    ``now + interval`` (season-filtered), oneshot clears its ``due_datetime``.
+    Reschedules a chore's current occurrence. With an explicit ``until``,
+    sets ``skipped_until`` directly (a naive value is coerced to local tz so
+    storage stays tz-aware) — the override is honored in both directions, so
+    an ``until`` earlier than the natural anchor pulls the occurrence
+    forward, and re-skipping with a new value moves an existing skip.
+    Without it, delegates to the chore's ``apply_default_skip`` for
+    type-specific behavior — scheduled advances one occurrence, interval
+    slides ``now + interval`` (season-filtered), oneshot clears its
+    ``due_datetime``.
 
     The skip surfaces via ``chore_calendar_status_changed`` with
     ``source=skip``. Skipping an already-``completed`` chore (e.g. an

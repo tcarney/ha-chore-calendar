@@ -622,6 +622,69 @@ async def test_update_interval_persist_only_keeps_terminal(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_recurrence_releases_skip_override(hass, config_entry):
+    """A recurrence change releases an active skipped_until override.
+
+    The override rescheduled the *old* occurrence; since skipped_until is an
+    unconditional anchor override, leaving it in place would shadow the new
+    schedule until the next completion.
+    """
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "create_item",
+        {
+            "entity_id": entity_id,
+            "chore_name": "Deferred Chore",
+            "interval": {"frequency": "daily", "interval": 3},
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    store = config_entry.runtime_data.store
+    chore = _find_chore_by_name(store, "Deferred Chore")
+    assert isinstance(chore, IntervalChore)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "skip_item",
+        {"entity_id": entity_id, "item": chore.uid, "until": "2026-06-10T09:00:00-05:00"},
+        blocking=True,
+    )
+    assert store.get_chore(chore.uid).skipped_until is not None
+
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": chore.uid, "interval": {"frequency": "weekly"}},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert isinstance(refreshed, IntervalChore)
+    assert refreshed.freq == "weekly"
+    assert refreshed.skipped_until is None
+
+    # A persist-only tweak is not a recurrence change — the override holds.
+    await hass.services.async_call(
+        DOMAIN,
+        "skip_item",
+        {"entity_id": entity_id, "item": chore.uid, "until": "2026-06-10T09:00:00-05:00"},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "update_item",
+        {"entity_id": entity_id, "item": chore.uid, "interval": {"persist": True}},
+        blocking=True,
+    )
+    refreshed = store.get_chore(chore.uid)
+    assert refreshed is not None
+    assert refreshed.skipped_until is not None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_create_item_without_description_is_none(hass, config_entry):
     """create_item leaves description as None when not provided."""
     entity_id = await _setup_with_chore(hass, config_entry)

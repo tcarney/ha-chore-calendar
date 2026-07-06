@@ -16,7 +16,7 @@ from custom_components.chore_calendar.const import (
     ChoreType,
 )
 from custom_components.chore_calendar.models import IntervalChore, ScheduledChore
-from homeassistant.components.todo import TodoItem, TodoItemStatus, TodoListEntityFeature
+from homeassistant.components.todo import TodoItemStatus, TodoListEntityFeature
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
@@ -99,24 +99,28 @@ async def test_todo_entity_shares_device_with_calendar(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_todo_entity_only_advertises_update(hass, config_entry):
-    """Only UPDATE_TODO_ITEM is advertised; CREATE/DELETE/MOVE/SET_DESCRIPTION are not.
+async def test_todo_entity_advertised_features(hass, config_entry):
+    """UPDATE plus the description/due-datetime field features; CREATE/DELETE/MOVE are not.
 
-    Mutation lives on chore_calendar.* services. Advertising DELETE_TODO_ITEM
-    would route both todo.remove_item and todo.remove_completed_items through
-    async_delete_todo_items, where we can't cleanly distinguish "permanently
-    delete this chore" from "clear from completed view" — the native card's
-    "permanently deleted" warning would be misleading for recurring chores
-    whose last_completed is load-bearing. SET_DESCRIPTION_ON_ITEM stays off
-    because the todo card's edit dialog submits due_datetime alongside the
-    description, which the entity cannot accept (due times are derived from
-    the chore schedule) — see the todo.py module docstring.
+    Creation and deletion live on chore_calendar.* services. Advertising
+    DELETE_TODO_ITEM would route both todo.remove_item and
+    todo.remove_completed_items through async_delete_todo_items, where we
+    can't cleanly distinguish "permanently delete this chore" from "clear
+    from completed view" — the native card's "permanently deleted" warning
+    would be misleading for recurring chores whose last_completed is
+    load-bearing. SET_DUE_DATE_ON_ITEM (date-only) stays off: every reported
+    due is a datetime, and accepting a bare date would mean inventing a
+    time-of-day.
     """
     entity_id = await _setup_entry(hass, config_entry)
     state = hass.states.get(entity_id)
     assert state is not None
     features = state.attributes["supported_features"]
-    assert features == TodoListEntityFeature.UPDATE_TODO_ITEM
+    assert features == (
+        TodoListEntityFeature.UPDATE_TODO_ITEM
+        | TodoListEntityFeature.SET_DESCRIPTION_ON_ITEM
+        | TodoListEntityFeature.SET_DUE_DATETIME_ON_ITEM
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +233,41 @@ async def test_todo_items_maps_completed_to_completed(hass, config_entry):
     assert items[0].due is None
     # completed field mirrors chore.last_completed.
     assert items[0].completed == last_completed
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_todo_items_skip_deferred_item_carries_due(hass, config_entry):
+    """A skip-deferred chore reads COMPLETED but carries its deferred-until due.
+
+    Exposing ``skipped_until`` on the dormant row is what makes the skip
+    visible — and editable/clearable — from the native card.
+    """
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    deferred_to = FROZEN_NOW + timedelta(days=3)
+    chore = IntervalChore(
+        uid="deferred",
+        chore_name="Water Plants",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(days=7),
+        skipped_until=deferred_to,
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        entity = _get_todo_entity(hass, entity_id)
+        assert entity is not None
+        items = entity.todo_items
+
+    assert items is not None
+    assert len(items) == 1
+    assert items[0].status == TodoItemStatus.COMPLETED
+    assert items[0].due == deferred_to
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -504,11 +543,11 @@ async def test_todo_items_carry_description(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_update_description_is_ignored(hass, config_entry):
-    """A description change in the merged TodoItem payload is silently ignored.
+async def test_update_description_via_service(hass, config_entry):
+    """todo.update_item with a description writes it through to the chore.
 
-    The stored description is only writable via chore_calendar.update_item —
-    see the todo.py module docstring for why SET_DESCRIPTION_ON_ITEM is off.
+    Core merges the unspecified fields (summary, status, due) from the
+    reported item, so only the description registers as a change.
     """
     entity_id = await _setup_entry(hass, config_entry)
     runtime = config_entry.runtime_data
@@ -526,26 +565,384 @@ async def test_update_description_is_ignored(hass, config_entry):
     await runtime.store.async_create_chore(chore)
     await _refresh_at(hass, config_entry, FROZEN_NOW)
 
-    # Call the entity method directly with a mutated description — the
-    # todo.update_item service would reject the field outright (the entity
-    # doesn't advertise SET_DESCRIPTION_ON_ITEM), so this exercises the
-    # handler's own ignore path with a merged payload.
-    entity = _get_todo_entity(hass, entity_id)
-    assert entity is not None
     with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
-        await entity.async_update_todo_item(
-            TodoItem(
-                uid="chore-1",
-                summary="Test Chore",
-                status=TodoItemStatus.NEEDS_ACTION,
-                description="Edited note.",
-            )
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": entity_id, "item": "chore-1", "description": "Edited note."},
+            blocking=True,
         )
         await hass.async_block_till_done()
 
     updated = runtime.store.get_chore("chore-1")
     assert updated is not None
-    assert updated.description == "Original note."
+    assert updated.description == "Edited note."
+    # Status untouched — no completion was recorded by the field edit.
+    assert updated.last_completed == FROZEN_NOW - timedelta(days=7)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_clear_description_via_service(hass, config_entry):
+    """An explicit null description clears the stored one (empty → None)."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = IntervalChore(
+        uid="chore-1",
+        chore_name="Test Chore",
+        chore_type=ChoreType.INTERVAL,
+        description="Original note.",
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(days=7),
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": entity_id, "item": "chore-1", "description": None},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    updated = runtime.store.get_chore("chore-1")
+    assert updated is not None
+    assert updated.description is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_rename_via_service(hass, config_entry):
+    """todo.update_item with rename updates the chore name."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = IntervalChore(
+        uid="chore-1",
+        chore_name="Old Name",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(days=7),
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": entity_id, "item": "chore-1", "rename": "New Name"},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    updated = runtime.store.get_chore("chore-1")
+    assert updated is not None
+    assert updated.chore_name == "New Name"
+
+
+# ---------------------------------------------------------------------------
+# async_update_todo_item — due edits
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_due_later_defers_recurring(hass, config_entry):
+    """Setting a later due on a recurring chore sets the skipped_until override."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = IntervalChore(
+        uid="chore-1",
+        chore_name="Test Chore",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(days=7),  # DUE at FROZEN_NOW
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    new_due = FROZEN_NOW + timedelta(days=2)
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": entity_id, "item": "chore-1", "due_datetime": new_due.isoformat()},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    updated = runtime.store.get_chore("chore-1")
+    assert updated is not None
+    assert updated.skipped_until == new_due
+    # The schedule itself is untouched — only the current occurrence moved.
+    assert isinstance(updated, IntervalChore)
+    assert updated.interval == 7
+    assert updated.last_completed == FROZEN_NOW - timedelta(days=7)
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        assert updated.compute_next_due(FROZEN_NOW) == new_due
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_due_earlier_advances_recurring(hass, config_entry):
+    """Setting an earlier due pulls the occurrence forward of its natural anchor."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = IntervalChore(
+        uid="chore-1",
+        chore_name="Test Chore",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(days=1),  # natural due in 6 days
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    new_due = FROZEN_NOW + timedelta(days=1)
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": entity_id, "item": "chore-1", "due_datetime": new_due.isoformat()},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    updated = runtime.store.get_chore("chore-1")
+    assert updated is not None
+    assert updated.skipped_until == new_due
+    assert updated.compute_next_due(FROZEN_NOW) == new_due
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_due_moves_existing_skip(hass, config_entry):
+    """A due edit replaces an existing skip — 'skipped until next week, actually tomorrow'."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = IntervalChore(
+        uid="chore-1",
+        chore_name="Test Chore",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(days=7),
+        skipped_until=FROZEN_NOW + timedelta(days=7),
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    new_due = FROZEN_NOW + timedelta(days=1)
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": entity_id, "item": "chore-1", "due_datetime": new_due.isoformat()},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    updated = runtime.store.get_chore("chore-1")
+    assert updated is not None
+    assert updated.skipped_until == new_due
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_due_cleared_releases_skip(hass, config_entry):
+    """An explicit null due releases an active skip — the 'undo skip' path."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    natural_due = FROZEN_NOW + timedelta(hours=1)
+    chore = IntervalChore(
+        uid="chore-1",
+        chore_name="Test Chore",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=natural_due - timedelta(days=7),
+        skipped_until=FROZEN_NOW + timedelta(days=7),
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": entity_id, "item": "chore-1", "due_datetime": None},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    updated = runtime.store.get_chore("chore-1")
+    assert updated is not None
+    assert updated.skipped_until is None
+    # Natural cadence resumes.
+    assert updated.compute_next_due(FROZEN_NOW) == natural_due
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_due_cleared_without_skip_raises(hass, config_entry):
+    """Clearing the due of a recurring chore with no active skip is rejected.
+
+    The due derives from the schedule; silently accepting the clear would
+    just snap back in the UI. The error points at the schedule-editing path.
+    """
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = IntervalChore(
+        uid="chore-1",
+        chore_name="Test Chore",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(days=7),
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    with (
+        patch("homeassistant.util.dt.now", return_value=FROZEN_NOW),
+        pytest.raises(ServiceValidationError, match="takes its due from its schedule"),
+    ):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": entity_id, "item": "chore-1", "due_datetime": None},
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_due_on_terminal_recurring_raises(hass, config_entry):
+    """A due edit on an exhausted (terminal) recurring series is rejected."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = IntervalChore(
+        uid="chore-1",
+        chore_name="Test Chore",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=7,
+        count=1,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(days=1),
+        completion_count=1,
+        terminal=True,
+        persist=True,
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    with (
+        patch("homeassistant.util.dt.now", return_value=FROZEN_NOW),
+        pytest.raises(ServiceValidationError, match="series .* has ended"),
+    ):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {
+                "entity_id": entity_id,
+                "item": "chore-1",
+                "due_datetime": (FROZEN_NOW + timedelta(days=1)).isoformat(),
+            },
+            blocking=True,
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_due_on_dormant_recurring_defers_next_cycle(hass, config_entry):
+    """Setting a due on a cycle-completed (dormant) chore defers its next cycle."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = IntervalChore(
+        uid="chore-1",
+        chore_name="Test Chore",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(hours=1),  # COMPLETED
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    new_due = FROZEN_NOW + timedelta(days=10)
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": entity_id, "item": "chore-1", "due_datetime": new_due.isoformat()},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    updated = runtime.store.get_chore("chore-1")
+    assert updated is not None
+    assert updated.skipped_until == new_due
+    # Still completed for the current cycle; the override moves the next one.
+    assert updated.last_completed == FROZEN_NOW - timedelta(hours=1)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_complete_with_due_keeps_override(hass, config_entry):
+    """Completing and setting a due in one payload records both.
+
+    The card's edit dialog submits the whole form, so a user can tick the
+    checkbox and move the due together — the completion must not clear the
+    just-set override.
+    """
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = IntervalChore(
+        uid="chore-1",
+        chore_name="Test Chore",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(days=7),  # DUE at FROZEN_NOW
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    new_due = FROZEN_NOW + timedelta(days=10)
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {
+                "entity_id": entity_id,
+                "item": "chore-1",
+                "status": "completed",
+                "due_datetime": new_due.isoformat(),
+            },
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    updated = runtime.store.get_chore("chore-1")
+    assert updated is not None
+    assert updated.last_completed == FROZEN_NOW
+    assert updated.skipped_until == new_due
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

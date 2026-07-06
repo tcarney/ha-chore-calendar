@@ -275,7 +275,7 @@
     },
     "skip_item": {
       "name": "Skip item",
-      "description": "Defer a chore's next occurrence without recording a completion.",
+      "description": "Reschedule a chore's current occurrence without recording a completion.",
       "fields": {
         "entity_id": {
           "name": "Entity",
@@ -287,7 +287,7 @@
         },
         "until": {
           "name": "Until",
-          "description": "Defer until this datetime. Omit for the type default: next occurrence (scheduled), now + interval (interval), clear the due date (oneshot)."
+          "description": "Reschedule to this datetime (later defers, earlier advances). Omit for the type default: next occurrence (scheduled), now + interval (interval), clear the due date (oneshot)."
         }
       }
     },

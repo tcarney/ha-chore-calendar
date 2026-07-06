@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.chore_calendar.const import CONF_LIST_NAME, DOMAIN, ChoreType
+from custom_components.chore_calendar.const import CONF_LIST_NAME, DOMAIN, ChoreStatus, ChoreType
 from custom_components.chore_calendar.models import OneshotChore
 from homeassistant.components.todo import TodoItemStatus
 from homeassistant.config_entries import ConfigEntryState
@@ -235,3 +235,109 @@ async def test_todo_completed_oneshot_renders_completed(hass, config_entry):
     assert items[0].status == TodoItemStatus.COMPLETED
     assert items[0].completed == completed
     assert items[0].due is None  # completed items don't carry the past due
+
+
+# ---------------------------------------------------------------------------
+# Todo platform — due edits (oneshot writes due_datetime directly)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_todo_due_edit_writes_oneshot_due_datetime(hass, config_entry):
+    """A due edit on a oneshot rewrites due_datetime — the occurrence is the series.
+
+    Both directions work (no skip-override involved), and any stale
+    skipped_until is released so it cannot shadow the new anchor.
+    """
+    _, todo_id = await _setup(hass, config_entry)
+    chore = OneshotChore(
+        uid="oneshot",
+        chore_name="File Taxes",
+        chore_type=ChoreType.ONESHOT,
+        due_datetime=FROZEN_NOW + timedelta(days=5),
+        skipped_until=FROZEN_NOW + timedelta(days=9),
+    )
+    await config_entry.runtime_data.store.async_create_chore(chore)
+    await _refresh(hass, config_entry, FROZEN_NOW)
+
+    new_due = FROZEN_NOW + timedelta(days=1)  # earlier than both anchors
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": todo_id, "item": "oneshot", "due_datetime": new_due.isoformat()},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    updated = config_entry.runtime_data.store.get_chore("oneshot")
+    assert isinstance(updated, OneshotChore)
+    assert updated.due_datetime == new_due
+    assert updated.skipped_until is None
+    assert updated.compute_next_due(FROZEN_NOW) == new_due
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_todo_due_cleared_unschedules_oneshot(hass, config_entry):
+    """An explicit null due makes the oneshot unscheduled (still actionable)."""
+    _, todo_id = await _setup(hass, config_entry)
+    chore = OneshotChore(
+        uid="oneshot",
+        chore_name="Buy Milk",
+        chore_type=ChoreType.ONESHOT,
+        due_datetime=FROZEN_NOW + timedelta(days=2),
+    )
+    await config_entry.runtime_data.store.async_create_chore(chore)
+    await _refresh(hass, config_entry, FROZEN_NOW)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": todo_id, "item": "oneshot", "due_datetime": None},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    updated = config_entry.runtime_data.store.get_chore("oneshot")
+    assert isinstance(updated, OneshotChore)
+    assert updated.due_datetime is None
+    assert updated.compute_status(FROZEN_NOW) == ChoreStatus.PENDING
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_todo_due_edit_reopens_terminal_oneshot(hass, config_entry):
+    """Setting a due on a completed (terminal) oneshot reopens it.
+
+    Mirrors the chore_calendar.update_item reschedule semantics: the
+    terminal flag clears and the chore re-enters the cycle at the new due.
+    (Until the new pending window opens it reads as dormant-COMPLETED,
+    like any rescheduled chore with a prior completion.)
+    """
+    _, todo_id = await _setup(hass, config_entry)
+    chore = OneshotChore(
+        uid="oneshot",
+        chore_name="File Taxes",
+        chore_type=ChoreType.ONESHOT,
+        due_datetime=FROZEN_NOW - timedelta(days=1),
+        last_completed=FROZEN_NOW - timedelta(days=1),
+        terminal=True,
+    )
+    await config_entry.runtime_data.store.async_create_chore(chore)
+    await _refresh(hass, config_entry, FROZEN_NOW)
+
+    new_due = FROZEN_NOW + timedelta(days=30)
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": todo_id, "item": "oneshot", "due_datetime": new_due.isoformat()},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    updated = config_entry.runtime_data.store.get_chore("oneshot")
+    assert isinstance(updated, OneshotChore)
+    assert updated.due_datetime == new_due
+    assert updated.terminal is False
+    assert updated.compute_next_due(FROZEN_NOW + timedelta(days=29)) == new_due

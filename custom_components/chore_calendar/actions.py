@@ -91,8 +91,9 @@ async def async_apply_completed_cleared_at(
 ) -> None:
     """Set the per-list completed-items cutoff and sweep persist=false chores.
 
-    Used by both the ``hide_completed_items`` service handler and the todo
-    entity's ``async_remove_completed_items``. After updating the cutoff,
+    Used by the ``hide_completed_items`` service handler (the todo entity
+    deliberately does not advertise ``DELETE_TODO_ITEM``, so HA's native
+    ``remove_completed_items`` path never reaches it). After updating the cutoff,
     deletes any terminal-completed oneshot — and any until/count-exhausted
     (``terminal``) scheduled or interval chore — whose ``last_completed``
     precedes the new cutoff and whose ``persist`` flag is False; these

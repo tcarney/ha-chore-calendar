@@ -36,6 +36,11 @@ class BaseChore(abc.ABC):
     # once via uncomplete_item. Not user-facing.
     previous_last_completed: datetime | None = None
     previous_last_completed_by: str | None = None
+    # Explicit due override for the current occurrence. When set it *is* the
+    # operative due — whether it defers past the natural anchor or advances
+    # ahead of it ("do it tomorrow instead of Monday"). Cleared by the next
+    # completion (see ``apply_completion``) or explicitly (todo due-date
+    # cleared), after which the natural cadence resumes.
     skipped_until: datetime | None = None
     previous_skipped_until: datetime | None = None
     # When True, the current occurrence is satisfied terminally — compute_status
@@ -86,13 +91,19 @@ class BaseChore(abc.ABC):
         """
 
     def _operative_due_at(self, now: datetime) -> datetime | None:
-        """Return the operative due time, honoring an active skip anchor.
+        """Return the operative due time, honoring a due override.
 
-        ``skipped_until`` overrides the type-specific anchor while the skip
-        window is active (until ``skipped_until + grace_period``). Once the
-        window elapses, falls through to the normal anchor.
+        ``skipped_until``, when set, replaces the type-specific anchor
+        outright — in both directions. A later value defers the current
+        occurrence; an earlier value advances it. The override holds through
+        OVERDUE (so "overdue by" reads from the override, not a stale natural
+        anchor) and is released only by a completion or an explicit clear,
+        at which point the natural cadence resumes. The natural anchor cannot
+        organically overtake an override: scheduled pins to the oldest
+        uncompleted period, and interval/oneshot anchors are fixed until
+        completion.
         """
-        if self._skip_anchor_active(now):
+        if self.skipped_until is not None:
             return self.skipped_until
         return self._anchor_due_at(now)
 
@@ -133,10 +144,10 @@ class BaseChore(abc.ABC):
         pending_at = due_at - self.pending_period
         overdue_at = due_at + self.grace_period
 
-        # Skip anchor may place ``now`` well before its pending window —
-        # treat the gap before pending_at as COMPLETED (the chore is
-        # explicitly deferred).
-        if self._skip_anchor_active(now) and now < pending_at:
+        # A due override may place ``now`` well before its pending window —
+        # treat the gap before pending_at as COMPLETED (the occurrence is
+        # explicitly rescheduled; dormant until its window opens).
+        if self.skipped_until is not None and now < pending_at:
             return ChoreStatus.COMPLETED
 
         # Completion landing within the current cycle's pending window
@@ -263,30 +274,6 @@ class BaseChore(abc.ABC):
         # completion_count=0 even when last_completed is set, so a revert of
         # such a completion must not go negative.
         self.completion_count = max(0, self.completion_count - 1)
-
-    def _skip_anchor_active(self, now: datetime) -> bool:
-        """Return True while ``skipped_until`` should override the type's normal anchor.
-
-        The skip stays operative as long as it represents a later due than
-        the type's natural anchor — the user's deferral hasn't been overtaken
-        by the natural cadence. For types whose natural anchor advances over
-        time without a completion (scheduled), the skip falls through once
-        today's period catches up. For types whose natural anchor is fixed
-        until completion (interval, oneshot with ``due_datetime``), the skip
-        persists until cleared by a completion.
-
-        Keeping the skip operative through OVERDUE — rather than expiring it
-        at ``skipped_until + grace_period`` — is what lets ``compute_next_due``
-        report ``skipped_until`` once the chore goes overdue, so the card's
-        "overdue by" reading starts at zero from when the skip's grace
-        elapsed instead of snapping back to a stale natural anchor.
-        """
-        if self.skipped_until is None:
-            return False
-        natural = self._anchor_due_at(now)
-        if natural is None:
-            return True
-        return self.skipped_until > natural
 
     @abc.abstractmethod
     def _schedule_to_dict(self) -> dict[str, Any]:
