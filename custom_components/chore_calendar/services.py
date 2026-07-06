@@ -16,6 +16,7 @@ from homeassistant.util import dt as dt_util
 from .actions import (
     async_apply_completed_cleared_at,
     async_complete_chore,
+    async_register_chore,
     async_uncomplete_chore,
     resolve_tag_entity_id,
 )
@@ -24,7 +25,6 @@ from .const import (
     ATTR_ITEM,
     ATTR_TRIGGER_ENTITY,
     DOMAIN,
-    EVENT_ITEM_CREATED,
     EVENT_ITEM_DELETED,
     LOGGER,
     SERVICE_COMPLETE_ITEM,
@@ -401,24 +401,7 @@ async def _async_handle_create(call: ServiceCall) -> None:
         chore.last_completed = last_scanned
         LOGGER.debug("Seeded last_completed from tag last-scanned: %s", last_scanned.isoformat())
 
-    await store.async_create_chore(chore)
-    await coordinator.async_refresh()
-
-    now = dt_util.now()
-    next_due = chore.compute_next_due(now)
-    call.hass.bus.async_fire(
-        EVENT_ITEM_CREATED,
-        {
-            "uid": chore.uid,
-            "chore_name": chore.chore_name,
-            "chore_type": str(chore.chore_type),
-            "entity_id": call.data[ATTR_ENTITY_ID],
-            "status": str(chore.compute_status(now)),
-            "next_due": next_due.isoformat() if next_due else None,
-            "assigned_to": list(chore.assigned_to),
-        },
-    )
-    LOGGER.info("created %s (%s)", chore.chore_name, uid)
+    await async_register_chore(call.hass, store, coordinator, chore, call.data[ATTR_ENTITY_ID])
 
 
 async def _async_handle_update(call: ServiceCall) -> None:

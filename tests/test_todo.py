@@ -100,9 +100,9 @@ async def test_todo_entity_shares_device_with_calendar(hass, config_entry):
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_todo_entity_advertised_features(hass, config_entry):
-    """UPDATE plus the description/due-datetime field features; CREATE/DELETE/MOVE are not.
+    """CREATE/UPDATE plus the description/due-datetime field features; DELETE/MOVE are not.
 
-    Creation and deletion live on chore_calendar.* services. Advertising
+    Deletion lives on chore_calendar.* services. Advertising
     DELETE_TODO_ITEM would route both todo.remove_item and
     todo.remove_completed_items through async_delete_todo_items, where we
     can't cleanly distinguish "permanently delete this chore" from "clear
@@ -117,7 +117,8 @@ async def test_todo_entity_advertised_features(hass, config_entry):
     assert state is not None
     features = state.attributes["supported_features"]
     assert features == (
-        TodoListEntityFeature.UPDATE_TODO_ITEM
+        TodoListEntityFeature.CREATE_TODO_ITEM
+        | TodoListEntityFeature.UPDATE_TODO_ITEM
         | TodoListEntityFeature.SET_DESCRIPTION_ON_ITEM
         | TodoListEntityFeature.SET_DUE_DATETIME_ON_ITEM
     )

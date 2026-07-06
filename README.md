@@ -8,7 +8,7 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 
 - **Service-driven management**: Create, update, delete, and complete chores via service calls
 - **Calendar entity**: Read-only calendar per list showing every upcoming occurrence and recently completed chores
-- **Todo entity**: One todo list per chore list, surfacing chores through HA's native todo UI and Assist pipelines — complete, rename, edit descriptions, and reschedule the current occurrence right from the card
+- **Todo entity**: One todo list per chore list, surfacing chores through HA's native todo UI and Assist pipelines — add one-off chores, complete, rename, edit descriptions, and reschedule the current occurrence right from the card
 - **Sensor entities**: One sensor per chore tracking its current status and attributes
 - **Custom Lovelace card**: Built-in timeline card with per-entity filtering, colors, a detail dialog, create/edit/delete dialogs, and configurable actions
 - **Tag scan auto-completion**: Assign NFC tags to chores for tap-to-complete; shared tags automatically resolve to the correct chore based on completion windows
@@ -553,7 +553,9 @@ The default tap action (`edit`) opens HA's item editor, where you can rename a c
 - **One-shot chores**: the due date is edited directly; clearing it leaves the chore unscheduled, and setting a date on a completed one-shot reopens it.
 - **Scheduled / interval chores**: a changed due date acts like [`skip_item`](#skip-a-chore) with an explicit `until` — later defers the occurrence, earlier pulls it forward. A skipped chore shows in the completed section with its deferred date as the due; clearing that due date undoes the skip and returns the chore to its normal schedule. Clearing the due of a chore with no skip in force is rejected (the due comes from the schedule).
 
-To change a chore's recurrence, use [`chore_calendar.update_item`](#update-a-chore) or the chore card's edit dialog. Adding and deleting items from the todo card is not supported — use the [services](#services) or the chore card.
+Adding an item (from the card or `todo.add_item`) creates a **one-shot chore** — quick capture for one-offs like "Buy milk", with optional due date and description. It behaves like any other one-shot: complete it, reschedule it, or convert it to a recurring chore later via [`chore_calendar.update_item`](#update-a-chore). Once completed, it is cleaned up by the next [`hide_completed_items`](#hide-completed-items) call. Recurring chores are created via the [services](#services) or the chore card.
+
+To change a chore's recurrence, use [`chore_calendar.update_item`](#update-a-chore) or the chore card's edit dialog. Deleting items from the todo card is not supported — use the services or the chore card.
 
 ## Automation Events
 

@@ -26,27 +26,36 @@ the whole form on save), so the handler diffs each field against what
   natural cadence resumes (the "undo skip" path). The series schedule is
   never touched from here; that remains ``chore_calendar.update_item``.
 
-``DELETE_TODO_ITEM`` / ``CREATE_TODO_ITEM`` stay unadvertised — deletes are
-ambiguous between occurrence and series (see SPECS.md), and item creation is
-served by ``chore_calendar.create_item``.
+``CREATE_TODO_ITEM`` maps ``todo.add_item`` to a **oneshot** chore — the
+todo surface is quick capture, and a one-off is the only chore type with 1:1
+todo semantics (summary / optional due / description carry straight over).
+Recurring chores are deliberate setup and keep their doorway in
+``chore_calendar.create_item`` and the card. A todo-created oneshot defaults
+``persist=False``, so once completed it is swept by ``hide_completed_items``
+— it lives and dies entirely within todo semantics.
+
+``DELETE_TODO_ITEM`` stays unadvertised — deletes are ambiguous between
+occurrence and series (see SPECS.md).
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from homeassistant.components.todo import TodoItem, TodoListEntity
 from homeassistant.components.todo.const import TodoItemStatus, TodoListEntityFeature
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from . import chore_list_device_info
-from .actions import async_complete_chore, async_uncomplete_chore
-from .const import ChoreEventSource, ChoreStatus
+from .actions import async_complete_chore, async_register_chore, async_uncomplete_chore
+from .const import DOMAIN, ChoreEventSource, ChoreStatus, ChoreType
 from .coordinator import ChoreCalendarCoordinator
 from .models import BaseChore, OneshotChore
 
@@ -78,7 +87,8 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
     _attr_has_entity_name = True
     _attr_icon = "mdi:clipboard-check-outline"
     _attr_supported_features = (
-        TodoListEntityFeature.UPDATE_TODO_ITEM
+        TodoListEntityFeature.CREATE_TODO_ITEM
+        | TodoListEntityFeature.UPDATE_TODO_ITEM
         | TodoListEntityFeature.SET_DESCRIPTION_ON_ITEM
         | TodoListEntityFeature.SET_DUE_DATETIME_ON_ITEM
     )
@@ -162,6 +172,51 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
         # comparison total).
         entries.sort(key=lambda e: (e[0], e[1] is None, e[1] or now))
         return [item for _, _, item in entries]
+
+    async def async_create_todo_item(self, item: TodoItem) -> None:
+        """Create a oneshot chore from a new todo item.
+
+        The todo surface is quick capture: a one-off is the only chore type
+        with 1:1 todo semantics, so ``todo.add_item`` always creates a
+        ``OneshotChore`` — summary, optional due, and description carry
+        over; ``persist`` defaults False so a completed one is swept by
+        ``hide_completed_items``. Recurring chores are created via
+        ``chore_calendar.create_item`` or the card.
+
+        Persists and announces through the same helper as the service, so
+        ``chore_calendar_item_created`` fires with the identical payload
+        (``entity_id`` is the list's calendar entity, the list identifier
+        used across the event surface).
+        """
+        if not item.summary:
+            msg = "Cannot create a todo item without a summary"
+            raise ServiceValidationError(msg)
+
+        chore = OneshotChore(
+            uid=str(uuid4()),
+            chore_name=item.summary,
+            chore_type=ChoreType.ONESHOT,
+            description=item.description or None,
+            due_datetime=_coerce_due(item.due),
+            created_at=dt_util.now(),
+        )
+        await async_register_chore(
+            self.hass,
+            self._entry.runtime_data.store,
+            self.coordinator,
+            chore,
+            self._list_entity_id(),
+        )
+
+    def _list_entity_id(self) -> str:
+        """Return the list's calendar entity_id, the event-payload list identifier.
+
+        Falls back to this todo entity's id in the degenerate case where the
+        calendar entity is not (yet) registered.
+        """
+        registry = er.async_get(self.hass)
+        calendar_entity_id = registry.async_get_entity_id("calendar", DOMAIN, self._entry.entry_id)
+        return calendar_entity_id or self.entity_id
 
     async def async_update_todo_item(self, item: TodoItem) -> None:
         """Apply a todo-item update by diffing against the reported item.
