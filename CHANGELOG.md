@@ -2,6 +2,13 @@
 
 # Changelog
 
+## [0.12.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.11.0...v0.12.0) (2026-07-09)
+
+
+### Features
+
+* writable native todo items ([#32](https://github.com/tcarney/ha-chore-calendar/issues/32)) ([1120db6](https://github.com/tcarney/ha-chore-calendar/commit/1120db6f8aa3e2d7a81c6d54719641deb19a17e2))
+
 ## [0.11.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.10.1...v0.11.0) (2026-07-05)
 
 
