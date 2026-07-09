@@ -17,11 +17,46 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
-from .const import EVENT_ITEM_DELETED, LOGGER, ChoreEventSource
+from .const import EVENT_ITEM_CREATED, EVENT_ITEM_DELETED, LOGGER, ChoreEventSource
 
 if TYPE_CHECKING:
     from .coordinator import ChoreCalendarCoordinator
+    from .models import BaseChore
     from .store import ChoreStore
+
+
+async def async_register_chore(
+    hass: HomeAssistant,
+    store: ChoreStore,
+    coordinator: ChoreCalendarCoordinator,
+    chore: BaseChore,
+    entity_id: str,
+) -> None:
+    """Persist a newly built chore, refresh, and fire ``chore_calendar_item_created``.
+
+    Shared by the ``create_item`` service handler and the todo entity's
+    ``async_create_todo_item`` so both creation paths persist and announce
+    identically. *entity_id* is the list identifier carried in the event
+    payload — the list's calendar entity, matching the service surface.
+    """
+    await store.async_create_chore(chore)
+    await coordinator.async_refresh()
+
+    now = dt_util.now()
+    next_due = chore.compute_next_due(now)
+    hass.bus.async_fire(
+        EVENT_ITEM_CREATED,
+        {
+            "uid": chore.uid,
+            "chore_name": chore.chore_name,
+            "chore_type": str(chore.chore_type),
+            "entity_id": entity_id,
+            "status": str(chore.compute_status(now)),
+            "next_due": next_due.isoformat() if next_due else None,
+            "assigned_to": list(chore.assigned_to),
+        },
+    )
+    LOGGER.info("created %s (%s)", chore.chore_name, chore.uid)
 
 
 async def async_complete_chore(
@@ -91,8 +126,9 @@ async def async_apply_completed_cleared_at(
 ) -> None:
     """Set the per-list completed-items cutoff and sweep persist=false chores.
 
-    Used by both the ``hide_completed_items`` service handler and the todo
-    entity's ``async_remove_completed_items``. After updating the cutoff,
+    Used by the ``hide_completed_items`` service handler (the todo entity
+    deliberately does not advertise ``DELETE_TODO_ITEM``, so HA's native
+    ``remove_completed_items`` path never reaches it). After updating the cutoff,
     deletes any terminal-completed oneshot — and any until/count-exhausted
     (``terminal``) scheduled or interval chore — whose ``last_completed``
     precedes the new cutoff and whose ``persist`` flag is False; these

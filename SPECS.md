@@ -113,14 +113,15 @@ A parallel `previous_skipped_until` slot holds any `skipped_until` value that a 
 
 ### Skip
 
-`skip_item` defers a chore's current occurrence without touching `last_completed` — skipping is distinct from completing, preserving an accurate record of when the task was really done. It shifts the operative anchor forward; the only argument is an optional `until`. With no `until` it delegates to the type's `apply_default_skip` (see *Defaults* below); with an explicit `until` it sets `skipped_until` to that datetime (a naive value is coerced to local tz). There is no per-occurrence `range` / `recurrence_id` surface — the integration is a chore tracker, not a calendar editor.
+`skip_item` reschedules a chore's current occurrence without touching `last_completed` — skipping is distinct from completing, preserving an accurate record of when the task was really done. The only argument is an optional `until`. With no `until` it delegates to the type's `apply_default_skip` (see *Defaults* below); with an explicit `until` it sets `skipped_until` to that datetime (a naive value is coerced to local tz) in **either direction** — later defers the occurrence, earlier advances it ("do it tomorrow instead of Monday"), and re-skipping with a new value moves an existing skip. There is no per-occurrence `range` / `recurrence_id` surface — the integration is a chore tracker, not a calendar editor.
 
 - **`skipped_until` acts as the operative anchor** for scheduled and interval state machines:
   - *Scheduled*: `pending_at = skipped_until − pending_period`, `overdue_at = skipped_until + grace_period`
   - *Interval*: `due_at = skipped_until`, `pending_at = skipped_until − pending_period`, `overdue_at = skipped_until + grace_period`
   - *Oneshot*: same window math when `until` is provided (overrides `due_datetime`); when omitted, default skip clears `due_datetime` instead of advancing an anchor
 - **No new status** — a skipped chore reports as `completed` while `now < pending_at` (scheduled / oneshot with explicit `until`) or `now < skipped_until` (interval). Once past that threshold, it transitions through `pending`/`due`/ etc. against the skipped anchor.
-- **Stale-skip fallthrough**: the skip stays the operative anchor as long as `skipped_until` is later than the type's natural anchor. For *scheduled* chores, today's `period_due` eventually advances past `skipped_until` and normal period logic resumes (the skip falls through). For *interval* and *oneshot* (with `due_datetime`) chores the natural anchor is fixed until completion, so the skip persists through OVERDUE until a completion clears it. This keeps `compute_next_due` pinned to `skipped_until` after the chore goes overdue, so consumers (e.g. the card's "overdue by" reading) measure the overdue duration from `skipped_until + grace_period` instead of snapping back to a stale natural anchor. The field is not eagerly cleared.
+- **Unconditional override**: `skipped_until`, while set, *is* the operative anchor — it holds in both directions (a value earlier than the natural anchor is honored, not ignored) and does not lapse when the natural cadence catches up. It is released only by a completion (`apply_completion`), an explicit clear (todo due-date cleared), or a schedule change via `update_item` (the override rescheduled the *old* occurrence, so a recurrence / `due_datetime` change resets it). This keeps `compute_next_due` pinned to `skipped_until` after the chore goes overdue, so consumers (e.g. the card's "overdue by" reading) measure the overdue duration from `skipped_until + grace_period` instead of snapping back to a stale natural anchor. The natural anchor cannot organically overtake an override — scheduled pins to the oldest uncompleted period, and interval/oneshot anchors are fixed until completion — so there is no fallthrough case.
+- **Undoing a skip**: re-skip with a new (possibly earlier) `until`, or clear the item's due date from the todo surface (see *Todo Item Writes*) to release the override entirely and resume the natural cadence.
 - **Defaults when `until` is omitted** — handled type-specifically via `apply_default_skip`:
   - *Scheduled*: the next occurrence's period-due strictly after now. Walks forward past the pinned overdue period so the skip cannot land in the past.
   - *Interval*: `now + interval`, season-filtered.
@@ -128,6 +129,21 @@ A parallel `previous_skipped_until` slot holds any `skipped_until` value that a 
 - **`complete_item` clears the skip** by default. Pass `keep_skip: true` to preserve it — internally mapped to `apply_completion(clear_skip=False)`. The cleared value is saved to `previous_skipped_until` and restored by `uncomplete_item`.
 - **Surfaces via `chore_calendar_status_changed`** with `source=skip` on the resulting transition (e.g. `due → completed` when `skipped_until` lands inside the skip-anchor's pending window). Skipping a chore already in `completed` (e.g. early-completed scheduled chore deferring its next cycle further) doesn't fire the event because the transition is `completed → completed`; the chore's `skipped_until` is still observable via the sensor's `state_changed`.
 - **Scope**: per-chore only; list-level skip is deferred.
+
+### Todo Item Writes
+
+The todo entity advertises `CREATE_TODO_ITEM | UPDATE_TODO_ITEM | SET_DESCRIPTION_ON_ITEM | SET_DUE_DATETIME_ON_ITEM`, making chores creatable and editable from HA's native todo card. For updates, HA always submits the full `TodoItem` (the card's edit dialog sends the whole form), so the handler diffs each field against what `todo_items` reported and applies only real changes:
+
+- **`status`** — routes through the shared complete/uncomplete helpers, identical to `complete_item` / `uncomplete_item`.
+- **`rename` / `description`** — written straight onto the chore; an empty description clears it (matching `update_item`).
+- **`due_datetime`** — *reschedules the current occurrence*, never the series (schedule edits remain `chore_calendar.update_item`):
+  - *Oneshot*: writes `due_datetime` directly (the occurrence is the series). `null` makes the chore unscheduled; setting a due on a terminal-completed oneshot reopens it, matching `update_item` reschedule semantics.
+  - *Scheduled / interval*: sets the `skipped_until` override — later defers, earlier advances. `null` releases an active override (the "undo skip" path); with no override active the clear is rejected (the due derives from the schedule and would silently snap back in the UI). Due edits on a terminal (`until`/`count`-exhausted) series are rejected.
+  - A due edit submitted together with a completion is applied with `keep_skip` semantics, so "done, and next one at X" survives the completion's skip-clearing.
+- **Skip visibility** — a skip-deferred chore reads `completed` (dormant) but its todo item carries `due = skipped_until`: "deferred until X" is what the row means, and exposing the date is what makes the skip movable/clearable from the native card. A genuinely done item carries no due.
+- **`SET_DUE_DATE_ON_ITEM` (date-only) stays off** — every reported due is a datetime; accepting a bare date would mean inventing a time-of-day.
+- **`todo.add_item` creates a oneshot chore** — the todo surface is quick capture, and a one-off is the only chore type with 1:1 todo semantics (summary / optional due / description carry straight over; nobody expects HA's add dialog to configure recurrence — native `local_todo` can't either). `persist` defaults false, so a todo-created oneshot is swept by `hide_completed_items` after completion — it lives and dies entirely within todo semantics. Creation persists and announces through the same helper as `create_item` (`async_register_chore`), so `chore_calendar_item_created` fires with the identical payload, carrying the list's calendar entity as `entity_id`. Recurring chores keep their doorway in `chore_calendar.create_item` and the card.
+- **`DELETE_TODO_ITEM` stays off** — deletes are ambiguous between occurrence and series (see *Hide Completed Items* for the bulk-clear rationale).
 
 ### Hide Completed Items
 
@@ -150,8 +166,8 @@ Three events make up the public automation surface; lifecycle CRUD pairs (create
 | `schedule`   | Coordinator tick crossed a threshold (default — natural progression).                       |
 | `complete`   | `complete_item` service or todo entity `needs_action → completed` toggle.                   |
 | `uncomplete` | `uncomplete_item` service or todo entity `completed → needs_action` toggle.                 |
-| `skip`       | `skip_item` service.                                                                        |
-| `update`     | `update_item` whose field change flipped the operative anchor enough to change status.      |
+| `skip`       | `skip_item` service, or a todo-item due edit (occurrence reschedule).                       |
+| `update`     | `update_item` (or todo rename/description edit) whose field change altered the status.      |
 | `tag`        | `tag_scanned` listener auto-completion.                                                     |
 
 The coordinator stores per-uid source overrides in `_pending_sources`, populated by service handlers via `mark_source(uid, source)` and consumed exactly once per refresh tick. Pending sources are dropped after each tick whether or not a transition fired, so a service action that doesn't flip status doesn't bleed its source into a later natural transition.

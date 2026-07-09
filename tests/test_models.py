@@ -1269,14 +1269,43 @@ class TestScheduledChoreSkip:
         now = datetime(2026, 4, 2, 8, 30, tzinfo=TZ)
         assert chore.compute_status(now) == ChoreStatus.DUE
 
-    def test_status_after_skip_grace_falls_through(self):
-        """Once the skip's grace period fully elapses, normal schedule logic resumes."""
+    def test_stale_override_stays_operative_through_overdue(self):
+        """An elapsed due override keeps anchoring the chore until cleared.
+
+        ``skipped_until`` is an unconditional occurrence-due override: it
+        does not lapse when the natural cadence catches up — only a
+        completion (or an explicit clear) releases it. A chore whose
+        override is days past reads OVERDUE from the override, not PENDING
+        from today's natural period.
+        """
         chore = _make_scheduled()
-        # Skipped to a date three days back — all of the skip window has passed.
         chore.skipped_until = datetime(2026, 3, 27, 8, 0, tzinfo=TZ)
-        # Never-completed chore on a fresh day: normal logic returns PENDING
-        # in the early window of today's period.
         now = datetime(2026, 3, 30, 6, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.OVERDUE
+        assert chore.compute_next_due(now) == chore.skipped_until
+
+    def test_override_earlier_than_natural_advances_occurrence(self):
+        """A due override earlier than the natural anchor pulls the occurrence forward.
+
+        "Do it tomorrow instead of Monday": the override is operative in both
+        directions, so the chore reads DUE at the earlier time while the
+        natural period is still days away.
+        """
+        chore = _make_scheduled(active_days=["mon"])
+        # Natural anchor: Monday 2026-04-06 08:00. Advance to Thursday.
+        chore.skipped_until = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        now = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        assert chore.compute_status(now) == ChoreStatus.DUE
+        assert chore.compute_next_due(now) == chore.skipped_until
+
+    def test_clearing_override_resumes_natural_cadence(self):
+        """Clearing ``skipped_until`` returns the chore to its natural anchor."""
+        chore = _make_scheduled()
+        chore.skipped_until = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        now = datetime(2026, 3, 30, 6, 0, tzinfo=TZ)
+        assert chore.compute_next_due(now) == chore.skipped_until
+        chore.skipped_until = None
+        assert chore.compute_next_due(now) == datetime(2026, 3, 30, 8, 0, tzinfo=TZ)
         assert chore.compute_status(now) == ChoreStatus.PENDING
 
     def test_next_due_returns_skipped_until(self):
@@ -1353,16 +1382,28 @@ class TestIntervalChoreSkip:
         now = datetime(2026, 4, 3, 0, 0, tzinfo=TZ)
         assert chore.compute_status(now) == ChoreStatus.DUE
 
-    def test_status_after_skip_grace_falls_through(self):
-        """Once the skip's grace fully elapses, last_completed logic resumes."""
+    def test_override_earlier_than_natural_advances_occurrence(self):
+        """A due override earlier than ``last_completed + interval`` is operative.
+
+        The override is unconditional in both directions — an interval chore
+        pulled forward reads from the override, not the natural anchor, until
+        a completion (which clears it) lands.
+        """
         chore = _make_interval(
             last_completed=datetime(2026, 3, 27, 12, 0, tzinfo=TZ),
         )
-        # Skip fully expired (far in the past).
-        chore.skipped_until = datetime(2026, 3, 25, 12, 0, tzinfo=TZ)
-        now = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
-        # Normal logic: last_completed 3 days ago, interval 3 days → DUE.
+        # Natural anchor: Mar 30 12:00. Advance to Mar 28.
+        chore.skipped_until = datetime(2026, 3, 28, 12, 0, tzinfo=TZ)
+        now = datetime(2026, 3, 28, 12, 0, tzinfo=TZ)
         assert chore.compute_status(now) == ChoreStatus.DUE
+        assert chore.compute_next_due(now) == chore.skipped_until
+        # Days later, still anchored on the override (grace is 1 day).
+        later = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
+        assert chore.compute_status(later) == ChoreStatus.OVERDUE
+        # Completion releases the override and restarts the natural cycle.
+        chore.apply_completion(later, None)
+        assert chore.skipped_until is None
+        assert chore.compute_next_due(later) == datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
 
     def test_next_due_returns_skipped_until(self):
         """compute_next_due returns skipped_until while skip is live."""

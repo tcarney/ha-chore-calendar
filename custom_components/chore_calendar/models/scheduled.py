@@ -162,7 +162,7 @@ class ScheduledChore(BaseChore):
         """
         if self.terminal:
             return None
-        if self._skip_anchor_active(now):
+        if self.skipped_until is not None:
             return self.skipped_until
 
         period_due = self._find_current_period(now)
@@ -200,7 +200,7 @@ class ScheduledChore(BaseChore):
         # Operative anchor is non-None for ScheduledChore — _anchor_due_at
         # always resolves a period — but the base signature returns
         # ``datetime | None``, so resolve directly here.
-        if self._skip_anchor_active(now) and self.skipped_until is not None:
+        if self.skipped_until is not None:
             anchor = self.skipped_until
         else:
             anchor = self._find_current_period(now)
