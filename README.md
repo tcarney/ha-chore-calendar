@@ -418,6 +418,8 @@ response_variable: result
 
 A custom Lovelace card is included and auto-registered (no manual resource setup needed). Add it to a dashboard via the UI card picker or YAML.
 
+Each row shows the chore's status, name, due time, and — when the chore is assigned — a small avatar badge per assignee (the person's photo, falling back to their icon; hover for the name).
+
 <img src="docs/images/card.png" alt="The Chore Calendar card with Overdue, Due, Upcoming, and Completed sections." width="480">
 
 ### Minimal Configuration
@@ -437,13 +439,14 @@ entities:
 | `entities[].exclude` | `[]` | Statuses to hide for this entity: `overdue`, `due`, `pending`, `completed` |
 | `title` | none | Card title text |
 | `hide_completed` | `false` | Hide the completed section entirely |
-| `due_date_period` | none | Duration dict: hide `pending` chores whose `next_due` is further in the future than this. Overdue and due chores are always shown. |
+| `due_date_period` | none | Duration dict: hide `pending` chores whose `next_due` is further in the future than this. Overdue and due chores are always shown. While chores are hidden, a "Show all (N more)" footer toggle reveals them (see `hide_show_all`). |
 | `completed_period` | none | Duration dict: hide `completed` chores whose `last_completed` is further in the past than this. |
 | `hide_section_headers` | `false` | Hide section headings (Overdue, Due, Upcoming, Completed) |
 | `hide_card_background` | `false` | Hide the card background (transparent) |
 | `allow_uncomplete` | `false` | Show an "Uncomplete" button on completed rows in the detail dialog |
 | `hide_add_button` | `false` | Hide the header "+" button that opens the create-chore dialog |
 | `hide_edit_button` | `false` | Hide the "Edit" button in the chore detail dialog |
+| `hide_show_all` | `false` | Hide the "Show all (N more)" footer toggle that reveals chores hidden by `due_date_period` |
 | `update_interval` | `60` | Seconds between data refreshes |
 | `tap_action` | `details` | [Action](#action-configuration) on row tap |
 | `hold_action` | `none` | [Action](#action-configuration) on row hold (500ms) |

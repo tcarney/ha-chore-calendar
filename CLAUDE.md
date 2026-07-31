@@ -81,3 +81,17 @@ See `SPECS.md` for full architecture details (data flow, state machines, storage
 - **Scope:** Implement features completely (e.g., new sensor needs entity class + platform init + descriptions — all at once). For multiple independent features, do one at a time and suggest a commit between each.
 - **Large changes:** For refactors touching >10 files or architectural changes, propose a plan and get explicit confirmation before starting.
 - **Research first:** Don't guess HA patterns — look them up at [developers.home-assistant.io](https://developers.home-assistant.io/). HA evolves rapidly; verify current best practices.
+
+## AI Contribution Policy
+
+This project follows the [Open Home Foundation AI policy](https://developers.home-assistant.io/docs/ai_policy/). It applies to work in this repo and to anything upstreamed to Home Assistant core, HACS, or other OHF projects.
+
+- **Human in the loop.** Every change must be reviewed and understood by the maintainer before it ships — they have to be able to explain each one in their own words. Keep diffs small and reviewable; surface non-obvious decisions and trade-offs in the summary instead of burying them in the diff.
+- **No autonomous GitHub activity.** Never open or update issues, PRs, comments, or reviews without explicit approval for that specific action. Draft the text, hand it over for review — the maintainer posts it. This holds even when a `gh` command would obviously work.
+- **PR descriptions and comments:** written in the maintainer's voice, as short as the intent allows, technically accurate. No AI boilerplate, no filler headings, no marketing tone. If a summary is AI-drafted, flag that it needs a technical-accuracy pass before posting.
+- **Never draft answers to maintainer questions.** Supply the facts and reasoning; the maintainer writes the reply. Grammar and clarity help is fine — substance must be theirs.
+- **Disclose quoted AI output.** If AI output belongs in a comment, keep it short, put it in a `>` quote block, label it as AI-generated, and pair it with the maintainer's own commentary on why it matters.
+- **Treat AI review comments as fallible** — including bots on this repo's PRs. Verify each claim against the code before acting on it; a brief explanation is enough to push back. Maintainers have the final say.
+- **Upstream contributions** follow the target repo's issue/PR templates rather than bypassing them — bypassing a template is itself treated as a sign of automation.
+
+Commits keep the `Co-Authored-By` trailer: attribution is disclosure, not a substitute for review.

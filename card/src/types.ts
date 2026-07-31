@@ -101,6 +101,8 @@ export interface ChoreCalendarCardConfig {
   hide_add_button?: boolean;
   /** Hide the Edit button in the chore detail dialog. */
   hide_edit_button?: boolean;
+  /** Hide the "Show all" footer toggle that lifts the due-date window. */
+  hide_show_all?: boolean;
   tap_action?: ActionConfig;
   hold_action?: ActionConfig;
   double_tap_action?: ActionConfig;

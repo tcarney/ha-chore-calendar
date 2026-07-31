@@ -50,7 +50,10 @@ export class ChoreCalendarCard extends LitElement {
   @state() private _dialogOpen = false;
   @state() private _editItem?: EnrichedChoreItem;
   @state() private _editOpen = false;
+  @state() private _showAll = false;
+  @state() private _hiddenCount = 0;
 
+  private _allItems: EnrichedChoreItem[] = [];
   private _entityConfigs: (EntityConfig & { color: string })[] = [];
   private _refreshTimer?: ReturnType<typeof setInterval>;
   private _eventUnsub?: UnsubscribeFunc;
@@ -77,6 +80,8 @@ export class ChoreCalendarCard extends LitElement {
     this._entityConfigs = config.entities.map((e, i) =>
       resolveEntityConfig(e, i),
     );
+    // Re-filter already-fetched items so period-filter edits preview live.
+    if (this._allItems.length) this._applyFilters();
     // Reflect hide_card_background as a host attribute for CSS.
     if (config.hide_card_background) {
       this.setAttribute("no-card-background", "");
@@ -164,15 +169,35 @@ export class ChoreCalendarCard extends LitElement {
       });
 
       await Promise.all(promises);
-      const dueMs = durationToMs(this._config.due_date_period);
-      const completedMs = durationToMs(this._config.completed_period);
-      const filtered = applyPeriodFilters(allItems, dueMs, completedMs, new Date());
-      this._items = sortChores(filtered);
+      this._allItems = allItems;
+      this._applyFilters();
     } catch (err) {
       console.error("chore-calendar-card: failed to fetch items", err);
     } finally {
       this._loading = false;
     }
+  }
+
+  /**
+   * Recompute the visible list from the last fetch. The due-date window can be
+   * lifted by the "Show all" toggle; the completed-period filter (and the
+   * per-list cleared_at cutoff, applied at fetch time) always stay in effect.
+   */
+  private _applyFilters() {
+    const dueMs = durationToMs(this._config.due_date_period);
+    const completedMs = durationToMs(this._config.completed_period);
+    const now = new Date();
+    const unwindowed = applyPeriodFilters(this._allItems, null, completedMs, now);
+    const windowed =
+      dueMs === null ? unwindowed : applyPeriodFilters(this._allItems, dueMs, completedMs, now);
+    this._hiddenCount = unwindowed.length - windowed.length;
+    const showAll = this._showAll && !this._config.hide_show_all;
+    this._items = sortChores(showAll ? unwindowed : windowed);
+  }
+
+  private _toggleShowAll() {
+    this._showAll = !this._showAll;
+    this._applyFilters();
   }
 
   private _startPolling() {
@@ -310,6 +335,30 @@ export class ChoreCalendarCard extends LitElement {
       font-size: 14px;
     }
 
+    .show-all {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      width: 100%;
+      margin-top: 4px;
+      padding: 6px 0;
+      border: none;
+      background: none;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+      color: var(--secondary-text-color);
+    }
+
+    .show-all:hover {
+      color: var(--primary-text-color);
+    }
+
+    .show-all ha-icon {
+      --mdc-icon-size: 18px;
+    }
+
 `;
 
   protected render() {
@@ -347,7 +396,7 @@ export class ChoreCalendarCard extends LitElement {
           : nothing}
         ${this._loading
           ? html`<div class="loading">Loading...</div>`
-          : this._renderSections()}
+          : html`${this._renderSections()}${this._renderShowAllToggle()}`}
       </ha-card>
       <chore-detail-dialog
         .hass=${this.hass}
@@ -417,6 +466,18 @@ export class ChoreCalendarCard extends LitElement {
           )}
         `;
       })}
+    `;
+  }
+
+  /** A footer toggle that lifts the due-date window, shown only while that
+   *  window is actually hiding chores. */
+  private _renderShowAllToggle() {
+    if (this._hiddenCount === 0 || this._config.hide_show_all) return nothing;
+    return html`
+      <button class="show-all" part="show-all" @click=${this._toggleShowAll}>
+        <ha-icon icon=${this._showAll ? "mdi:chevron-up" : "mdi:chevron-down"}></ha-icon>
+        ${this._showAll ? "Show fewer" : `Show all (${this._hiddenCount} more)`}
+      </button>
     `;
   }
 

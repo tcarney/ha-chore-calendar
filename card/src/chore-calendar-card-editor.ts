@@ -30,6 +30,7 @@ const TOGGLE_OPTIONS: { key: keyof ChoreCalendarCardConfig; label: string }[] = 
   { key: "allow_uncomplete", label: "Allow uncomplete" },
   { key: "hide_add_button", label: "Hide add button" },
   { key: "hide_edit_button", label: "Hide edit button" },
+  { key: "hide_show_all", label: "Hide show-all toggle" },
 ];
 
 /** Options below the period rows. */
@@ -101,6 +102,7 @@ const LABELS: Record<string, string> = {
   allow_uncomplete: "Allow uncomplete",
   hide_add_button: "Hide add button",
   hide_edit_button: "Hide edit button",
+  hide_show_all: "Hide show-all toggle",
   update_interval: "Update interval (seconds)",
   tap_action: "Tap action",
   hold_action: "Hold action",
