@@ -62,9 +62,13 @@ const INTERVAL_UNITS: Record<string, string> = {
   yearly: "years",
 };
 
-/** A throwaway time selector whose only job is to make HA lazy-load and
- *  register ha-time-input, which isn't loaded anywhere else in the card. */
-const TIME_LOADER_SCHEMA = [{ name: "_t", selector: { time: {} } }];
+/** Throwaway selectors whose only job is to make HA lazy-load and register
+ *  ha-time-input and ha-date-input, which the raw Start/Due/Until rows use
+ *  but no ha-form schema in the card imports. */
+const PICKER_LOADER_SCHEMA = [
+  { name: "_t", selector: { time: {} } },
+  { name: "_d", selector: { date: {} } },
+];
 
 const LABELS: Record<string, string> = {
   target_entity: "List",
@@ -139,10 +143,26 @@ export class ChoreEditDialog extends LitElement {
       flex: 2;
       min-width: 0;
     }
-    /* Off-screen ha-form whose time selector force-registers ha-time-input,
-       which HA only lazy-loads when a time selector is used. */
-    .start-loader {
+    /* Off-screen ha-form whose selectors force-register ha-date-input and
+       ha-time-input, which HA only lazy-loads when a matching selector is
+       rendered by an ha-form. */
+    .picker-loader {
       display: none;
+    }
+    /* Until (end date): matches ha-form's 24px row rhythm; the clear button
+       only renders while a date is set. */
+    .until-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin: 24px 0;
+    }
+    .until-row .until-date {
+      flex: 1;
+      min-width: 0;
+    }
+    .until-row .until-clear {
+      color: var(--secondary-text-color);
     }
     .footer {
       display: flex;
@@ -314,14 +334,21 @@ export class ChoreEditDialog extends LitElement {
     return schema;
   }
 
-  /** Fields below the Start row: the type-specific block plus the shared tail. */
-  private _bodySchema(): FormSchema[] {
+  /** Type-specific recurrence fields rendered between the Start row and the
+   *  Until row. Empty for oneshot (its due datetime is the custom date row). */
+  private _recurrenceSchema(): FormSchema[] {
+    const type = String(this._data.chore_type ?? "scheduled");
+    if (type === "scheduled") return this._scheduledSchema();
+    if (type === "interval") return this._intervalSchema();
+    return [];
+  }
+
+  /** Fields below the Until row: the lifecycle tail plus the shared tail. */
+  private _tailSchema(): FormSchema[] {
     const type = String(this._data.chore_type ?? "scheduled");
     const schema: FormSchema[] = [];
-    if (type === "scheduled") schema.push(...this._scheduledSchema());
-    else if (type === "interval") schema.push(...this._intervalSchema());
-    else schema.push(...this._oneshotSchema());
-
+    if (type !== "oneshot") schema.push({ name: "count", selector: { number: { min: 1, mode: "box" } } });
+    schema.push({ name: "persist", selector: { boolean: {} } });
     schema.push({ name: "pending_period", selector: { duration: {} } });
     schema.push({ name: "grace_period", selector: { duration: {} } });
     schema.push({ name: "trigger_entity", selector: { entity: { filter: { domain: "tag" } } } });
@@ -348,7 +375,6 @@ export class ChoreEditDialog extends LitElement {
     if (freq === "monthly") {
       schema.push({ name: "monthly_mode", selector: { select: { mode: "dropdown", options: this._monthlyOptions() } } });
     }
-    schema.push(...this._lifecycleSchema());
     return schema;
   }
 
@@ -361,20 +387,6 @@ export class ChoreEditDialog extends LitElement {
         selector: { number: { min: 1, mode: "box", unit_of_measurement: INTERVAL_UNITS[freq] ?? "days" } },
       },
       { name: "bymonth", selector: { select: { multiple: true, mode: "dropdown", options: MONTH_OPTIONS } } },
-      ...this._lifecycleSchema(),
-    ];
-  }
-
-  private _oneshotSchema(): FormSchema[] {
-    // due_datetime renders as a custom date+time row (see _renderDateTimeRow).
-    return [{ name: "persist", selector: { boolean: {} } }];
-  }
-
-  private _lifecycleSchema(): FormSchema[] {
-    return [
-      { name: "until", selector: { date: {} } },
-      { name: "count", selector: { number: { min: 1, mode: "box" } } },
-      { name: "persist", selector: { boolean: {} } },
     ];
   }
 
@@ -404,10 +416,19 @@ export class ChoreEditDialog extends LitElement {
           <ha-form
             .hass=${this.hass}
             .data=${this._data}
-            .schema=${this._bodySchema()}
+            .schema=${this._recurrenceSchema()}
             .computeLabel=${this._computeLabel}
             @value-changed=${this._onValueChanged}
           ></ha-form>
+          ${this._data.chore_type !== "oneshot" ? this._renderUntilRow() : nothing}
+          <ha-form
+            .hass=${this.hass}
+            .data=${this._data}
+            .schema=${this._tailSchema()}
+            .computeLabel=${this._computeLabel}
+            @value-changed=${this._onValueChanged}
+          ></ha-form>
+          <ha-form class="picker-loader" .hass=${this.hass} .schema=${PICKER_LOADER_SCHEMA} .data=${{}}></ha-form>
         </div>
         <div slot="footer" class="footer">
           <span>
@@ -428,8 +449,8 @@ export class ChoreEditDialog extends LitElement {
   /** A date + time row (Start for scheduled, Due for oneshot), using HA's raw
    *  date/time inputs (as the calendar editor does) with no labels — the
    *  heading labels the row — so nothing reserves the vertical space that
-   *  misaligns ha-form fields. The hidden ha-form force-registers
-   *  ha-time-input. */
+   *  misaligns ha-form fields. The hidden picker-loader ha-form in the dialog
+   *  body force-registers ha-date-input / ha-time-input. */
   private _renderDateTimeRow(key: "dtstart" | "due_datetime", label: string) {
     // A scheduled Start always has a value; an unscheduled oneshot due renders
     // empty (rather than a fake today that Save wouldn't persist).
@@ -452,8 +473,41 @@ export class ChoreEditDialog extends LitElement {
           @value-changed=${(e: CustomEvent<{ value?: string }>) => this._onTimePart(key, e)}
         ></ha-time-input>
       </div>
-      <ha-form class="start-loader" .hass=${this.hass} .schema=${TIME_LOADER_SCHEMA} .data=${{}}></ha-form>
     `;
+  }
+
+  /** The "Until (end date)" row — a raw ha-date-input with an explicit clear
+   *  button, because ha-form's date selector offers no way to clear a value
+   *  once one is set. */
+  private _renderUntilRow() {
+    const until = String(this._data.until ?? "");
+    return html`
+      <div class="until-row">
+        <ha-date-input
+          class="until-date"
+          .locale=${this.hass.locale}
+          .label=${LABELS.until}
+          .value=${until}
+          .canClear=${true}
+          @value-changed=${this._onUntilChanged}
+        ></ha-date-input>
+        ${until
+          ? html`
+              <ha-icon-button class="until-clear" title="Clear end date" @click=${this._onUntilClear}>
+                <ha-icon icon="mdi:close"></ha-icon>
+              </ha-icon-button>
+            `
+          : nothing}
+      </div>
+    `;
+  }
+
+  private _onUntilChanged(e: CustomEvent<{ value?: string }>) {
+    this._data = { ...this._data, until: e.detail.value || undefined };
+  }
+
+  private _onUntilClear() {
+    this._data = { ...this._data, until: undefined };
   }
 
   private _onDatePart(key: "dtstart" | "due_datetime", e: CustomEvent<{ value?: string }>) {
