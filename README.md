@@ -418,6 +418,8 @@ response_variable: result
 
 A custom Lovelace card is included and auto-registered (no manual resource setup needed). Add it to a dashboard via the UI card picker or YAML.
 
+Each row shows the chore's status, name, due time, and — when the chore is assigned — a small avatar badge per assignee (the person's photo, falling back to their icon; hover for the name).
+
 <img src="docs/images/card.png" alt="The Chore Calendar card with Overdue, Due, Upcoming, and Completed sections." width="480">
 
 ### Minimal Configuration

@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { LitElement, html, css, nothing } from "lit";
 import { property } from "lit/decorators.js";
 import { safeDefine } from "../define";
 import { actionHandler } from "../action-handler";
@@ -68,6 +68,55 @@ export class ChoreRow extends LitElement {
       white-space: nowrap;
     }
 
+    .assignees {
+      display: flex;
+      flex-shrink: 0;
+      align-items: center;
+    }
+
+    .assignees .avatar {
+      box-sizing: border-box;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background-size: cover;
+      background-position: center;
+      /* Card-background ring separates overlapping avatars in a stack. */
+      border: 2px solid var(--card-background-color, var(--ha-card-background, white));
+    }
+
+    .assignees .avatar + .avatar {
+      margin-left: -7px;
+    }
+
+    .assignees .initial {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      /* --border-color is the row's list color, set inline on .chore. */
+      background: var(--border-color, var(--primary-color, #03a9f4));
+      color: var(--text-primary-color, white);
+      font-size: 10px;
+      font-weight: 500;
+      line-height: 1;
+    }
+
+    /* Icon fallback: bare icon, no photo-style disc. */
+    .assignees .icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      color: var(--border-color, var(--primary-color, #03a9f4));
+      --mdc-icon-size: 18px;
+    }
+
+    .assignees .icon ha-icon {
+      display: flex;
+      line-height: 0;
+    }
+
     :host([status="completed"]) .chore {
       opacity: 0.6;
     }
@@ -93,8 +142,38 @@ export class ChoreRow extends LitElement {
       >
         <span class="status-indicator">${STATUS_ICON[this.item.status]}</span>
         <span class="name">${this.item.chore_name}</span>
+        ${this._renderAssignees()}
         <span class="time">${timeText}</span>
       </div>
+    `;
+  }
+
+  /** Assignee avatar badges: the person's entity_picture in a small circle,
+   *  else their explicitly set icon, else their initial in a list-colored
+   *  bubble (never the generic mdi:account default). Name shows as a tooltip. */
+  private _renderAssignees() {
+    const ids = this.item.assigned_to ?? [];
+    if (ids.length === 0) return nothing;
+    return html`
+      <span class="assignees" part="assignees">
+        ${ids.map((id) => {
+          const stateObj = this.hass?.states?.[id];
+          const name = (stateObj?.attributes?.friendly_name as string) ?? id.split(".").pop() ?? id;
+          const picture = stateObj?.attributes?.entity_picture as string | undefined;
+          const icon = stateObj?.attributes?.icon as string | undefined;
+          if (picture) {
+            return html`<span class="avatar" title=${name} style="background-image: url('${picture}')"></span>`;
+          }
+          if (icon) {
+            return html`
+              <span class="icon" title=${name}>
+                <ha-icon .icon=${icon}></ha-icon>
+              </span>
+            `;
+          }
+          return html`<span class="avatar initial" title=${name}>${name.charAt(0).toUpperCase()}</span>`;
+        })}
+      </span>
     `;
   }
 
