@@ -171,6 +171,31 @@ function formatDuration(ms: number): string {
   return `${days} day${days !== 1 ? "s" : ""}`;
 }
 
+/** Format a Date as an HA datetime value ("YYYY-MM-DD HH:MM:SS", local time),
+ *  the shape HA's date/time inputs and the datetime selector read and write. */
+export function formatHaDateTime(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  );
+}
+
+/**
+ * Convert an HA datetime value to an offset-bearing ISO string, or undefined
+ * when empty/unparseable.
+ *
+ * The pickers emit a naive local value; ``complete_item`` stores whatever
+ * ``cv.datetime`` parses without coercing naive values to the local zone, so
+ * the card sends an unambiguous timestamp rather than relying on that.
+ */
+export function haDateTimeToIso(value: unknown): string | undefined {
+  const raw = String(value ?? "").trim();
+  if (!raw) return undefined;
+  const date = new Date(raw.replace(" ", "T"));
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
 /** Format a completed-at timestamp for display. */
 export function formatCompletedTime(
   isoString: string,
@@ -550,6 +575,8 @@ declare global {
   interface HASSDomEvents {
     "chore-detail": { item: EnrichedChoreItem };
     "chore-edit": { item: EnrichedChoreItem };
+    "chore-complete-details": { item: EnrichedChoreItem };
+    "chore-skip-details": { item: EnrichedChoreItem };
     "chore-completed": { item: EnrichedChoreItem };
     "hass-action": { config: Record<string, unknown>; action: string };
   }

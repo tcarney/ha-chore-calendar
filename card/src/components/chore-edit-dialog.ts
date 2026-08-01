@@ -1,7 +1,14 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { safeDefine } from "../define";
-import { DAY_FULL, ordinalNumber, parseByday, positionWord } from "../utils";
+import { DAY_FULL, formatHaDateTime, ordinalNumber, parseByday, positionWord } from "../utils";
+import {
+  DATETIME_ROW_STYLES,
+  PICKER_LOADER_SCHEMA,
+  mergeDatePart,
+  mergeTimePart,
+  renderDateTimeRow,
+} from "./datetime-row";
 import type { ChoreSelector, EnrichedChoreItem, HomeAssistant } from "../types";
 
 const DOMAIN = "chore_calendar";
@@ -62,14 +69,6 @@ const INTERVAL_UNITS: Record<string, string> = {
   yearly: "years",
 };
 
-/** Throwaway selectors whose only job is to make HA lazy-load and register
- *  ha-time-input and ha-date-input, which the raw Start/Due/Until rows use
- *  but no ha-form schema in the card imports. */
-const PICKER_LOADER_SCHEMA = [
-  { name: "_t", selector: { time: {} } },
-  { name: "_d", selector: { date: {} } },
-];
-
 const LABELS: Record<string, string> = {
   target_entity: "List",
   chore_name: "Name",
@@ -106,6 +105,7 @@ export class ChoreEditDialog extends LitElement {
   private _seededFor?: string;
 
   static styles = css`
+    ${DATETIME_ROW_STYLES}
     ha-dialog {
       --ha-dialog-max-width: 460px;
     }
@@ -118,36 +118,6 @@ export class ChoreEditDialog extends LitElement {
     ha-alert {
       display: block;
       margin-bottom: 12px;
-    }
-    /* Start date + time, laid out like HA's calendar editor: a standalone
-       "Start:" label above a row with a wider date field and a narrower time
-       field. Raw ha-date-input / ha-time-input (not ha-form fields) so there's
-       no reserved label/helper space to throw off the alignment. */
-    .start-label {
-      margin: 10px 0 2px;
-      font-size: 0.8125rem;
-      font-weight: 500;
-      color: var(--primary-text-color);
-    }
-    .start-row {
-      display: flex;
-      gap: 12px;
-      align-items: flex-start;
-      margin: 0 0 8px;
-    }
-    .start-row .start-date {
-      flex: 3;
-      min-width: 0;
-    }
-    .start-row .start-time {
-      flex: 2;
-      min-width: 0;
-    }
-    /* Off-screen ha-form whose selectors force-register ha-date-input and
-       ha-time-input, which HA only lazy-loads when a matching selector is
-       rendered by an ha-form. */
-    .picker-loader {
-      display: none;
     }
     /* Until (end date): matches ha-form's 24px row rhythm; the clear button
        only renders while a date is set. */
@@ -206,8 +176,8 @@ export class ChoreEditDialog extends LitElement {
   /** Today at 08:00 as an ha datetime value ("YYYY-MM-DD HH:MM:SS"). */
   private _todayStart(): string {
     const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} 08:00:00`;
+    d.setHours(8, 0, 0, 0);
+    return formatHaDateTime(d);
   }
 
   /** Parse an ha datetime value into a Date (accepts space or T separator). */
@@ -446,34 +416,19 @@ export class ChoreEditDialog extends LitElement {
     `;
   }
 
-  /** A date + time row (Start for scheduled, Due for oneshot), using HA's raw
-   *  date/time inputs (as the calendar editor does) with no labels — the
-   *  heading labels the row — so nothing reserves the vertical space that
-   *  misaligns ha-form fields. The hidden picker-loader ha-form in the dialog
-   *  body force-registers ha-date-input / ha-time-input. */
+  /** A date + time row (Start for scheduled, Due for oneshot). The hidden
+   *  picker-loader ha-form in the dialog body force-registers the inputs it
+   *  uses. */
   private _renderDateTimeRow(key: "dtstart" | "due_datetime", label: string) {
     // A scheduled Start always has a value; an unscheduled oneshot due renders
     // empty (rather than a fake today that Save wouldn't persist).
-    const dt = String(this._data[key] ?? (key === "dtstart" ? this._todayStart() : ""));
-    return html`
-      <div class="start-label">${label}</div>
-      <div class="start-row">
-        <ha-date-input
-          class="start-date"
-          .locale=${this.hass.locale}
-          .value=${dt.slice(0, 10)}
-          .label=${" "}
-          @value-changed=${(e: CustomEvent<{ value?: string }>) => this._onDatePart(key, e)}
-        ></ha-date-input>
-        <ha-time-input
-          class="start-time"
-          .locale=${this.hass.locale}
-          .value=${dt ? dt.slice(11, 19) || "08:00:00" : ""}
-          .enableSecond=${false}
-          @value-changed=${(e: CustomEvent<{ value?: string }>) => this._onTimePart(key, e)}
-        ></ha-time-input>
-      </div>
-    `;
+    return renderDateTimeRow({
+      label,
+      value: String(this._data[key] ?? (key === "dtstart" ? this._todayStart() : "")),
+      locale: this.hass.locale,
+      onDate: (e) => this._onDatePart(key, e),
+      onTime: (e) => this._onTimePart(key, e),
+    });
   }
 
   /** The "Until (end date)" row — a raw ha-date-input with an explicit clear
@@ -513,16 +468,13 @@ export class ChoreEditDialog extends LitElement {
   private _onDatePart(key: "dtstart" | "due_datetime", e: CustomEvent<{ value?: string }>) {
     const date = e.detail.value;
     if (!date) return;
-    const time = String(this._data[key] ?? "").slice(11, 19) || "08:00:00";
-    this._data = { ...this._data, [key]: `${date} ${time}` };
+    this._data = { ...this._data, [key]: mergeDatePart(this._data[key], date) };
   }
 
   private _onTimePart(key: "dtstart" | "due_datetime", e: CustomEvent<{ value?: string }>) {
-    let time = e.detail.value;
+    const time = e.detail.value;
     if (!time) return;
-    if (time.length === 5) time += ":00"; // ha-time-input omits seconds when disabled
-    const date = String(this._data[key] ?? "").slice(0, 10) || this._todayStart().slice(0, 10);
-    this._data = { ...this._data, [key]: `${date} ${time}` };
+    this._data = { ...this._data, [key]: mergeTimePart(this._data[key], time) };
   }
 
   private _computeLabel = (schema: FormSchema): string => {

@@ -1,6 +1,8 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { safeDefine } from "../define";
+import { holdAction } from "../hold-action";
+import { fireEvent } from "../fire-event";
 import type { EnrichedChoreItem, HomeAssistant } from "../types";
 import { formatSchedule, formatCompletedTime } from "../utils";
 
@@ -121,11 +123,24 @@ export class ChoreDetailDialog extends LitElement {
                           variant="neutral"
                           appearance="plain"
                           ?disabled=${this._loading}
-                          @click=${this._onSkip}
+                          title="Tap to skip to the next occurrence, hold to pick a date"
+                          ${holdAction({
+                            tap: () => this._onSkip(),
+                            hold: () => this._openSkipDialog(),
+                            disabled: this._loading,
+                          })}
                         >
                           ${this._loading ? "Skipping..." : "Skip"}
                         </ha-button>
-                        <ha-button ?disabled=${this._loading} @click=${this._onComplete}>
+                        <ha-button
+                          ?disabled=${this._loading}
+                          title="Tap to complete now, hold to set time and person"
+                          ${holdAction({
+                            tap: () => this._onComplete(),
+                            hold: () => this._openCompleteDialog(),
+                            disabled: this._loading,
+                          })}
+                        >
                           ${this._loading ? "Completing..." : "Complete"}
                         </ha-button>
                       `
@@ -221,6 +236,13 @@ export class ChoreDetailDialog extends LitElement {
     `;
   }
 
+  /** Hand off to the complete dialog, where the time and person can be set.
+   *  Fires mid-press, as soon as the hold registers. */
+  private _openCompleteDialog() {
+    if (!this.item) return;
+    fireEvent(this, "chore-complete-details", { item: this.item });
+  }
+
   private async _onComplete() {
     if (!this.item || this._loading) return;
 
@@ -247,6 +269,13 @@ export class ChoreDetailDialog extends LitElement {
     } finally {
       this._loading = false;
     }
+  }
+
+  /** Hand off to the skip dialog, where an explicit resume datetime can be
+   *  picked. Fires mid-press, as soon as the hold registers. */
+  private _openSkipDialog() {
+    if (!this.item) return;
+    fireEvent(this, "chore-skip-details", { item: this.item });
   }
 
   private async _onSkip() {
