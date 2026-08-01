@@ -283,29 +283,30 @@ function t(t,e,i,o){var n,s=arguments.length,a=s<3?e:null===o?o=Object.getOwnPro
       gap: 8px;
     }
   `,t([ht({attribute:!1})],Qt.prototype,"hass",void 0),t([ht({attribute:!1})],Qt.prototype,"item",void 0),t([ht({type:Boolean})],Qt.prototype,"open",void 0),t([ht({type:Boolean,attribute:"allow-uncomplete"})],Qt.prototype,"allowUncomplete",void 0),t([ht({type:Boolean,attribute:"allow-edit"})],Qt.prototype,"allowEdit",void 0),t([pt()],Qt.prototype,"_loading",void 0),ut("chore-detail-dialog",Qt);const te="08:00:00",ee=a`
-  /* Date + time laid out like HA's calendar editor: a standalone label above a
-     row with a wider date field and a narrower time field. Raw ha-date-input /
-     ha-time-input (not ha-form fields) so there's no reserved label/helper
-     space to throw off the alignment. */
+  /* Date + time laid out like HA's calendar event editor, down to the label
+     typography and the growing date field with a content-sized time field
+     16px after it. Raw ha-date-input / ha-time-input rather than an ha-form
+     datetime selector, whose reserved label and helper space throws the row
+     out of line. */
   .datetime-label {
     margin: 10px 0 2px;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--primary-text-color);
+    font-size: var(--ha-font-size-s, 12px);
+    font-weight: var(--ha-font-weight-medium, 500);
+    color: var(--input-label-ink-color, rgba(0, 0, 0, 0.6));
   }
   .datetime-row {
     display: flex;
-    gap: 12px;
-    align-items: flex-start;
+    justify-content: space-between;
     margin: 0 0 8px;
   }
   .datetime-row .datetime-date {
-    flex: 3;
+    flex-grow: 1;
     min-width: 0;
   }
   .datetime-row .datetime-time {
-    flex: 2;
-    min-width: 0;
+    margin-left: 16px;
+    margin-inline-start: 16px;
+    margin-inline-end: initial;
   }
   /* Off-screen ha-form whose selectors force-register ha-date-input and
      ha-time-input, which HA only lazy-loads when a matching selector is
@@ -320,7 +321,6 @@ function t(t,e,i,o){var n,s=arguments.length,a=s<3?e:null===o?o=Object.getOwnPro
         class="datetime-date"
         .locale=${o}
         .value=${i.slice(0,10)}
-        .label=${" "}
         @value-changed=${n}
       ></ha-date-input>
       <ha-time-input
@@ -430,7 +430,7 @@ function t(t,e,i,o){var n,s=arguments.length,a=s<3?e:null===o?o=Object.getOwnPro
     .delete {
       --mdc-theme-primary: var(--error-color);
     }
-  `,t([ht({attribute:!1})],ge.prototype,"hass",void 0),t([ht({type:Boolean})],ge.prototype,"open",void 0),t([ht({attribute:!1})],ge.prototype,"item",void 0),t([ht({attribute:!1})],ge.prototype,"targets",void 0),t([ht({attribute:!1})],ge.prototype,"defaultTarget",void 0),t([pt()],ge.prototype,"_data",void 0),t([pt()],ge.prototype,"_error",void 0),t([pt()],ge.prototype,"_loading",void 0),t([pt()],ge.prototype,"_confirmDelete",void 0),ut("chore-edit-dialog",ge);const ye=[{name:"completed_by",selector:{entity:{filter:{domain:"person"}}}}],fe={completed_by:"Completed by"};class ve extends rt{constructor(){super(...arguments),this.open=!1,this._data={},this._loading=!1,this._computeLabel=t=>fe[t.name]??t.name,this._onDatePart=t=>{const e=t.detail.value;e&&(this._data={...this._data,completed_at:ne(this._data.completed_at,e)})},this._onTimePart=t=>{const e=t.detail.value;e&&(this._data={...this._data,completed_at:se(this._data.completed_at,e)})}}willUpdate(t){if(t.has("open")||t.has("item")){const t=this.open?this.item?.uid:void 0;t&&t!==this._seededFor&&(this._seededFor=t,this._data=this._defaults(),this._error=void 0),this.open||(this._seededFor=void 0)}}_defaults(){const t=this.item?.assigned_to??[];return{completed_at:Ct(new Date),...1===t.length?{completed_by:t[0]}:{}}}render(){return this.item?F`
+  `,t([ht({attribute:!1})],ge.prototype,"hass",void 0),t([ht({type:Boolean})],ge.prototype,"open",void 0),t([ht({attribute:!1})],ge.prototype,"item",void 0),t([ht({attribute:!1})],ge.prototype,"targets",void 0),t([ht({attribute:!1})],ge.prototype,"defaultTarget",void 0),t([pt()],ge.prototype,"_data",void 0),t([pt()],ge.prototype,"_error",void 0),t([pt()],ge.prototype,"_loading",void 0),t([pt()],ge.prototype,"_confirmDelete",void 0),ut("chore-edit-dialog",ge);const ye=[{name:"completed_by",selector:{entity:{filter:{domain:"person"}}}}],fe={completed_by:"Completed by:"};class ve extends rt{constructor(){super(...arguments),this.open=!1,this._data={},this._loading=!1,this._computeLabel=t=>fe[t.name]??t.name,this._onDatePart=t=>{const e=t.detail.value;e&&(this._data={...this._data,completed_at:ne(this._data.completed_at,e)})},this._onTimePart=t=>{const e=t.detail.value;e&&(this._data={...this._data,completed_at:se(this._data.completed_at,e)})}}willUpdate(t){if(t.has("open")||t.has("item")){const t=this.open?this.item?.uid:void 0;t&&t!==this._seededFor&&(this._seededFor=t,this._data=this._defaults(),this._error=void 0),this.open||(this._seededFor=void 0)}}_defaults(){const t=this.item?.assigned_to??[];return{completed_at:Ct(new Date),...1===t.length?{completed_by:t[0]}:{}}}render(){return this.item?F`
       <ha-dialog .open=${this.open} @closed=${this._onClosed}>
         <ha-icon-button slot="headerNavigationIcon" data-dialog="close" class="header_button">
           <ha-icon icon="mdi:close"></ha-icon>

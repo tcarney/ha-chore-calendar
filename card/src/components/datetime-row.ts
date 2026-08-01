@@ -10,29 +10,30 @@ const DEFAULT_TIME = "08:00:00";
  * component's ``static styles`` array alongside its own rules.
  */
 export const DATETIME_ROW_STYLES = css`
-  /* Date + time laid out like HA's calendar editor: a standalone label above a
-     row with a wider date field and a narrower time field. Raw ha-date-input /
-     ha-time-input (not ha-form fields) so there's no reserved label/helper
-     space to throw off the alignment. */
+  /* Date + time laid out like HA's calendar event editor, down to the label
+     typography and the growing date field with a content-sized time field
+     16px after it. Raw ha-date-input / ha-time-input rather than an ha-form
+     datetime selector, whose reserved label and helper space throws the row
+     out of line. */
   .datetime-label {
     margin: 10px 0 2px;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--primary-text-color);
+    font-size: var(--ha-font-size-s, 12px);
+    font-weight: var(--ha-font-weight-medium, 500);
+    color: var(--input-label-ink-color, rgba(0, 0, 0, 0.6));
   }
   .datetime-row {
     display: flex;
-    gap: 12px;
-    align-items: flex-start;
+    justify-content: space-between;
     margin: 0 0 8px;
   }
   .datetime-row .datetime-date {
-    flex: 3;
+    flex-grow: 1;
     min-width: 0;
   }
   .datetime-row .datetime-time {
-    flex: 2;
-    min-width: 0;
+    margin-left: 16px;
+    margin-inline-start: 16px;
+    margin-inline-end: initial;
   }
   /* Off-screen ha-form whose selectors force-register ha-date-input and
      ha-time-input, which HA only lazy-loads when a matching selector is
@@ -54,9 +55,10 @@ export const PICKER_LOADER_SCHEMA = [
 /** A labelled date + time row bound to an ha datetime value
  *  ("YYYY-MM-DD HH:MM:SS"); an empty value renders both fields empty.
  *
- *  The heading above the row carries the label, so the date input's own label
- *  is a non-breaking space: blank would collapse its reserved label space and
- *  drop the field out of line with the time input beside it. */
+ *  The heading above the row carries the label and the date input gets none of
+ *  its own, as in HA's calendar event editor. Its fields then sit slightly
+ *  higher than the time input's HH/MM — the same offset the native dialog has
+ *  (where AM/PM doesn't line up either). */
 export function renderDateTimeRow(opts: {
   label: string;
   value: string;
@@ -72,7 +74,6 @@ export function renderDateTimeRow(opts: {
         class="datetime-date"
         .locale=${locale}
         .value=${value.slice(0, 10)}
-        .label=${" "}
         @value-changed=${onDate}
       ></ha-date-input>
       <ha-time-input

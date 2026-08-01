@@ -26,7 +26,7 @@ const SCHEMA: FormSchema[] = [
 ];
 
 const LABELS: Record<string, string> = {
-  completed_by: "Completed by",
+  completed_by: "Completed by:",
 };
 
 /**
