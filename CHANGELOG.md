@@ -2,6 +2,15 @@
 
 # Changelog
 
+## [0.12.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.11.0...v0.12.0) (2026-08-01)
+
+
+### Features
+
+* assignee badges, clearable until date, show-all toggle for the card ([#36](https://github.com/tcarney/ha-chore-calendar/issues/36)) ([88049a2](https://github.com/tcarney/ha-chore-calendar/commit/88049a2292e3179af220b4cbeda886967a1b2369))
+* complete and skip dialogs on the card ([#37](https://github.com/tcarney/ha-chore-calendar/issues/37)) ([9e464fc](https://github.com/tcarney/ha-chore-calendar/commit/9e464fcb67c962c9ee3a00b6d37a3fd40f563634))
+* writable native todo items ([#32](https://github.com/tcarney/ha-chore-calendar/issues/32)) ([1120db6](https://github.com/tcarney/ha-chore-calendar/commit/1120db6f8aa3e2d7a81c6d54719641deb19a17e2))
+
 ## [0.11.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.10.1...v0.11.0) (2026-07-05)
 
 

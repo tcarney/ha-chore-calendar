@@ -19,5 +19,5 @@
     "ical>=13.2.5",
     "python-dateutil>=2.8.2"
   ],
-  "version": "0.11.0"
+  "version": "0.12.0"
 }
