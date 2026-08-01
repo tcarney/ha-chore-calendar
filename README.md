@@ -526,6 +526,11 @@ Tapping a chore row (default behavior) opens a detail dialog showing:
 
 An "Edit" button in the dialog footer opens the create/edit dialog for the chore (hidden when `hide_edit_button` is set). For non-completed chores, "Skip" and "Complete" buttons also appear. Skip defers the chore using the type-specific default (see [Skip a Chore](#skip-a-chore)); Complete records the completion and clears any active skip. For completed chores, an "Uncomplete" button is shown when `allow_uncomplete` is enabled. Uncompleting restores the skip that was cleared by the completion.
 
+Both status buttons take a hold (500ms) for a dialog that exposes the service's optional fields; a plain tap keeps the one-press behavior described above.
+
+- **Hold "Complete"** → a date/time field defaulting to now, plus a person picker for `completed_by` (pre-filled when the chore has exactly one assignee). See [`complete_item`](#complete-a-chore).
+- **Hold "Skip"** → a date/time field for an explicit `until`, pre-filled with the chore's current due date so it can be nudged in either direction. See [`skip_item`](#skip-a-chore).
+
 ### Creating & Editing Chores
 
 <img src="docs/images/card_edit.png" alt="The chore edit dialog, showing the edit options for a scheduled chore." width="480">

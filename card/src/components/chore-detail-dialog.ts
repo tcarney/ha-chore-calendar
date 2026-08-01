@@ -1,7 +1,9 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { safeDefine } from "../define";
-import type { EnrichedChoreItem, HomeAssistant } from "../types";
+import { actionHandler } from "../action-handler";
+import { fireEvent } from "../fire-event";
+import type { ActionHandlerDetail, EnrichedChoreItem, HomeAssistant } from "../types";
 import { formatSchedule, formatCompletedTime } from "../utils";
 
 const DOMAIN = "chore_calendar";
@@ -121,11 +123,18 @@ export class ChoreDetailDialog extends LitElement {
                           variant="neutral"
                           appearance="plain"
                           ?disabled=${this._loading}
-                          @click=${this._onSkip}
+                          title="Tap to skip to the next occurrence, hold to pick a date"
+                          ${actionHandler({ hasHold: true, disabled: this._loading })}
+                          @action=${this._onSkipAction}
                         >
                           ${this._loading ? "Skipping..." : "Skip"}
                         </ha-button>
-                        <ha-button ?disabled=${this._loading} @click=${this._onComplete}>
+                        <ha-button
+                          ?disabled=${this._loading}
+                          title="Tap to complete now, hold to set time and person"
+                          ${actionHandler({ hasHold: true, disabled: this._loading })}
+                          @action=${this._onCompleteAction}
+                        >
                           ${this._loading ? "Completing..." : "Complete"}
                         </ha-button>
                       `
@@ -221,6 +230,18 @@ export class ChoreDetailDialog extends LitElement {
     `;
   }
 
+  /** Tap completes right away with the service defaults; hold hands off to the
+   *  complete dialog, where the time and person can be set. The gesture
+   *  directive owns the click, so there is no @click handler alongside it. */
+  private _onCompleteAction(ev: CustomEvent<ActionHandlerDetail>) {
+    if (!this.item) return;
+    if (ev.detail.action === "hold") {
+      fireEvent(this, "chore-complete-details", { item: this.item });
+      return;
+    }
+    this._onComplete();
+  }
+
   private async _onComplete() {
     if (!this.item || this._loading) return;
 
@@ -247,6 +268,17 @@ export class ChoreDetailDialog extends LitElement {
     } finally {
       this._loading = false;
     }
+  }
+
+  /** Tap defers by the chore's type-specific default; hold hands off to the
+   *  skip dialog, where an explicit resume datetime can be picked. */
+  private _onSkipAction(ev: CustomEvent<ActionHandlerDetail>) {
+    if (!this.item) return;
+    if (ev.detail.action === "hold") {
+      fireEvent(this, "chore-skip-details", { item: this.item });
+      return;
+    }
+    this._onSkip();
   }
 
   private async _onSkip() {

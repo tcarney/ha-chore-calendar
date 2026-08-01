@@ -23,6 +23,8 @@ import {
 import "./components/chore-row";
 import "./components/chore-detail-dialog";
 import "./components/chore-edit-dialog";
+import "./components/chore-complete-dialog";
+import "./components/chore-skip-dialog";
 import "./chore-calendar-card-editor";
 import type { TargetOption } from "./components/chore-edit-dialog";
 
@@ -50,6 +52,10 @@ export class ChoreCalendarCard extends LitElement {
   @state() private _dialogOpen = false;
   @state() private _editItem?: EnrichedChoreItem;
   @state() private _editOpen = false;
+  @state() private _completeItem?: EnrichedChoreItem;
+  @state() private _completeOpen = false;
+  @state() private _skipItem?: EnrichedChoreItem;
+  @state() private _skipOpen = false;
   @state() private _showAll = false;
   @state() private _hiddenCount = 0;
 
@@ -406,10 +412,26 @@ export class ChoreCalendarCard extends LitElement {
         .allowEdit=${!this._config.hide_edit_button}
         @detail-dialog-closed=${this._onDialogClosed}
         @chore-edit=${this._onChoreEdit}
+        @chore-complete-details=${this._onChoreCompleteDetails}
+        @chore-skip-details=${this._onChoreSkipDetails}
         @chore-completed=${this._onChoreCompleted}
         @chore-uncompleted=${this._onChoreCompleted}
         @chore-skipped=${this._onChoreCompleted}
       ></chore-detail-dialog>
+      <chore-complete-dialog
+        .hass=${this.hass}
+        .item=${this._completeItem}
+        .open=${this._completeOpen}
+        @complete-dialog-closed=${this._onCompleteClosed}
+        @chore-completed=${this._onChoreCompleted}
+      ></chore-complete-dialog>
+      <chore-skip-dialog
+        .hass=${this.hass}
+        .item=${this._skipItem}
+        .open=${this._skipOpen}
+        @skip-dialog-closed=${this._onSkipClosed}
+        @chore-skipped=${this._onChoreCompleted}
+      ></chore-skip-dialog>
       <chore-edit-dialog
         .hass=${this.hass}
         .item=${this._editItem}
@@ -490,9 +512,37 @@ export class ChoreCalendarCard extends LitElement {
     this._dialogOpen = false;
   }
 
+  /** A chore changed (completed, uncompleted or skipped): close whichever
+   *  dialog drove it and pull fresh data. */
   private _onChoreCompleted() {
     this._dialogOpen = false;
+    this._completeOpen = false;
+    this._skipOpen = false;
     this._refreshData();
+  }
+
+  /** Hold on the detail dialog's Complete button: swap the detail view for the
+   *  complete dialog, the same hand-off the Edit button makes. */
+  private _onChoreCompleteDetails(e: CustomEvent<{ item: EnrichedChoreItem }>) {
+    this._dialogOpen = false;
+    this._completeItem = e.detail.item;
+    this._completeOpen = true;
+  }
+
+  private _onCompleteClosed() {
+    this._completeOpen = false;
+  }
+
+  /** Hold on the detail dialog's Skip button: swap the detail view for the
+   *  skip dialog, where an explicit resume datetime can be picked. */
+  private _onChoreSkipDetails(e: CustomEvent<{ item: EnrichedChoreItem }>) {
+    this._dialogOpen = false;
+    this._skipItem = e.detail.item;
+    this._skipOpen = true;
+  }
+
+  private _onSkipClosed() {
+    this._skipOpen = false;
   }
 
   private _onAddChore() {
