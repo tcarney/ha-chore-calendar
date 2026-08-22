@@ -2,6 +2,13 @@
 
 # Changelog
 
+## [0.12.1](https://github.com/tcarney/ha-chore-calendar/compare/v0.12.0...v0.12.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* show-all toggle lifts all card-level filters ([#38](https://github.com/tcarney/ha-chore-calendar/issues/38)) ([b68b5fa](https://github.com/tcarney/ha-chore-calendar/commit/b68b5fa58b7d316a1414172ac0823b3e33c0072f))
+
 ## [0.12.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.11.0...v0.12.0) (2026-08-01)
 
 
