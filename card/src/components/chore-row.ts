@@ -133,6 +133,7 @@ export class ChoreRow extends LitElement {
     return html`
       <div
         class="chore"
+        part="chore"
         style="--border-color: ${themeColorToCss(this.item.source_color)}"
         ${actionHandler({
           hasHold: hasAction(this.holdAction),

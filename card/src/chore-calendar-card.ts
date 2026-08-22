@@ -184,21 +184,28 @@ export class ChoreCalendarCard extends LitElement {
     }
   }
 
+  /** Whether the "Show all" toggle is currently lifting the card-level filters. */
+  private get _showAllActive(): boolean {
+    return this._showAll && !this._config.hide_show_all;
+  }
+
   /**
-   * Recompute the visible list from the last fetch. The due-date window can be
-   * lifted by the "Show all" toggle; the completed-period filter (and the
-   * per-list cleared_at cutoff, applied at fetch time) always stay in effect.
+   * Recompute the visible list from the last fetch. The "Show all" toggle
+   * lifts all card-level filters (due_date_period, completed_period, and the
+   * hide_completed section); the per-entity exclude lists and the per-list
+   * cleared_at cutoff are applied at fetch time and always stay in effect.
    */
   private _applyFilters() {
     const dueMs = durationToMs(this._config.due_date_period);
     const completedMs = durationToMs(this._config.completed_period);
-    const now = new Date();
-    const unwindowed = applyPeriodFilters(this._allItems, null, completedMs, now);
-    const windowed =
-      dueMs === null ? unwindowed : applyPeriodFilters(this._allItems, dueMs, completedMs, now);
-    this._hiddenCount = unwindowed.length - windowed.length;
-    const showAll = this._showAll && !this._config.hide_show_all;
-    this._items = sortChores(showAll ? unwindowed : windowed);
+    const filtered = applyPeriodFilters(this._allItems, dueMs, completedMs, new Date());
+    // Hidden = everything expanding reveals: period-filtered chores plus the
+    // whole completed section when hide_completed suppresses it.
+    const collapsedCount = this._config.hide_completed
+      ? filtered.filter((i) => i.status !== "completed").length
+      : filtered.length;
+    this._hiddenCount = this._allItems.length - collapsedCount;
+    this._items = sortChores(this._showAllActive ? this._allItems : filtered);
   }
 
   private _toggleShowAll() {
@@ -446,7 +453,7 @@ export class ChoreCalendarCard extends LitElement {
 
   private _renderSections() {
     const groups = groupByStatus(this._items);
-    const hideCompleted = !!this._config.hide_completed;
+    const hideCompleted = !!this._config.hide_completed && !this._showAllActive;
     const hideSections = !!this._config.hide_section_headers;
 
     const visibleSections = SECTION_ORDER.filter((status) => {
@@ -491,8 +498,8 @@ export class ChoreCalendarCard extends LitElement {
     `;
   }
 
-  /** A footer toggle that lifts the due-date window, shown only while that
-   *  window is actually hiding chores. */
+  /** A footer toggle that lifts the period filters, shown only while they
+   *  are actually hiding chores. */
   private _renderShowAllToggle() {
     if (this._hiddenCount === 0 || this._config.hide_show_all) return nothing;
     return html`
