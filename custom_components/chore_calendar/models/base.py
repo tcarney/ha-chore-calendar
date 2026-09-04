@@ -354,13 +354,26 @@ class BaseChore(abc.ABC):
         raise ValueError(msg)
 
 
+def _parse_local(raw: Any) -> datetime | None:
+    """Parse a stored ISO timestamp, coercing a naive value to local tz.
+
+    Every timestamp on ``BaseChore`` is compared against a tz-aware ``now``,
+    so all of them must load tz-aware. Stores written before ``complete_item``
+    coerced its ``completed_at`` argument can hold a naive ``last_completed``;
+    loading that as-is makes ``compute_status`` raise on the comparison. The
+    per-type floating-local fields (``dtstart``, ``until``) live in the
+    ``schedule`` sub-dict and are deliberately not routed through here.
+    """
+    if not raw:
+        return None
+    parsed = dt_util.parse_datetime(raw)
+    if parsed is not None and parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+    return parsed
+
+
 def _extract_base_kwargs(data: dict[str, Any], chore_type: ChoreType) -> dict[str, Any]:
     """Extract shared BaseChore fields from a storage dict."""
-    created_at_raw = data.get("created_at")
-    last_completed_raw = data.get("last_completed")
-    previous_last_completed_raw = data.get("previous_last_completed")
-    skipped_until_raw = data.get("skipped_until")
-    previous_skipped_until_raw = data.get("previous_skipped_until")
     return {
         "uid": data["uid"],
         "chore_name": data["chore_name"],
@@ -368,17 +381,13 @@ def _extract_base_kwargs(data: dict[str, Any], chore_type: ChoreType) -> dict[st
         "description": data.get("description"),
         "trigger_tag_id": data.get("trigger_tag_id"),
         "assigned_to": list(data.get("assigned_to", [])),
-        "created_at": dt_util.parse_datetime(created_at_raw) if created_at_raw else None,
-        "last_completed": dt_util.parse_datetime(last_completed_raw) if last_completed_raw else None,
+        "created_at": _parse_local(data.get("created_at")),
+        "last_completed": _parse_local(data.get("last_completed")),
         "last_completed_by": data.get("last_completed_by"),
-        "previous_last_completed": (
-            dt_util.parse_datetime(previous_last_completed_raw) if previous_last_completed_raw else None
-        ),
+        "previous_last_completed": _parse_local(data.get("previous_last_completed")),
         "previous_last_completed_by": data.get("previous_last_completed_by"),
-        "skipped_until": dt_util.parse_datetime(skipped_until_raw) if skipped_until_raw else None,
-        "previous_skipped_until": (
-            dt_util.parse_datetime(previous_skipped_until_raw) if previous_skipped_until_raw else None
-        ),
+        "skipped_until": _parse_local(data.get("skipped_until")),
+        "previous_skipped_until": _parse_local(data.get("previous_skipped_until")),
         "terminal": bool(data.get("terminal", False)),
         "completion_count": int(data.get("completion_count", 0)),
         "pending_period": timedelta(minutes=data.get("pending_period_mins", DEFAULT_PENDING_PERIOD_MINS)),
