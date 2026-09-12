@@ -83,6 +83,12 @@ async def async_complete_chore(
         raise ServiceValidationError(msg)
 
     timestamp = completed_at if completed_at is not None else dt_util.now()
+    # Coerce a naive `completed_at` (a service call whose datetime carries no
+    # tz suffix) to local tz — mirrors the skip_item / hide_completed_items
+    # handlers. Storing it naive makes every later `compute_status` compare a
+    # naive anchor derived from it against a tz-aware `now` and raise.
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
     existing.apply_completion(timestamp, completed_by, clear_skip=not keep_skip)
     coordinator.mark_source(uid, source)
     await store.async_update_chore(existing)

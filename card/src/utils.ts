@@ -184,10 +184,6 @@ export function formatHaDateTime(date: Date): string {
 /**
  * Convert an HA datetime value to an offset-bearing ISO string, or undefined
  * when empty/unparseable.
- *
- * The pickers emit a naive local value; ``complete_item`` stores whatever
- * ``cv.datetime`` parses without coercing naive values to the local zone, so
- * the card sends an unambiguous timestamp rather than relying on that.
  */
 export function haDateTimeToIso(value: unknown): string | undefined {
   const raw = String(value ?? "").trim();

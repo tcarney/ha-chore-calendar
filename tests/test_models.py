@@ -488,6 +488,25 @@ class TestSerialization:
         assert restored.description is None
         assert restored.completion_count == 0
 
+    def test_naive_stored_timestamps_load_tz_aware(self):
+        """A store holding naive timestamps loads tz-aware, so compute_status doesn't raise."""
+        data = _make_interval(created_at=datetime(2026, 3, 25, 12, 0, tzinfo=TZ)).to_dict()
+        # Simulate a store poisoned by a naive `completed_at` service call.
+        data["last_completed"] = "2026-03-27T12:00:00"
+        data["created_at"] = "2026-03-25T12:00:00"
+        data["skipped_until"] = "2026-03-29T12:00:00"
+
+        restored = BaseChore.from_dict(data)
+
+        assert restored.last_completed is not None
+        assert restored.last_completed.tzinfo is not None
+        assert restored.created_at is not None
+        assert restored.created_at.tzinfo is not None
+        assert restored.skipped_until is not None
+        assert restored.skipped_until.tzinfo is not None
+        # The comparison that used to raise TypeError.
+        assert restored.compute_status(datetime(2026, 3, 30, 12, 0, tzinfo=TZ)) is not None
+
     def test_from_dict_unknown_type_raises(self):
         """from_dict raises ValueError for unknown chore_type."""
         data = {

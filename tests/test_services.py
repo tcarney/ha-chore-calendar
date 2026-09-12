@@ -22,6 +22,7 @@ from custom_components.chore_calendar.models import IntervalChore, OneshotChore,
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
 TZ = timezone(timedelta(hours=-5))
 FROZEN_NOW = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
@@ -913,6 +914,35 @@ async def test_complete_item_with_timestamp(hass, config_entry):
     chore = store.get_chore(TEST_UID)
     assert chore.last_completed is not None
     assert chore.last_completed.hour == 8
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_complete_item_naive_timestamp_is_localized(hass, config_entry):
+    """complete_item coerces a naive completed_at to local tz.
+
+    A naive timestamp stored as-is makes every later compute_status compare a
+    naive anchor derived from it against a tz-aware now and raise TypeError.
+    """
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "complete_item",
+        {
+            "entity_id": entity_id,
+            "item": TEST_UID,
+            "completed_at": "2026-03-30 08:00:00",
+        },
+        blocking=True,
+    )
+
+    store = config_entry.runtime_data.store
+    chore = store.get_chore(TEST_UID)
+    assert chore.last_completed is not None
+    assert chore.last_completed.tzinfo is not None
+    assert chore.last_completed.hour == 8
+    # The refresh above already exercises compute_status; assert it directly too.
+    assert chore.compute_status(dt_util.now()) is not None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
