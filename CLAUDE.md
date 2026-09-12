@@ -1,24 +1,22 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) when working in this repository.
 
 ## Project Overview
 
-Home Assistant custom integration called **Chore Calendar** (domain: `chore_calendar`) that manages recurring household chores. Each chore list is added through Settings > Integrations (like `local_calendar` or `local_todo`), with chores managed via services. Provides native sensor/calendar entities, service-based CRUD, and built-in trigger handling. Intended for HACS distribution.
+**Chore Calendar** (domain `chore_calendar`) is a Home Assistant custom integration for recurring household chores, distributed through HACS. Core integration and card are complete.
 
-**Current state:** Core integration and card complete. See `README.md` for features and usage.
+- `README.md`: user-facing documentation. Features, install, chore model, services, card configuration, events.
+- `SPECS.md`: design specification. Design decisions, state machines, storage schema, card internals.
 
-**Key files:**
-
-- `README.md` — User-facing documentation (features, install, service examples, card config)
-- `SPECS.md` — Design specification (architecture, state machines, storage schema, card design)
+Do not restate the contents of those files here. Point to them.
 
 ## Development Commands
 
-Always use project scripts — never run `hass`, `pip`, `pytest` directly.
+Always use project scripts. Never run `hass`, `pip`, or `pytest` directly.
 
 ```bash
-script/check                          # Full validation (type-check + lint + spell) — run before committing
+script/check                          # Full validation (type-check + lint + spell). Run before committing.
 script/lint                           # Auto-format and fix linting issues
 script/type-check                     # Pyright type checking only
 script/test                           # Run all tests
@@ -31,13 +29,17 @@ script/develop                        # Start local HA instance (port 8123)
 script/hassfest                       # Validate manifest, translations, services against HA standards
 script/card/bootstrap                 # Install card npm dependencies
 script/card/build                     # Build card JS (auto-bootstraps if needed)
-script/card/dev                       # Watch mode — rebuild card on source changes
+script/card/dev                       # Watch mode: rebuild card on source changes
 script/card/clean                     # Remove card node_modules/ and dist/
 ```
 
-Restart HA after modifying Python files, `manifest.json`, `services.yaml`, translations, or config flow. Force restart: `pkill -f "hass --config" || true && pkill -f "debugpy.*5678" || true && ./script/develop`
+Restart HA after modifying Python files, `manifest.json`, `services.yaml`, translations, or the config flow. Force restart:
 
-Logs: live in terminal running `./script/develop`, or `config/home-assistant.log`. Set `custom_components.chore_calendar: debug` in `config/configuration.yaml`.
+```bash
+pkill -f "hass --config" || true && pkill -f "debugpy.*5678" || true && ./script/develop
+```
+
+Logs appear in the terminal running `./script/develop` and in `config/home-assistant.log`. Debug logging is enabled by the `logger` block shown in the README's Troubleshooting section, added to `config/configuration.yaml`.
 
 ## Code Style
 
@@ -45,53 +47,45 @@ Logs: live in terminal running `./script/develop`, or `config/home-assistant.log
 - Python 3.14+, 4 spaces, 120 char lines, double quotes, full type hints, async for all I/O
 - YAML: 2 spaces, modern HA syntax (no legacy `platform:` style). JSON: 2 spaces, no trailing commas
 - Ruff for linting (matches HA core config), Pyright basic mode for type checking
-- Google-style docstrings; comments as complete sentences with capitalization and ending period
+- Google-style docstrings. Comments are complete sentences with capitalization and an ending period
 - Import aliases: `voluptuous` as `vol`, `homeassistant.helpers.config_validation` as `cv`, `homeassistant.util.dt` as `dt_util`
-- Import order: `from __future__ import annotations` → stdlib → third-party → HA core → local
+- Import order: `from __future__ import annotations`, then stdlib, third-party, HA core, local
 - Commit messages: Conventional Commits (`feat:`, `fix:`, `chore:`, `refactor:`, `docs:`)
-- Tests: `pytest` with `asyncio_mode = auto`, use `pytest-homeassistant-custom-component` fixtures
-- **File size:** target 200–400 lines, max ~500 before splitting
+- Tests: `pytest` with `asyncio_mode = auto`, using `pytest-homeassistant-custom-component` fixtures
+- File size: target 200 to 400 lines, split at about 500
 
 **Never suppress checks with blanket ignores.** Use specific codes with reasons: `# noqa: F401 - reason` or `# type: ignore[attr-defined] - reason`.
 
 ## Architecture
 
-See `SPECS.md` for full architecture details (data flow, state machines, storage schema).
+`SPECS.md` is the reference for architecture, naming, entity model, and storage. The rules below are the ones most often needed while writing code.
 
-### Key Conventions
-
-- **Public API**: "item" (`create_item`, `complete_item`) — matches HA `todo` pattern
-- **Internal models**: "chore" (`BaseChore`, `ScheduledChore`, `IntervalChore`, `OneshotChore`) — domain-specific
-- **Domain**: `chore_calendar`, **Class prefix**: `ChoreCalendar`
-- **Entities** (per config entry / list): `calendar.daily_chores` (one per list), `todo.daily_chores` (one per list), `sensor.daily_chores_<chore_name>` (one per chore). Sensor unique_id: `{entry_id}_{uid}` where uid is a standard UUID. Calendar/todo unique_id: `{entry_id}` / `{entry_id}_todo`.
-- **Services over entities** for all mutations. Single-chore services accept either a sensor entity_id (chore inferred) or calendar entity_id + explicit `item` (name or UID). List-level services require the calendar entity.
-- Flat modules where practical; the only sub-package is `models/` (one file per chore type). Services registered in `async_setup()`, not `async_setup_entry()`. Card source in `card/`, built JS copied to `custom_components/chore_calendar/www/`.
-
-### Key HA Patterns
-
-- **Services registration:** `async_setup()`, NOT `async_setup_entry()` (Quality Scale requirement)
-- **Config entry data access:** `entry.runtime_data` (typed `ChoreCalendarData`)
-- **Entity MRO:** `(CoordinatorEntity[ChoreCalendarCoordinator], <PlatformEntity>)` — `CoordinatorEntity` first so coordinator updates drive state; concrete platform (`CalendarEntity`, `SensorEntity`, `TodoListEntity`) second.
+- **Naming:** public API (services, events) says "item" (`create_item`, `complete_item`). Internal models say "chore" (`BaseChore`, `ScheduledChore`, `IntervalChore`, `OneshotChore`). Class prefix is `ChoreCalendar`.
+- **Mutations go through services**, never entities. Single-chore services accept a sensor entity_id (chore inferred) or a calendar entity_id plus `item` (name or UID). List-level services require the calendar entity.
+- **Layout:** flat modules. The only sub-package is `models/` (one file per chore type). Card source lives in `card/`, and the built JS is copied to `custom_components/chore_calendar/www/`.
+- **Service registration:** in `async_setup()`, never `async_setup_entry()` (Quality Scale requirement).
+- **Config entry data:** `entry.runtime_data`, typed `ChoreCalendarData`.
+- **Entity MRO:** `(CoordinatorEntity[ChoreCalendarCoordinator], <PlatformEntity>)`. `CoordinatorEntity` comes first so coordinator updates drive state. The concrete platform (`CalendarEntity`, `SensorEntity`, `TodoListEntity`) comes second.
 
 ## Workflow Rules
 
-- **Tests:** Write tests for new features and bug fixes. Follow existing test patterns in the `tests/` directory.
-- **Docs:** Do NOT create markdown files without explicit permission. Extend existing docs rather than creating new files.
-- **Translations:** Business logic first; update `translations/en.json` only when asked or at feature completion. `strings.json` and `translations/en.json` must stay byte-for-byte identical — `script/check` diffs them and fails on drift. Never update other language files automatically — ask first.
-- **Scope:** Implement features completely (e.g., new sensor needs entity class + platform init + descriptions — all at once). For multiple independent features, do one at a time and suggest a commit between each.
-- **Large changes:** For refactors touching >10 files or architectural changes, propose a plan and get explicit confirmation before starting.
-- **Research first:** Don't guess HA patterns — look them up at [developers.home-assistant.io](https://developers.home-assistant.io/). HA evolves rapidly; verify current best practices.
+- **Tests:** write tests for new features and bug fixes. Follow the existing patterns in `tests/`.
+- **Docs:** do not create markdown files without explicit permission. Extend existing docs.
+- **Translations:** business logic first. Update `translations/en.json` only when asked or at feature completion. `strings.json` and `translations/en.json` must stay byte-for-byte identical. `script/check` diffs them and fails on drift. Never update other language files without asking first.
+- **Scope:** implement features completely. A new sensor needs the entity class, platform init, and descriptions in one change. For multiple independent features, do one at a time and suggest a commit between each.
+- **Large changes:** for refactors touching more than 10 files, or architectural changes, propose a plan and get explicit confirmation before starting.
+- **Research first:** do not guess HA patterns. Look them up at [developers.home-assistant.io](https://developers.home-assistant.io/). HA evolves rapidly, so verify current best practices.
 
 ## AI Contribution Policy
 
 This project follows the [Open Home Foundation AI policy](https://developers.home-assistant.io/docs/ai_policy/). It applies to work in this repo and to anything upstreamed to Home Assistant core, HACS, or other OHF projects.
 
-- **Human in the loop.** Every change must be reviewed and understood by the maintainer before it ships — they have to be able to explain each one in their own words. Keep diffs small and reviewable; surface non-obvious decisions and trade-offs in the summary instead of burying them in the diff.
-- **No autonomous GitHub activity.** Never open or update issues, PRs, comments, or reviews without explicit approval for that specific action. Draft the text, hand it over for review — the maintainer posts it. This holds even when a `gh` command would obviously work.
-- **PR descriptions and comments:** written in the maintainer's voice, as short as the intent allows, technically accurate. No AI boilerplate, no filler headings, no marketing tone. If a summary is AI-drafted, flag that it needs a technical-accuracy pass before posting.
-- **Never draft answers to maintainer questions.** Supply the facts and reasoning; the maintainer writes the reply. Grammar and clarity help is fine — substance must be theirs.
+- **Human in the loop.** The maintainer reviews and understands every change before it ships, and must be able to explain each one in their own words. Keep diffs small and reviewable. Surface non-obvious decisions and trade-offs in the summary, never only in the diff.
+- **No autonomous GitHub activity.** Never open or update issues, PRs, comments, or reviews without explicit approval for that specific action. Draft the text and hand it over. The maintainer posts it. This holds even when a `gh` command would obviously work.
+- **PR descriptions and comments** are written in the maintainer's voice, as short as the intent allows, and technically accurate. No AI boilerplate, no filler headings, no marketing tone. If a summary is AI-drafted, flag that it needs a technical-accuracy pass before posting.
+- **Never draft answers to maintainer questions.** Supply the facts and reasoning. The maintainer writes the reply. Grammar and clarity help is fine. The substance must be theirs.
 - **Disclose quoted AI output.** If AI output belongs in a comment, keep it short, put it in a `>` quote block, label it as AI-generated, and pair it with the maintainer's own commentary on why it matters.
-- **Treat AI review comments as fallible** — including bots on this repo's PRs. Verify each claim against the code before acting on it; a brief explanation is enough to push back. Maintainers have the final say.
-- **Upstream contributions** follow the target repo's issue/PR templates rather than bypassing them — bypassing a template is itself treated as a sign of automation.
+- **Treat AI review comments as fallible**, including bots on this repo's PRs. Verify each claim against the code before acting on it. A brief explanation is enough to push back. Maintainers have the final say.
+- **Upstream contributions** follow the target repo's issue and PR templates. Bypassing a template is itself treated as a sign of automation.
 
-Commits keep the `Co-Authored-By` trailer: attribution is disclosure, not a substitute for review.
+Commits keep the `Co-Authored-By` trailer. Attribution is disclosure, and never a substitute for review.
