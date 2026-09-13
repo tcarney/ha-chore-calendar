@@ -182,9 +182,12 @@ Behaviors specific to oneshot:
 
 ### Tag Triggers
 
-Assigning a `tag.*` entity to a chore enables NFC tap-to-complete. When the tag is scanned, the integration checks whether the chore is currently in its completion window (pending window through overdue) and auto-completes it.
+Assigning a `tag.*` entity to a chore enables NFC tap-to-complete. What a scan does depends on the chore type:
 
-If multiple chores share the same tag, only the chore whose completion window matches the scan time is completed.
+- **Interval chores** are completed on every scan, even before the pending window opens, because the next due derives from the last completion. An active skip that falls after the reset clock is kept.
+- **Scheduled and oneshot chores** are completed only while they read `pending`, `due`, or `overdue`. A scan while the chore reads `completed`, including a skip-deferred chore, has no effect. A never-completed chore reads `pending` before its first window, so a scan records a completion, but that completion satisfies the first occurrence only if it lands inside the occurrence's window.
+
+A scan within one minute of the chore's last completion is treated as a repeat read of the same tap and ignored. If multiple chores share the same tag, each is evaluated independently.
 
 When a chore is created with a `trigger_entity`, the tag's last-scanned timestamp seeds `last_completed`. This allows migration from an existing tag-based system without losing the most recent completion. The chore's initial status reflects the seeded `last_completed`, typically `completed` for a recently scanned tag, in place of the usual never-completed `pending`.
 
@@ -280,14 +283,9 @@ data:
 
 `completed_at` takes a datetime and defaults to now. Datetime arguments can be typed directly in YAML or chosen with the picker in Developer Tools.
 
-Completing a chore clears any active skip. Pass `keep_skip: true` to preserve the skip, for example when you complete early but still want the deferral to hold until the scheduled `skipped_until`.
+The service records the completion without checking the chore's window. Completing an interval chore early resets its clock from the new `last_completed`. Completing a scheduled chore before its pending window opens records the completion in history but does not satisfy the upcoming occurrence, which still comes due on schedule.
 
-```yaml
-action: chore_calendar.complete_item
-data:
-  entity_id: sensor.daily_chores_morning_medicine
-  keep_skip: true
-```
+An active skip is kept when it falls after the natural next due the completion produces, and cleared otherwise. See [Skip a Chore](#skip-a-chore). The `keep_skip` field is deprecated, has no effect, and will be removed in 1.0.0.
 
 ### Skip a Chore
 
@@ -317,7 +315,13 @@ data:
 
 To undo a skip, re-skip with a new `until`, or clear the item's due date from the [native todo card](#native-todo-card) to drop the override and return to the normal schedule.
 
-Completing a skipped chore clears the skip, so the completion counts for the current cycle (unless `keep_skip: true`). Uncompleting that completion restores the prior skip state.
+A skip is a floor on the next occurrence. Completing a skipped chore keeps the skip when `skipped_until` is later than the natural next due the completion produces, and clears it otherwise:
+
+- **Scheduled chores**: a completion before the skipped occurrence's pending window is history only, so the skip holds and the chore stays deferred. A completion inside that window satisfies the occurrence and clears the skip.
+- **Interval chores**: the completion resets the clock. The skip holds if it is later than `last_completed` plus the interval, and clears if the reset clock already lands past it.
+- **Oneshot chores**: completion ends the chore, so the skip always clears.
+
+Uncompleting that completion restores the prior skip state.
 
 ### Uncomplete a Chore
 

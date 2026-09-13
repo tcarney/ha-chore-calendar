@@ -1466,31 +1466,92 @@ class TestIntervalChoreSkip:
 class TestSkipUndoInteraction:
     """Test apply_completion / revert_completion with skip semantics."""
 
-    def test_complete_clears_skip_by_default(self):
-        """Default completion clears skipped_until and saves it to the undo slot."""
+    def test_complete_clears_skip_before_reset_clock(self):
+        """Interval: a skip earlier than the reset clock is redundant and clears."""
         chore = _make_interval()
         skipped = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
         chore.skipped_until = skipped
 
+        # Natural next due becomes Apr 3 10:00 (3-day interval), past the skip.
         chore.apply_completion(datetime(2026, 3, 31, 10, 0, tzinfo=TZ), "person.alice")
 
         assert chore.skipped_until is None
         assert chore.previous_skipped_until == skipped
 
-    def test_complete_with_keep_skip_preserves(self):
-        """apply_completion(clear_skip=False) preserves skipped_until and leaves undo empty."""
+    def test_complete_keeps_skip_after_reset_clock(self):
+        """Interval: a skip later than the reset clock is a floor on the next due and holds."""
         chore = _make_interval()
-        skipped = datetime(2026, 4, 2, 12, 0, tzinfo=TZ)
+        skipped = datetime(2026, 4, 10, 12, 0, tzinfo=TZ)
         chore.skipped_until = skipped
 
-        chore.apply_completion(
-            datetime(2026, 3, 31, 10, 0, tzinfo=TZ),
-            "person.alice",
-            clear_skip=False,
-        )
+        # Natural next due becomes Apr 3 10:00, still before the skip.
+        completed = datetime(2026, 3, 31, 10, 0, tzinfo=TZ)
+        chore.apply_completion(completed, "person.alice")
 
         assert chore.skipped_until == skipped
-        assert chore.previous_skipped_until is None
+        assert chore.previous_skipped_until == skipped
+        assert chore.last_completed == completed
+        assert chore.completion_count == 1
+        assert chore.compute_next_due(completed) == skipped
+
+    def test_revert_after_kept_skip_keeps_skip(self):
+        """Reverting a completion that kept the skip leaves the skip in place."""
+        chore = _make_interval()
+        skipped = datetime(2026, 4, 10, 12, 0, tzinfo=TZ)
+        chore.skipped_until = skipped
+
+        chore.apply_completion(datetime(2026, 3, 31, 10, 0, tzinfo=TZ), "person.alice")
+        chore.revert_completion()
+
+        assert chore.skipped_until == skipped
+        assert chore.last_completed is None
+
+    def test_scheduled_early_complete_keeps_skip(self):
+        """Scheduled: a completion before the skipped occurrence's window is history only."""
+        chore = _make_scheduled(last_completed=datetime(2026, 3, 29, 8, 30, tzinfo=TZ))
+        skipped = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        chore.skipped_until = skipped
+
+        # Mar 31 noon is well before the Apr 2 05:00 pending window.
+        chore.apply_completion(datetime(2026, 3, 31, 12, 0, tzinfo=TZ), "person.alice")
+
+        assert chore.skipped_until == skipped
+        assert chore.completion_count == 1
+        # Dormant until the skipped occurrence's window, then actionable as planned.
+        assert chore.compute_status(datetime(2026, 4, 1, 12, 0, tzinfo=TZ)) == ChoreStatus.COMPLETED
+        assert chore.compute_status(datetime(2026, 4, 2, 6, 0, tzinfo=TZ)) == ChoreStatus.PENDING
+        assert chore.compute_next_due(datetime(2026, 4, 1, 12, 0, tzinfo=TZ)) == skipped
+
+    def test_scheduled_in_window_complete_clears_skip(self):
+        """Scheduled: completing inside the skipped occurrence's window satisfies it and clears the skip.
+
+        Regression guard: keeping the skip here pinned the chore at ``skipped_until``
+        as ``completed`` indefinitely, because ``last_completed >= pending_at`` held
+        against the skip anchor forever.
+        """
+        chore = _make_scheduled(last_completed=datetime(2026, 3, 29, 8, 30, tzinfo=TZ))
+        skipped = datetime(2026, 4, 2, 8, 0, tzinfo=TZ)
+        chore.skipped_until = skipped
+
+        chore.apply_completion(datetime(2026, 4, 2, 7, 0, tzinfo=TZ), "person.alice")
+
+        assert chore.skipped_until is None
+        assert chore.previous_skipped_until == skipped
+        assert chore.compute_status(datetime(2026, 4, 2, 12, 0, tzinfo=TZ)) == ChoreStatus.COMPLETED
+        assert chore.compute_next_due(datetime(2026, 4, 2, 12, 0, tzinfo=TZ)) == datetime(2026, 4, 3, 8, 0, tzinfo=TZ)
+        # The following day re-enters the cycle instead of staying wedged.
+        assert chore.compute_status(datetime(2026, 4, 3, 6, 0, tzinfo=TZ)) == ChoreStatus.PENDING
+
+    def test_terminal_complete_clears_skip(self):
+        """A completion that ends the series (count exhausted) never keeps a skip."""
+        chore = _make_interval()
+        chore.count = 1
+        chore.skipped_until = datetime(2026, 4, 10, 12, 0, tzinfo=TZ)
+
+        chore.apply_completion(datetime(2026, 3, 31, 10, 0, tzinfo=TZ), "person.alice")
+
+        assert chore.terminal is True
+        assert chore.skipped_until is None
 
     def test_revert_restores_skipped_until(self):
         """revert_completion restores skipped_until from the undo slot."""

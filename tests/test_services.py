@@ -1839,50 +1839,81 @@ async def test_skip_item_via_sensor_entity(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_complete_item_clears_skip_by_default(hass, config_entry):
-    """complete_item without keep_skip clears skipped_until and seeds the undo slot."""
+async def test_complete_item_clears_skip_before_next_due(hass, config_entry):
+    """complete_item clears a skip that the reset clock overtakes and seeds the undo slot."""
     entity_id = await _setup_with_chore(hass, config_entry)
 
-    await hass.services.async_call(
-        DOMAIN,
-        "skip_item",
-        {"entity_id": entity_id, "item": TEST_UID, "until": "2026-04-10T08:00:00-05:00"},
-        blocking=True,
-    )
-    await hass.services.async_call(
-        DOMAIN,
-        "complete_item",
-        {"entity_id": entity_id, "item": TEST_UID},
-        blocking=True,
-    )
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "skip_item",
+            {"entity_id": entity_id, "item": TEST_UID, "until": "2026-04-01T08:00:00-05:00"},
+            blocking=True,
+        )
+        # 3-day interval: the natural next due becomes Apr 2 12:00, past the skip.
+        await hass.services.async_call(
+            DOMAIN,
+            "complete_item",
+            {"entity_id": entity_id, "item": TEST_UID},
+            blocking=True,
+        )
 
     chore = config_entry.runtime_data.store.get_chore(TEST_UID)
     assert chore.skipped_until is None
-    assert chore.previous_skipped_until == datetime(2026, 4, 10, 8, 0, tzinfo=TZ)
+    assert chore.previous_skipped_until == datetime(2026, 4, 1, 8, 0, tzinfo=TZ)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_complete_item_keep_skip_preserves(hass, config_entry):
-    """complete_item with keep_skip=True preserves skipped_until and leaves undo empty."""
+async def test_complete_item_keeps_skip_after_next_due(hass, config_entry):
+    """complete_item keeps a skip that falls after the natural next due."""
     entity_id = await _setup_with_chore(hass, config_entry)
-    skipped_iso = "2026-04-10T08:00:00-05:00"
+    skipped = datetime(2026, 4, 10, 8, 0, tzinfo=TZ)
 
-    await hass.services.async_call(
-        DOMAIN,
-        "skip_item",
-        {"entity_id": entity_id, "item": TEST_UID, "until": skipped_iso},
-        blocking=True,
-    )
-    await hass.services.async_call(
-        DOMAIN,
-        "complete_item",
-        {"entity_id": entity_id, "item": TEST_UID, "keep_skip": True},
-        blocking=True,
-    )
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "skip_item",
+            {"entity_id": entity_id, "item": TEST_UID, "until": skipped.isoformat()},
+            blocking=True,
+        )
+        # 3-day interval: the natural next due becomes Apr 2 12:00, before the skip.
+        await hass.services.async_call(
+            DOMAIN,
+            "complete_item",
+            {"entity_id": entity_id, "item": TEST_UID},
+            blocking=True,
+        )
 
     chore = config_entry.runtime_data.store.get_chore(TEST_UID)
-    assert chore.skipped_until == datetime(2026, 4, 10, 8, 0, tzinfo=TZ)
-    assert chore.previous_skipped_until is None
+    assert chore.last_completed == FROZEN_NOW
+    assert chore.skipped_until == skipped
+    assert chore.compute_next_due(FROZEN_NOW) == skipped
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_complete_item_keep_skip_is_deprecated_noop(hass, config_entry, caplog):
+    """keep_skip is still accepted, logs a deprecation warning, and changes nothing."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "skip_item",
+            {"entity_id": entity_id, "item": TEST_UID, "until": "2026-04-01T08:00:00-05:00"},
+            blocking=True,
+        )
+        await hass.services.async_call(
+            DOMAIN,
+            "complete_item",
+            {"entity_id": entity_id, "item": TEST_UID, "keep_skip": True},
+            blocking=True,
+        )
+
+    chore = config_entry.runtime_data.store.get_chore(TEST_UID)
+    # The skip is decided by the completion time, so keep_skip cannot hold it.
+    assert chore.skipped_until is None
+    assert "'keep_skip' is deprecated" in caplog.text
+    assert "1.0.0" in caplog.text
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

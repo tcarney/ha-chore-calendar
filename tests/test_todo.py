@@ -947,6 +947,51 @@ async def test_update_complete_with_due_keeps_override(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_complete_with_earlier_due_keeps_override(hass, config_entry):
+    """A due set together with a completion holds even when it precedes the natural next due.
+
+    The explicit due is applied after the completion, so the completion's own
+    skip handling (which would drop a skip the reset clock overtakes) cannot
+    undo what the user just typed.
+    """
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = IntervalChore(
+        uid="chore-1",
+        chore_name="Test Chore",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=7,
+        grace_period=timedelta(hours=1),
+        last_completed=FROZEN_NOW - timedelta(days=7),  # DUE at FROZEN_NOW
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    new_due = FROZEN_NOW + timedelta(days=2)  # Before the natural next due (+7 days).
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {
+                "entity_id": entity_id,
+                "item": "chore-1",
+                "status": "completed",
+                "due_datetime": new_due.isoformat(),
+            },
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    updated = runtime.store.get_chore("chore-1")
+    assert updated is not None
+    assert updated.last_completed == FROZEN_NOW
+    assert updated.skipped_until == new_due
+    assert updated.compute_next_due(FROZEN_NOW) == new_due
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_update_unknown_item_raises(hass, config_entry):
     """Updating an unknown item raises ServiceValidationError."""
     entity_id = await _setup_entry(hass, config_entry)

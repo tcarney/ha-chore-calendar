@@ -269,7 +269,7 @@
         },
         "keep_skip": {
           "name": "Keep skip",
-          "description": "Preserve an active skip instead of clearing it (e.g. completing early while keeping the deferral)."
+          "description": "Deprecated, has no effect and will be removed in 1.0.0. An active skip is kept automatically when it falls after the natural next due."
         }
       }
     },
