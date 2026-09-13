@@ -2,6 +2,18 @@
 
 # Changelog
 
+## [0.12.2](https://github.com/tcarney/ha-chore-calendar/compare/v0.12.1...v0.12.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* read naive completed_at as local time ([#41](https://github.com/tcarney/ha-chore-calendar/issues/41)) ([f9d7e9f](https://github.com/tcarney/ha-chore-calendar/commit/f9d7e9fe64425ea2b89c528b7a43d77eeb1fe77a))
+
+
+### Documentation
+
+* apply style guide and remove duplication ([#43](https://github.com/tcarney/ha-chore-calendar/issues/43)) ([44966a3](https://github.com/tcarney/ha-chore-calendar/commit/44966a303d362ee962c95fbb647657a4f585cf12))
+
 ## [0.12.1](https://github.com/tcarney/ha-chore-calendar/compare/v0.12.0...v0.12.1) (2026-08-22)
 
 
