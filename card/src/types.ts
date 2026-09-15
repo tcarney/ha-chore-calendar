@@ -25,6 +25,12 @@ export interface ChoreItem {
   chore_type: "scheduled" | "interval" | "oneshot";
   status: ChoreStatus;
   next_due: string | null;
+  /** First uncompleted occurrence that is not yet missed; scheduled chores only. */
+  upcoming_due: string | null;
+  /** Uncompleted periods whose grace period has lapsed. Non-zero iff overdue. */
+  missed_count: number;
+  /** The ten most recent missed period dues, ISO 8601, ascending. */
+  missed_occurrences: string[];
   last_completed: string | null;
   last_completed_by: string | null;
   assigned_to: string[];

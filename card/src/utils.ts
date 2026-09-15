@@ -223,6 +223,32 @@ export function formatCompletedTime(
   }).format(target);
 }
 
+/** Format a due timestamp as a short calendar date, with the year only when it differs from now. */
+export function formatDueDate(isoString: string, now: Date, locale: string): string {
+  const target = new Date(isoString);
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    ...(target.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
+  }).format(target);
+}
+
+/**
+ * Label for the upcoming occurrence of an overdue chore, from its own window
+ * state: "Upcoming" before the pending window opens, "Pending" inside it,
+ * "Due" once the due time has passed (it cannot be past its grace period,
+ * or it would be in the missed list instead).
+ */
+export function upcomingLabel(item: EnrichedChoreItem, now: Date): string {
+  if (!item.upcoming_due) return "Upcoming";
+  const schedule = typeof item.schedule === "object" && item.schedule !== null ? item.schedule : {};
+  const pendingMins = Number(schedule.pending_period_mins ?? 0);
+  const dueMs = new Date(item.upcoming_due).getTime();
+  if (now.getTime() < dueMs - pendingMins * MINUTE) return "Upcoming";
+  if (now.getTime() < dueMs) return "Pending";
+  return "Due";
+}
+
 /**
  * Get the secondary time text for a chore row.
  * Matches the blueprint pattern: "Overdue by X", "Due", "in X", "✓ time".

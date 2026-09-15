@@ -112,7 +112,12 @@ The chore sensor's state is the chore's current status. Additional attributes ar
 | --- | --- |
 | `uid` | Stable UUID assigned at creation. Used as the `item` argument when targeting a specific chore via the calendar entity in service calls. |
 | `chore_type` | The chore type, set at creation by which sub-dict is passed. Changeable later by passing a different type's sub-dict to `update_item` (see [Convert Between Chore Types](#convert-between-chore-types)). |
-| `next_due` | When the chore is next due (ISO 8601). `null` for unscheduled chores. Stays pinned to the uncompleted period while `overdue`. |
+| `next_due` | When the chore is next due (ISO 8601). `null` for unscheduled chores. Stays pinned to the earliest uncompleted period while `overdue`. |
+| `missed_count` | Number of uncompleted occurrences whose grace period has lapsed, counted from the pinned period (or from `skipped_until` while a skip is active). Non-zero exactly when the chore is `overdue`. Counts up to one year of occurrences. |
+| `missed_occurrences` | The ten most recent missed occurrences (ISO 8601, oldest first). The earliest is always `next_due`. Excluded from recorder history. |
+| `upcoming_due` | Scheduled chores only: the first uncompleted occurrence that is not yet missed, so the one currently pending, due, or still ahead. Equals `next_due` when nothing is missed. `null` for interval and oneshot chores. |
+
+A single completion satisfies every missed occurrence and, when it lands inside the upcoming occurrence's pending window, that one too. Missed occurrences are context for deciding what to do, and completing once records one completion.
 | `last_completed` | When the chore was last completed (ISO 8601), or `null` if never completed. |
 | `last_completed_by` | The `person.*` entity that completed the chore, or `null`. Set via the optional `completed_by` parameter on `chore_calendar.complete_item`. Shown in the card detail dialog and included in status events. |
 
@@ -417,6 +422,8 @@ response_variable: result
 # result.items contains the list of matching chores
 ```
 
+Each item carries the sensor's [common attributes](#common-attributes) plus `chore_name`, `description`, `status`, and `schedule`.
+
 ## Dashboard Card
 
 The card is included with the integration and auto-registered, so no manual resource setup is needed. Add it to a dashboard via the UI card picker or YAML.
@@ -524,6 +531,7 @@ Tapping a chore row (default behavior) opens a detail dialog showing:
 - Schedule description (e.g. "Last Friday at 9:00 AM")
 - Assignee(s) (if assigned)
 - Trigger tag (if configured)
+- Missed occurrences (overdue chores only): the count and the most recent dates, then the upcoming occurrence labeled by its own state ("Upcoming", "Pending", or "Due")
 - Last completed time and by whom (if set)
 - The chore's free-text description (if set)
 

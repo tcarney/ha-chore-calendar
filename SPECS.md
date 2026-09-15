@@ -80,6 +80,8 @@ completed → pending → due → overdue → (trigger) → completed
 - **Initial state (never completed)**: pins to the first occurrence's `period_due` at or after `created_at`, since the chore could not have been done before it existed. The state machine runs `pending → due → overdue` against that pinned period and stays `overdue` until the first completion. The cycle never silently rolls forward past a missed initial period. Creating a chore after its scheduled time on the same day pins to the next occurrence, so the chore reads `pending` instead of `due`.
 - **Finite rules** (`UNTIL` or `COUNT`): completing or skipping past the final occurrence sets `terminal`. The chore reports `completed` permanently and is swept by `hide_completed_items` unless `persist` is set. Uncompleting, or updating the recurrence, reopens it.
 - **Overdue pinning** (after the first completion): walks back from the candidate period to find the earliest uncompleted period, using `last_completed` as the anchor. An overdue chore stays pinned to the uncompleted period. `next_due` does not advance until the chore is completed.
+- **Missed occurrences** (`compute_missed_occurrences`): the uncompleted periods whose `overdue_at` has passed, ascending from the operative anchor and stepping the grid while `period_due + grace_period <= now`. Every period after the anchor is uncompleted by construction, since the anchor is the oldest unsatisfied one. The list is empty unless the status is `overdue`, so a non-empty list and the `overdue` status are equivalent. The walk shares the 365-step guard (`PERIOD_WALK_LIMIT`) with the pinning walk-back. Interval and oneshot chores have no grid to step, so their list is the single operative due while overdue.
+- **Upcoming due** (`compute_upcoming_due`, scheduled only): the grid occurrence after the last missed period, or `compute_next_due` when nothing is missed. It is the period currently pending, due, or still ahead. A completion before its pending window leaves `next_due` there. A completion inside the window satisfies it too and `next_due` advances past it. `None` when the series is terminal or the last missed period is the final occurrence of a finite rule. The sensor exposes `missed_count`, `missed_occurrences` (the ten most recent, `MISSED_OCCURRENCES_LIMIT`, kept out of the recorder), and `upcoming_due`. `get_items` carries the same three fields.
 
 **Interval Chores**
 
@@ -128,7 +130,8 @@ A parallel `previous_skipped_until` slot holds any `skipped_until` value that a 
 - **No new status.** A skipped chore reports `completed` while `now < pending_at` (scheduled, or oneshot with explicit `until`) or `now < skipped_until` (interval). Past that threshold it transitions through `pending`, `due`, and `overdue` against the skipped anchor.
 - **Unconditional override.** While set, `skipped_until` holds in both directions (an earlier value is honored) and does not lapse when the natural cadence catches up. It is released only by a completion (`apply_completion`), an explicit clear (todo due date cleared), or a schedule change via `update_item`. The override rescheduled the old occurrence, so a recurrence or `due_datetime` change resets it. This keeps `compute_next_due` pinned to `skipped_until` after the chore goes overdue, so consumers such as the card's "overdue by" reading measure from `skipped_until + grace_period` instead of a stale natural anchor. The natural anchor cannot overtake an override on its own. Scheduled pins to the oldest uncompleted period, and interval and oneshot anchors are fixed until completion, so there is no fallthrough case.
 - **Defaults when `until` is omitted**, via `apply_default_skip`:
-  - *Scheduled*: the next occurrence's period-due strictly after now. Walks forward past the pinned overdue period so the skip cannot land in the past.
+  - *Scheduled*: the next occurrence's period-due strictly after now. Walks forward past the pinned overdue period so the skip cannot land in the past. Skipping while overdue therefore discards the missed run, the same as completing does.
+- **Missed occurrences start at `skipped_until`.** Periods between the natural anchor and the skip target were deferred, so they count as skipped rather than missed. Once the skip target's grace period lapses, the missed walk runs from `skipped_until` along the natural grid after it.
   - *Interval*: `now + interval`, season-filtered.
   - *Oneshot*: clears `due_datetime`.
 - **Completion resolves the skip from the completion time.** `apply_completion` keeps `skipped_until` only when it is later than the natural next due computed with the override lifted (`_skip_outlives_completion`); otherwise the skip clears. A terminal completion never keeps it. For a scheduled chore this means an early completion (before the skipped occurrence's pending window) leaves the deferral in place, while an in-window completion satisfies the occurrence and clears it. Keeping the skip after an in-window completion would pin the chore at `skipped_until` as `completed` forever, because `last_completed >= pending_at` holds against the override, so the caller cannot choose. The pre-completion value is always saved to `previous_skipped_until` and restored by `uncomplete_item`. The `complete_item` field `keep_skip` is a deprecated no-op that logs a warning; it is removed in 1.0.0.
@@ -348,6 +351,9 @@ interface ChoreItem {
   chore_type: 'scheduled' | 'interval' | 'oneshot';
   status: 'completed' | 'pending' | 'due' | 'overdue';
   next_due: string | null;       // ISO 8601
+  upcoming_due: string | null;   // ISO 8601; scheduled only
+  missed_count: number;
+  missed_occurrences: string[];  // ISO 8601, ten most recent, ascending
   last_completed: string | null; // ISO 8601
   last_completed_by: string | null;
   assigned_to: string[];
@@ -379,6 +385,8 @@ Each row has an MDI icon and a value, with no labels or dividers. Rows render on
 | **Schedule**   | `mdi:calendar-clock`                   | Human-readable schedule description                  |
 | **Assigned**   | `mdi:account` / `mdi:account-multiple` | Resolved person names, comma-separated               |
 | **Trigger**    | `mdi:nfc-tap`                          | Resolved trigger entity name                         |
+| **Missed**     | `mdi:calendar-alert`                   | Overdue only: "{missed_count} missed: {dates}", leading ellipsis when the count exceeds the list. The one row that wraps. |
+| **Upcoming**   | `mdi:calendar-arrow-right`             | Overdue only: `upcoming_due` labeled by its own window state, "Upcoming" before `pending_at`, "Pending" inside the pending window, "Due" past the due time (computed client-side from `pending_period_mins`) |
 | **Last done**  | `mdi:check-circle-outline`             | Formatted completion time + "by {person}" if present |
 | **Description**| none                                   | The chore's free-text description                    |
 

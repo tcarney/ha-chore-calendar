@@ -4,7 +4,7 @@ import { safeDefine } from "../define";
 import { holdAction } from "../hold-action";
 import { fireEvent } from "../fire-event";
 import type { EnrichedChoreItem, HomeAssistant } from "../types";
-import { formatSchedule, formatCompletedTime } from "../utils";
+import { formatSchedule, formatCompletedTime, formatDueDate, upcomingLabel } from "../utils";
 
 const DOMAIN = "chore_calendar";
 
@@ -52,6 +52,12 @@ export class ChoreDetailDialog extends LitElement {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    /* The missed list is the one row allowed to wrap: clipping it would hide
+       the most recent entries. */
+    .content > div.missed .info {
+      white-space: normal;
     }
 
     /* Free-text description: the last details block, set off by spacing
@@ -198,6 +204,25 @@ export class ChoreDetailDialog extends LitElement {
           `
         : nothing}
 
+      ${item.missed_count > 0
+        ? html`
+            <div class="missed">
+              <ha-icon icon="mdi:calendar-alert"></ha-icon>
+              <div class="info">${this._formatMissed(item, now, locale)}</div>
+            </div>
+            ${item.upcoming_due
+              ? html`
+                  <div class="upcoming">
+                    <ha-icon icon="mdi:calendar-arrow-right"></ha-icon>
+                    <div class="info">
+                      ${upcomingLabel(item, now)}: ${formatDueDate(item.upcoming_due, now, locale)}
+                    </div>
+                  </div>
+                `
+              : nothing}
+          `
+        : nothing}
+
       ${item.last_completed
         ? html`
             <div class="last-completed">
@@ -215,6 +240,14 @@ export class ChoreDetailDialog extends LitElement {
         ? html`<div class="description">${item.description}</div>`
         : nothing}
     `;
+  }
+
+  /** "N missed: d1, d2, …" — the server sends the ten most recent, so a
+   *  larger count gets a leading ellipsis to show the list is truncated. */
+  private _formatMissed(item: EnrichedChoreItem, now: Date, locale: string): string {
+    const dates = item.missed_occurrences.map((iso) => formatDueDate(iso, now, locale));
+    const truncated = item.missed_count > dates.length ? "…, " : "";
+    return `${item.missed_count} missed: ${truncated}${dates.join(", ")}`;
   }
 
   private _renderListRow() {
