@@ -307,7 +307,7 @@ Chores from all configured lists are merged into a single timeline, sorted by ur
   - Overdue: "2 hours ago", "1 day ago" (via `Intl.RelativeTimeFormat`)
   - Due: "now"
   - Pending: "in 4 hours", "in 2 days"
-  - Completed: time if today ("8:15 AM"), "Yesterday", or date ("Mar 28")
+  - Completed: nothing (the row already carries the check glyph)
 - **Completed rows**: reduced opacity (0.6).
 
 ### Section Headers
@@ -377,17 +377,22 @@ A theme name such as `"red"` maps to `var(--red-color)` and adapts to light and 
 
 ### Detail Dialog
 
-Each row has an MDI icon and a value, with no labels or dividers. Rows render only when the item has data for that field.
+The dialog leads with what is happening now and keeps the descriptive metadata muted beneath it, so an overdue chore with missed context reads as one status block rather than a stack of equal rows.
 
-| Row            | Icon                                   | Shows                                                |
-|----------------|----------------------------------------|------------------------------------------------------|
-| **List**       | `<ha-state-icon>` from calendar entity | Calendar entity friendly name, always first          |
-| **Schedule**   | `mdi:calendar-clock`                   | Human-readable schedule description                  |
-| **Assigned**   | `mdi:account` / `mdi:account-multiple` | Resolved person names, comma-separated               |
-| **Trigger**    | `mdi:nfc-tap`                          | Resolved trigger entity name                         |
-| **Missed**     | `mdi:calendar-alert`                   | Overdue only: "{missed_count} missed: {dates}", leading ellipsis when the count exceeds the list. The one row that wraps. |
-| **Upcoming**   | `mdi:calendar-arrow-right`             | Overdue only: `upcoming_due` labeled by its own window state, "Upcoming" before `pending_at`, "Pending" inside the pending window, "Due" past the due time (computed client-side from `pending_period_mins`) |
-| **Last done**  | `mdi:check-circle-outline`             | Formatted completion time + "by {person}" if present |
-| **Description**| none                                   | The chore's free-text description                    |
+- **Header**: the chore name only, matching other HA dialogs. The body's side padding is 20px so the row icons line up with the header's close button.
+- **Status block**: the status glyph plus the row's time text ("Overdue by 2 days", "Due", "Due in 3 days"), in the status color. A completed chore shows "Done {time}" here instead, followed by the completer's avatar, and the metadata omits the last-completed row so it is not repeated. Overdue chores add two context lines in secondary text: "{missed_count} missed: {dates}" (leading ellipsis when the count exceeds the list) and `upcoming_due` labeled by its own window state: "Upcoming" before `pending_at`, "Pending" inside the pending window, "Due" past the due time (computed client-side from `pending_period_mins`).
+- **Metadata rows**: MDI icon plus value, secondary color, no labels. Rendered only when the item has data for that field.
+
+| Row            | Icon                                   | Shows                                                                 |
+|----------------|----------------------------------------|-----------------------------------------------------------------------|
+| **List**       | `<ha-state-icon>` from calendar entity | Calendar entity friendly name, always first                           |
+| **Schedule**   | `mdi:calendar-clock`                   | Human-readable schedule description, followed inline by the assignee avatars (the same `<chore-assignees>` element the row uses) |
+| **Trigger**    | `mdi:nfc-tap`                          | Resolved trigger entity name                                          |
+| **Last done**  | `mdi:check-circle-outline`             | Completion time, followed inline by the completer's avatar if present; omitted while `completed` |
+| **Description**| none                                   | The chore's free-text description, primary color                      |
+
+Completion times read "Today 8:15 AM", "Yesterday 7:14 PM", a weekday within the last week, or a short date ("Mar 28").
+
+**Parts** for `card_mod` (`chore-detail-dialog::part(...)`): `title`, `list`, `assignees`, `content`, `status` (plus `status-{status}`), `status-text`, `missed`, `upcoming`, `meta`, `schedule`, `trigger`, `last-completed`, `completed-by`, `description`, `footer`.
 
 The footer has an "Edit" button (hidden by `hide_edit_button`). Non-completed chores also get "Skip" (plain, left) and "Complete" (primary, right). Completed chores get "Uncomplete" when `allow_uncomplete` is enabled. Holding "Skip" or "Complete" opens a secondary dialog exposing the service's optional fields.

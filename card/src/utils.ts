@@ -192,6 +192,11 @@ export function haDateTimeToIso(value: unknown): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
+/** Local midnight of *date*, as epoch milliseconds. */
+function startOfLocalDay(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
 /** Format a completed-at timestamp for display. */
 export function formatCompletedTime(
   isoString: string,
@@ -199,18 +204,16 @@ export function formatCompletedTime(
   locale: string,
 ): string {
   const target = new Date(isoString);
-  const diffDays = Math.floor((now.getTime() - target.getTime()) / DAY);
+  // Calendar days in local time, not 24-hour windows: 7:14 PM yesterday is
+  // "Yesterday" at 7:02 PM today. Rounding absorbs DST-shortened days.
+  const diffDays = Math.round((startOfLocalDay(now) - startOfLocalDay(target)) / DAY);
 
-  if (diffDays === 0) {
-    // Today — show time.
-    return new Intl.DateTimeFormat(locale, {
+  if (diffDays === 0 || diffDays === 1) {
+    const time = new Intl.DateTimeFormat(locale, {
       hour: "numeric",
       minute: "2-digit",
     }).format(target);
-  }
-
-  if (diffDays === 1) {
-    return "Yesterday";
+    return `${diffDays === 0 ? "Today" : "Yesterday"} ${time}`;
   }
 
   if (diffDays < 7) {
