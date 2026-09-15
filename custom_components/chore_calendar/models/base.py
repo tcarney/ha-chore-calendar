@@ -10,6 +10,7 @@ from typing import Any
 from custom_components.chore_calendar.const import (
     DEFAULT_GRACE_PERIOD_MINS,
     DEFAULT_PENDING_PERIOD_MINS,
+    PERIOD_WALK_LIMIT,
     ChoreStatus,
     ChoreType,
 )
@@ -195,6 +196,49 @@ class BaseChore(abc.ABC):
         if self.terminal:
             return None
         return self._operative_due_at(now)
+
+    def _occurrence_after(self, due_at: datetime) -> datetime | None:
+        """Return the occurrence that follows *due_at* on this chore's grid.
+
+        Drives the missed-occurrence walk. The default returns None: an
+        interval chore's cycle restarts from its completion and a oneshot
+        has no successor, so neither has a grid to walk. ``ScheduledChore``
+        steps the rrule.
+        """
+        return None
+
+    def compute_missed_occurrences(self, now: datetime) -> list[datetime]:
+        """Return the due times of every uncompleted period whose grace period has lapsed.
+
+        Ascending, starting at the operative anchor (``skipped_until`` when a
+        skip is active, so periods deferred by the skip count as skipped
+        rather than missed) and stepping ``_occurrence_after`` while
+        ``due + grace_period <= now``. Every period after the anchor is
+        uncompleted by construction: the anchor is the oldest unsatisfied
+        period. Empty unless the chore is OVERDUE, so ``bool(result)`` is
+        equivalent to that status. Bounded by ``PERIOD_WALK_LIMIT``.
+        """
+        if self.compute_status(now) is not ChoreStatus.OVERDUE:
+            return []
+        due_at = self._operative_due_at(now)
+        if due_at is None:
+            return []
+        missed = [due_at]
+        for _ in range(PERIOD_WALK_LIMIT - 1):
+            following = self._occurrence_after(due_at)
+            if following is None or following + self.grace_period > now:
+                break
+            missed.append(following)
+            due_at = following
+        return missed
+
+    def compute_upcoming_due(self, now: datetime) -> datetime | None:
+        """Return the first uncompleted occurrence that is not yet missed, or None.
+
+        Only a grid-anchored chore has one. The default (interval, oneshot)
+        returns None. ``ScheduledChore`` overrides this.
+        """
+        return None
 
     @abc.abstractmethod
     def apply_default_skip(self, now: datetime) -> datetime | None:

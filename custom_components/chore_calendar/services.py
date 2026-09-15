@@ -27,6 +27,7 @@ from .const import (
     DOMAIN,
     EVENT_ITEM_DELETED,
     LOGGER,
+    MISSED_OCCURRENCES_LIMIT,
     SERVICE_COMPLETE_ITEM,
     SERVICE_CREATE_ITEM,
     SERVICE_DELETE_ITEM,
@@ -670,6 +671,8 @@ async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
         if status_filter and current_status != status_filter:
             continue
         next_due = chore.compute_next_due(now)
+        upcoming_due = chore.compute_upcoming_due(now)
+        missed = chore.compute_missed_occurrences(now)
         schedule = chore.schedule_description()
         items.append(
             {
@@ -679,6 +682,9 @@ async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
                 "description": chore.description,
                 "status": current_status,
                 "next_due": next_due.isoformat() if next_due else None,
+                "upcoming_due": upcoming_due.isoformat() if upcoming_due else None,
+                "missed_count": len(missed),
+                "missed_occurrences": [due.isoformat() for due in missed[-MISSED_OCCURRENCES_LIMIT:]],
                 "last_completed": chore.last_completed.isoformat() if chore.last_completed else None,
                 "last_completed_by": chore.last_completed_by,
                 "assigned_to": list(chore.assigned_to),

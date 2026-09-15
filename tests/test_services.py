@@ -982,6 +982,10 @@ async def test_get_items(hass, config_entry):
     assert response["items"][0]["status"] in ("completed", "due", "overdue", "pending")
     # description is always present in the response — None when unset.
     assert response["items"][0]["description"] is None
+    # Missed-occurrence fields are always present; a never-completed interval chore has none.
+    assert response["items"][0]["missed_count"] == 0
+    assert response["items"][0]["missed_occurrences"] == []
+    assert response["items"][0]["upcoming_due"] is None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

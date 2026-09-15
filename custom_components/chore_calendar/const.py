@@ -17,6 +17,14 @@ CONF_LIST_NAME = "list_name"
 # Platforms.
 PLATFORMS: list[Platform] = [Platform.CALENDAR, Platform.SENSOR, Platform.TODO]
 
+# Upper bound on grid walks (the "one year of daily occurrences" guard) shared
+# by the scheduled period walk-back and the missed-occurrence walk-forward.
+PERIOD_WALK_LIMIT = 365
+# How many of the most recent missed occurrences are exposed in the sensor's
+# ``missed_occurrences`` list and the ``get_items`` response. The count is
+# uncapped (up to ``PERIOD_WALK_LIMIT``); the list is a detail view.
+MISSED_OCCURRENCES_LIMIT = 10
+
 
 class ChoreStatus(StrEnum):
     """Status of a chore."""
@@ -57,7 +65,10 @@ ATTR_CHORE_TYPE = "chore_type"
 ATTR_UID = "uid"
 ATTR_LAST_COMPLETED = "last_completed"
 ATTR_LAST_COMPLETED_BY = "last_completed_by"
+ATTR_MISSED_COUNT = "missed_count"
+ATTR_MISSED_OCCURRENCES = "missed_occurrences"
 ATTR_NEXT_DUE = "next_due"
+ATTR_UPCOMING_DUE = "upcoming_due"
 ATTR_SCHEDULE = "schedule"
 ATTR_TRIGGER_ENTITY = "trigger_entity"
 
