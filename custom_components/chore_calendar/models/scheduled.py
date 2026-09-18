@@ -8,6 +8,8 @@ from typing import Any, Self
 
 from dateutil import rrule as du_rrule
 
+from custom_components.chore_calendar.const import PERIOD_WALK_LIMIT
+
 from .base import BaseChore
 
 # Day name abbreviations used by the legacy service surface (Monday = 0).
@@ -180,6 +182,29 @@ class ScheduledChore(BaseChore):
         # Cycle satisfied and past due: advance to the next occurrence.
         return self._find_next_active_day(period_due)
 
+    def _occurrence_after(self, due_at: datetime) -> datetime | None:
+        """Step the grid: first occurrence strictly after *due_at*'s day."""
+        return self._find_next_active_day(due_at)
+
+    def compute_upcoming_due(self, now: datetime) -> datetime | None:
+        """Return the first uncompleted occurrence that is not yet missed.
+
+        While OVERDUE this is the grid occurrence after the last missed
+        period: the one currently pending, due, or still ahead. It is what a
+        completion would leave as ``next_due`` when it lands before that
+        period's pending window; a completion inside the window satisfies
+        the upcoming period too and ``next_due`` advances past it. When
+        nothing is missed it equals ``compute_next_due``. None once the
+        series is terminal or the last missed period is the final occurrence
+        of a finite rule.
+        """
+        if self.terminal:
+            return None
+        missed = self.compute_missed_occurrences(now)
+        if not missed:
+            return self.compute_next_due(now)
+        return self._occurrence_after(missed[-1])
+
     def apply_default_skip(self, now: datetime) -> datetime | None:
         """Skip to the next occurrence's period-due strictly after *now*.
 
@@ -256,7 +281,7 @@ class ScheduledChore(BaseChore):
             # The completion anchors which period is "current" — only advance
             # past periods that have been satisfied.
             period = candidate
-            for _ in range(365):
+            for _ in range(PERIOD_WALK_LIMIT):
                 prev = self._prev_occurrence(period, inclusive=False)
                 if prev >= period:
                     # Clamped at the series start (finite rule) — nothing

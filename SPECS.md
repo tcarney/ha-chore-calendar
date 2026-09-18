@@ -30,7 +30,7 @@ All events are point-in-time markers. A span would render a long `grace_period` 
 
 ### Built-in Trigger Handling
 
-When `trigger_entity` (a `tag.*` entity) is provided, its tag UUID is resolved and stored as `trigger_tag_id` on the chore model. The integration listens for `tag_scanned` events and matches by `tag_id`. A scan completes every matching chore whose status is not already `completed`. For shared triggers, each chore is evaluated independently. Typically only the chore whose cycle is currently active is in a non-`completed` status.
+When `trigger_entity` (a `tag.*` entity) is provided, its tag UUID is resolved and stored as `trigger_tag_id` on the chore model. The integration listens for `tag_scanned` events and matches by `tag_id`. The gate is per type: an interval chore is completed on every scan unless `terminal`, since its clock derives from the last completion; a scheduled or oneshot chore is completed only when its status is not `completed`. A scan within `TAG_SCAN_DEBOUNCE` (one minute) of `last_completed` is a repeat read of the same tap and is dropped, which is what protects interval chores, `completion_count`, and the undo slot now that the status gate no longer applies to them. For shared triggers, each chore is evaluated independently.
 
 On creation, the tag entity's last-scanned timestamp seeds `last_completed`, so migration from an existing tag-based system keeps the most recent completion.
 
@@ -80,6 +80,8 @@ completed → pending → due → overdue → (trigger) → completed
 - **Initial state (never completed)**: pins to the first occurrence's `period_due` at or after `created_at`, since the chore could not have been done before it existed. The state machine runs `pending → due → overdue` against that pinned period and stays `overdue` until the first completion. The cycle never silently rolls forward past a missed initial period. Creating a chore after its scheduled time on the same day pins to the next occurrence, so the chore reads `pending` instead of `due`.
 - **Finite rules** (`UNTIL` or `COUNT`): completing or skipping past the final occurrence sets `terminal`. The chore reports `completed` permanently and is swept by `hide_completed_items` unless `persist` is set. Uncompleting, or updating the recurrence, reopens it.
 - **Overdue pinning** (after the first completion): walks back from the candidate period to find the earliest uncompleted period, using `last_completed` as the anchor. An overdue chore stays pinned to the uncompleted period. `next_due` does not advance until the chore is completed.
+- **Missed occurrences** (`compute_missed_occurrences`): the uncompleted periods whose `overdue_at` has passed, ascending from the operative anchor and stepping the grid while `period_due + grace_period <= now`. Every period after the anchor is uncompleted by construction, since the anchor is the oldest unsatisfied one. The list is empty unless the status is `overdue`, so a non-empty list and the `overdue` status are equivalent. The walk shares the 365-step guard (`PERIOD_WALK_LIMIT`) with the pinning walk-back. Interval and oneshot chores have no grid to step, so their list is the single operative due while overdue.
+- **Upcoming due** (`compute_upcoming_due`, scheduled only): the grid occurrence after the last missed period, or `compute_next_due` when nothing is missed. It is the period currently pending, due, or still ahead. A completion before its pending window leaves `next_due` there. A completion inside the window satisfies it too and `next_due` advances past it. `None` when the series is terminal or the last missed period is the final occurrence of a finite rule. The sensor exposes `missed_count`, `missed_occurrences` (the ten most recent, `MISSED_OCCURRENCES_LIMIT`, kept out of the recorder), and `upcoming_due`. `get_items` carries the same three fields.
 
 **Interval Chores**
 
@@ -128,10 +130,11 @@ A parallel `previous_skipped_until` slot holds any `skipped_until` value that a 
 - **No new status.** A skipped chore reports `completed` while `now < pending_at` (scheduled, or oneshot with explicit `until`) or `now < skipped_until` (interval). Past that threshold it transitions through `pending`, `due`, and `overdue` against the skipped anchor.
 - **Unconditional override.** While set, `skipped_until` holds in both directions (an earlier value is honored) and does not lapse when the natural cadence catches up. It is released only by a completion (`apply_completion`), an explicit clear (todo due date cleared), or a schedule change via `update_item`. The override rescheduled the old occurrence, so a recurrence or `due_datetime` change resets it. This keeps `compute_next_due` pinned to `skipped_until` after the chore goes overdue, so consumers such as the card's "overdue by" reading measure from `skipped_until + grace_period` instead of a stale natural anchor. The natural anchor cannot overtake an override on its own. Scheduled pins to the oldest uncompleted period, and interval and oneshot anchors are fixed until completion, so there is no fallthrough case.
 - **Defaults when `until` is omitted**, via `apply_default_skip`:
-  - *Scheduled*: the next occurrence's period-due strictly after now. Walks forward past the pinned overdue period so the skip cannot land in the past.
+  - *Scheduled*: the next occurrence's period-due strictly after now. Walks forward past the pinned overdue period so the skip cannot land in the past. Skipping while overdue therefore discards the missed run, the same as completing does.
+- **Missed occurrences start at `skipped_until`.** Periods between the natural anchor and the skip target were deferred, so they count as skipped rather than missed. Once the skip target's grace period lapses, the missed walk runs from `skipped_until` along the natural grid after it.
   - *Interval*: `now + interval`, season-filtered.
   - *Oneshot*: clears `due_datetime`.
-- **`complete_item` clears the skip** by default. `keep_skip: true` maps to `apply_completion(clear_skip=False)`. The cleared value is saved to `previous_skipped_until` and restored by `uncomplete_item`.
+- **Completion resolves the skip from the completion time.** `apply_completion` keeps `skipped_until` only when it is later than the natural next due computed with the override lifted (`_skip_outlives_completion`); otherwise the skip clears. A terminal completion never keeps it. For a scheduled chore this means an early completion (before the skipped occurrence's pending window) leaves the deferral in place, while an in-window completion satisfies the occurrence and clears it. Keeping the skip after an in-window completion would pin the chore at `skipped_until` as `completed` forever, because `last_completed >= pending_at` holds against the override, so the caller cannot choose. The pre-completion value is always saved to `previous_skipped_until` and restored by `uncomplete_item`. The `complete_item` field `keep_skip` is a deprecated no-op that logs a warning; it is removed in 1.0.0.
 - **Events**: the resulting transition fires `chore_calendar_status_changed` with `source=skip`. A skip whose transition is `completed → completed` fires nothing.
 - **Scope**: per chore only. List-level skip is deferred.
 
@@ -144,7 +147,7 @@ The todo entity advertises `CREATE_TODO_ITEM | UPDATE_TODO_ITEM | SET_DESCRIPTIO
 - **`due_datetime`** reschedules the current occurrence, never the series. Schedule edits stay in `chore_calendar.update_item`.
   - *Oneshot*: writes `due_datetime` directly, since the occurrence is the series. `null` makes the chore unscheduled. Setting a due on a terminal-completed oneshot reopens it, matching `update_item` reschedule semantics.
   - *Scheduled and interval*: sets the `skipped_until` override. `null` releases an active override (the "undo skip" path). With no override active the clear is rejected, because the due derives from the schedule and would silently snap back in the UI. Due edits on a terminal (`until` or `count` exhausted) series are rejected.
-  - A due edit submitted together with a completion is applied with `keep_skip` semantics, so "done, and next one at X" survives the completion's skip clearing.
+  - A due edit submitted together with a completion is applied after it for recurring chores, so "done, and next one at X" holds regardless of how the completion resolved the prior skip. For a oneshot the due is written first, because a due edit after the terminal completion would reopen it.
 - **Skip visibility.** A skip-deferred chore reads `completed` (dormant) but its todo item carries `due = skipped_until`. "Deferred until X" is what the row means, and exposing the date is what makes the skip movable and clearable from the native card. A genuinely done item carries no due.
 - **`SET_DUE_DATE_ON_ITEM` (date only) stays off.** Every reported due is a datetime. Accepting a bare date would mean inventing a time of day.
 - **`todo.add_item` creates a oneshot chore.** The todo surface is quick capture, and a one-off is the only chore type with 1:1 todo semantics (summary, optional due, and description carry straight over). Nobody expects HA's add dialog to configure recurrence, and native `local_todo` cannot either. `persist` defaults to false, so a todo-created oneshot is swept by `hide_completed_items` after completion and lives entirely within todo semantics. Creation persists and announces through the same helper as `create_item` (`async_register_chore`), so `chore_calendar_item_created` fires with the identical payload, carrying the list's calendar entity as `entity_id`. Recurring chores keep their doorway in `chore_calendar.create_item` and the card.
@@ -304,7 +307,7 @@ Chores from all configured lists are merged into a single timeline, sorted by ur
   - Overdue: "2 hours ago", "1 day ago" (via `Intl.RelativeTimeFormat`)
   - Due: "now"
   - Pending: "in 4 hours", "in 2 days"
-  - Completed: time if today ("8:15 AM"), "Yesterday", or date ("Mar 28")
+  - Completed: nothing (the row already carries the check glyph)
 - **Completed rows**: reduced opacity (0.6).
 
 ### Section Headers
@@ -348,6 +351,9 @@ interface ChoreItem {
   chore_type: 'scheduled' | 'interval' | 'oneshot';
   status: 'completed' | 'pending' | 'due' | 'overdue';
   next_due: string | null;       // ISO 8601
+  upcoming_due: string | null;   // ISO 8601; scheduled only
+  missed_count: number;
+  missed_occurrences: string[];  // ISO 8601, ten most recent, ascending
   last_completed: string | null; // ISO 8601
   last_completed_by: string | null;
   assigned_to: string[];
@@ -371,15 +377,20 @@ A theme name such as `"red"` maps to `var(--red-color)` and adapts to light and 
 
 ### Detail Dialog
 
-Each row has an MDI icon and a value, with no labels or dividers. Rows render only when the item has data for that field.
+The dialog leads with what is happening now and keeps the descriptive metadata muted beneath it, so an overdue chore with missed context reads as one status block rather than a stack of equal rows.
 
-| Row            | Icon                                   | Shows                                                |
-|----------------|----------------------------------------|------------------------------------------------------|
-| **List**       | `<ha-state-icon>` from calendar entity | Calendar entity friendly name, always first          |
-| **Schedule**   | `mdi:calendar-clock`                   | Human-readable schedule description                  |
-| **Assigned**   | `mdi:account` / `mdi:account-multiple` | Resolved person names, comma-separated               |
-| **Trigger**    | `mdi:nfc-tap`                          | Resolved trigger entity name                         |
-| **Last done**  | `mdi:check-circle-outline`             | Formatted completion time + "by {person}" if present |
-| **Description**| none                                   | The chore's free-text description                    |
+- **Header**: the chore name only, matching other HA dialogs. The body's side padding is 20px so the row icons line up with the header's close button.
+- **Status block**: the status glyph plus the row's time text ("Overdue by 2 days", "Due", "Due in 3 days"), in the status color. A completed chore shows "Done {time}" here instead, followed by the completer's avatar. Context lines beneath, in secondary text and chronological order: "Last done: {time}" with the completer's avatar (omitted while `completed`, since the headline carries it); for overdue chores, "{missed_count} missed: {dates}" (leading ellipsis when the count exceeds the list; omitted for a single missed period, which the "Overdue by" headline already measures more precisely than a date) and `upcoming_due` labeled by its own window state: "Upcoming" before `pending_at`, "Pending" inside the pending window, "Due" past the due time (computed client-side from `pending_period_mins`).
+- **Metadata rows**: MDI icon plus value, secondary color, no labels. Rendered only when the item has data for that field. A row can carry context lines in the same style as the status block, indented to the text column.
+
+| Row            | Icon                                   | Shows                                                                 |
+|----------------|----------------------------------------|-----------------------------------------------------------------------|
+| **List**       | `<ha-state-icon>` from calendar entity | Calendar entity friendly name, always first                           |
+| **Schedule**   | `mdi:calendar-clock`                   | Human-readable schedule description, followed inline by the assignee avatars (the same `<chore-assignees>` element the row uses). Context line "Tag: {name}" when a trigger tag is configured |
+| **Description**| none                                   | The chore's free-text description, primary color                      |
+
+Completion times read "Today 8:15 AM", "Yesterday 7:14 PM", a weekday within the last week, or a short date ("Mar 28").
+
+**Parts** for `card_mod` (`chore-detail-dialog::part(...)`): `title`, `list`, `assignees`, `content`, `status` (plus `status-{status}`), `status-text`, `missed`, `upcoming`, `meta`, `schedule`, `trigger`, `last-completed`, `completed-by`, `description`, `footer`.
 
 The footer has an "Edit" button (hidden by `hide_edit_button`). Non-completed chores also get "Skip" (plain, left) and "Complete" (primary, right). Completed chores get "Uncomplete" when `allow_uncomplete` is enabled. Holding "Skip" or "Complete" opens a secondary dialog exposing the service's optional fields.

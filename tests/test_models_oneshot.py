@@ -424,10 +424,23 @@ class TestExplicitSkip:
         assert chore.compute_status(skipped) == ChoreStatus.DUE
         assert chore.compute_next_due(due) == skipped
 
+    # ---------------------------------------------------------------------------
+    # Storage round-trip
+    # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Storage round-trip
-# ---------------------------------------------------------------------------
+    def test_completion_always_clears_skip(self):
+        """A oneshot completion is terminal, so an explicit skip never survives it."""
+        chore = _make_oneshot(due_datetime=datetime(2026, 4, 1, 12, 0, tzinfo=TZ))
+        skipped = datetime(2026, 4, 10, 12, 0, tzinfo=TZ)
+        chore.skipped_until = skipped
+
+        chore.apply_completion(datetime(2026, 3, 30, 12, 0, tzinfo=TZ), None)
+
+        assert chore.terminal is True
+        assert chore.skipped_until is None
+        assert chore.previous_skipped_until == skipped
+        chore.revert_completion()
+        assert chore.skipped_until == skipped
 
 
 class TestStorageRoundTrip:

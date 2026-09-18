@@ -192,6 +192,11 @@ export function haDateTimeToIso(value: unknown): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
+/** Local midnight of *date*, as epoch milliseconds. */
+function startOfLocalDay(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
 /** Format a completed-at timestamp for display. */
 export function formatCompletedTime(
   isoString: string,
@@ -199,18 +204,16 @@ export function formatCompletedTime(
   locale: string,
 ): string {
   const target = new Date(isoString);
-  const diffDays = Math.floor((now.getTime() - target.getTime()) / DAY);
+  // Calendar days in local time, not 24-hour windows: 7:14 PM yesterday is
+  // "Yesterday" at 7:02 PM today. Rounding absorbs DST-shortened days.
+  const diffDays = Math.round((startOfLocalDay(now) - startOfLocalDay(target)) / DAY);
 
-  if (diffDays === 0) {
-    // Today — show time.
-    return new Intl.DateTimeFormat(locale, {
+  if (diffDays === 0 || diffDays === 1) {
+    const time = new Intl.DateTimeFormat(locale, {
       hour: "numeric",
       minute: "2-digit",
     }).format(target);
-  }
-
-  if (diffDays === 1) {
-    return "Yesterday";
+    return `${diffDays === 0 ? "Today" : "Yesterday"} ${time}`;
   }
 
   if (diffDays < 7) {
@@ -221,6 +224,32 @@ export function formatCompletedTime(
     month: "short",
     day: "numeric",
   }).format(target);
+}
+
+/** Format a due timestamp as a short calendar date, with the year only when it differs from now. */
+export function formatDueDate(isoString: string, now: Date, locale: string): string {
+  const target = new Date(isoString);
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    ...(target.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
+  }).format(target);
+}
+
+/**
+ * Label for the upcoming occurrence of an overdue chore, from its own window
+ * state: "Upcoming" before the pending window opens, "Pending" inside it,
+ * "Due" once the due time has passed (it cannot be past its grace period,
+ * or it would be in the missed list instead).
+ */
+export function upcomingLabel(item: EnrichedChoreItem, now: Date): string {
+  if (!item.upcoming_due) return "Upcoming";
+  const schedule = typeof item.schedule === "object" && item.schedule !== null ? item.schedule : {};
+  const pendingMins = Number(schedule.pending_period_mins ?? 0);
+  const dueMs = new Date(item.upcoming_due).getTime();
+  if (now.getTime() < dueMs - pendingMins * MINUTE) return "Upcoming";
+  if (now.getTime() < dueMs) return "Pending";
+  return "Due";
 }
 
 /**

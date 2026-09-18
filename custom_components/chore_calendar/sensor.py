@@ -18,11 +18,15 @@ from .const import (
     ATTR_CHORE_TYPE,
     ATTR_LAST_COMPLETED,
     ATTR_LAST_COMPLETED_BY,
+    ATTR_MISSED_COUNT,
+    ATTR_MISSED_OCCURRENCES,
     ATTR_NEXT_DUE,
     ATTR_SCHEDULE,
     ATTR_TRIGGER_ENTITY,
     ATTR_UID,
+    ATTR_UPCOMING_DUE,
     DOMAIN,
+    MISSED_OCCURRENCES_LIMIT,
     ChoreStatus,
 )
 from .coordinator import ChoreCalendarCoordinator
@@ -109,6 +113,9 @@ class ChoreSensorEntity(CoordinatorEntity[ChoreCalendarCoordinator], SensorEntit
     """Sensor entity representing a single chore's status."""
 
     _attr_has_entity_name = True
+    # The missed list is a detail view that can change daily on a neglected
+    # chore; the recorder keeps ``missed_count`` and drops the list.
+    _unrecorded_attributes = frozenset({ATTR_MISSED_OCCURRENCES})
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = [status.value for status in ChoreStatus]
 
@@ -169,6 +176,8 @@ class ChoreSensorEntity(CoordinatorEntity[ChoreCalendarCoordinator], SensorEntit
             return None
         now = dt_util.now()
         next_due = chore.compute_next_due(now)
+        upcoming_due = chore.compute_upcoming_due(now)
+        missed = chore.compute_missed_occurrences(now)
         return {
             ATTR_UID: chore.uid,
             ATTR_CHORE_TYPE: str(chore.chore_type),
@@ -176,6 +185,9 @@ class ChoreSensorEntity(CoordinatorEntity[ChoreCalendarCoordinator], SensorEntit
             ATTR_LAST_COMPLETED: chore.last_completed.isoformat() if chore.last_completed else None,
             ATTR_LAST_COMPLETED_BY: chore.last_completed_by,
             ATTR_NEXT_DUE: next_due.isoformat() if next_due else None,
+            ATTR_UPCOMING_DUE: upcoming_due.isoformat() if upcoming_due else None,
+            ATTR_MISSED_COUNT: len(missed),
+            ATTR_MISSED_OCCURRENCES: [due.isoformat() for due in missed[-MISSED_OCCURRENCES_LIMIT:]],
             ATTR_ASSIGNED_TO: list(chore.assigned_to),
             ATTR_SCHEDULE: chore.schedule_description(),
         }

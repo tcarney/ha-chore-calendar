@@ -10,6 +10,7 @@ from typing import Any
 from custom_components.chore_calendar.const import (
     DEFAULT_GRACE_PERIOD_MINS,
     DEFAULT_PENDING_PERIOD_MINS,
+    PERIOD_WALK_LIMIT,
     ChoreStatus,
     ChoreType,
 )
@@ -196,6 +197,49 @@ class BaseChore(abc.ABC):
             return None
         return self._operative_due_at(now)
 
+    def _occurrence_after(self, due_at: datetime) -> datetime | None:
+        """Return the occurrence that follows *due_at* on this chore's grid.
+
+        Drives the missed-occurrence walk. The default returns None: an
+        interval chore's cycle restarts from its completion and a oneshot
+        has no successor, so neither has a grid to walk. ``ScheduledChore``
+        steps the rrule.
+        """
+        return None
+
+    def compute_missed_occurrences(self, now: datetime) -> list[datetime]:
+        """Return the due times of every uncompleted period whose grace period has lapsed.
+
+        Ascending, starting at the operative anchor (``skipped_until`` when a
+        skip is active, so periods deferred by the skip count as skipped
+        rather than missed) and stepping ``_occurrence_after`` while
+        ``due + grace_period <= now``. Every period after the anchor is
+        uncompleted by construction: the anchor is the oldest unsatisfied
+        period. Empty unless the chore is OVERDUE, so ``bool(result)`` is
+        equivalent to that status. Bounded by ``PERIOD_WALK_LIMIT``.
+        """
+        if self.compute_status(now) is not ChoreStatus.OVERDUE:
+            return []
+        due_at = self._operative_due_at(now)
+        if due_at is None:
+            return []
+        missed = [due_at]
+        for _ in range(PERIOD_WALK_LIMIT - 1):
+            following = self._occurrence_after(due_at)
+            if following is None or following + self.grace_period > now:
+                break
+            missed.append(following)
+            due_at = following
+        return missed
+
+    def compute_upcoming_due(self, now: datetime) -> datetime | None:
+        """Return the first uncompleted occurrence that is not yet missed, or None.
+
+        Only a grid-anchored chore has one. The default (interval, oneshot)
+        returns None. ``ScheduledChore`` overrides this.
+        """
+        return None
+
     @abc.abstractmethod
     def apply_default_skip(self, now: datetime) -> datetime | None:
         """Apply type-specific default-skip behavior; return the operative anchor.
@@ -208,36 +252,55 @@ class BaseChore(abc.ABC):
         ``source=skip``.
         """
 
-    def apply_completion(
-        self,
-        timestamp: datetime,
-        completed_by: str | None,
-        *,
-        clear_skip: bool = True,
-    ) -> None:
+    def apply_completion(self, timestamp: datetime, completed_by: str | None) -> None:
         """Record a completion, saving the prior state to the undo slot.
-
-        When *clear_skip* is True (the default), any active ``skipped_until`` is
-        moved to the undo slot and cleared. Pass False to preserve the skip —
-        e.g. when the user completed early but still wants the deferral to hold.
 
         After the completion is recorded, ``_completion_is_terminal`` decides
         whether it ends the chore's series (every oneshot completion; an
-        ``until`` / ``count``-exhausted recurring completion). The hook runs
-        last so it sees the updated ``completion_count`` and ``last_completed``.
+        ``until`` / ``count``-exhausted recurring completion). It runs before
+        the skip decision so ``_skip_outlives_completion`` sees the final
+        ``terminal`` flag, and after the counters so it sees the updated
+        ``completion_count`` and ``last_completed``.
+
+        An active ``skipped_until`` survives only when it is later than the
+        natural next due this completion produces (see
+        ``_skip_outlives_completion``); otherwise it is cleared so the natural
+        cadence resumes. Either way the pre-completion value is saved to the
+        undo slot, so ``revert_completion`` restores the same skip state.
         """
         self.previous_last_completed = self.last_completed
         self.previous_last_completed_by = self.last_completed_by
         self.last_completed = timestamp
         self.last_completed_by = completed_by
         self.completion_count += 1
-        if clear_skip:
-            self.previous_skipped_until = self.skipped_until
-            self.skipped_until = None
-        else:
-            self.previous_skipped_until = None
         if self._completion_is_terminal(timestamp):
             self.terminal = True
+        self.previous_skipped_until = self.skipped_until
+        if self.skipped_until is not None and not self._skip_outlives_completion(timestamp):
+            self.skipped_until = None
+
+    def _skip_outlives_completion(self, timestamp: datetime) -> bool:
+        """Return True when the active skip is later than the natural next due.
+
+        A skip is a floor on the next occurrence. A completion that lands
+        before the skipped occurrence's window (a scheduled chore completed
+        early, or an interval chore whose reset clock still comes due before
+        ``skipped_until``) is recorded as history but does not lift that
+        floor, so the deferral holds. A completion that satisfies the skipped
+        occurrence, or that pushes the natural next due past it, makes the
+        skip redundant and it is cleared. A terminal completion has no next
+        due, so the skip never survives it. Requires ``skipped_until`` to be
+        set; the natural next due is evaluated with the override lifted.
+        """
+        if self.terminal:
+            return False
+        skipped_until = self.skipped_until
+        self.skipped_until = None
+        try:
+            natural_next = self.compute_next_due(timestamp)
+        finally:
+            self.skipped_until = skipped_until
+        return natural_next is not None and skipped_until is not None and skipped_until > natural_next
 
     def _completion_is_terminal(self, timestamp: datetime) -> bool:
         """Return True when the just-recorded completion ends the series.
