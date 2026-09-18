@@ -380,15 +380,13 @@ A theme name such as `"red"` maps to `var(--red-color)` and adapts to light and 
 The dialog leads with what is happening now and keeps the descriptive metadata muted beneath it, so an overdue chore with missed context reads as one status block rather than a stack of equal rows.
 
 - **Header**: the chore name only, matching other HA dialogs. The body's side padding is 20px so the row icons line up with the header's close button.
-- **Status block**: the status glyph plus the row's time text ("Overdue by 2 days", "Due", "Due in 3 days"), in the status color. A completed chore shows "Done {time}" here instead, followed by the completer's avatar, and the metadata omits the last-completed row so it is not repeated. Overdue chores add two context lines in secondary text: "{missed_count} missed: {dates}" (leading ellipsis when the count exceeds the list) and `upcoming_due` labeled by its own window state: "Upcoming" before `pending_at`, "Pending" inside the pending window, "Due" past the due time (computed client-side from `pending_period_mins`).
-- **Metadata rows**: MDI icon plus value, secondary color, no labels. Rendered only when the item has data for that field.
+- **Status block**: the status glyph plus the row's time text ("Overdue by 2 days", "Due", "Due in 3 days"), in the status color. A completed chore shows "Done {time}" here instead, followed by the completer's avatar. Context lines beneath, in secondary text and chronological order: "Last done: {time}" with the completer's avatar (omitted while `completed`, since the headline carries it); for overdue chores, "{missed_count} missed: {dates}" (leading ellipsis when the count exceeds the list; omitted for a single missed period, which the "Overdue by" headline already measures more precisely than a date) and `upcoming_due` labeled by its own window state: "Upcoming" before `pending_at`, "Pending" inside the pending window, "Due" past the due time (computed client-side from `pending_period_mins`).
+- **Metadata rows**: MDI icon plus value, secondary color, no labels. Rendered only when the item has data for that field. A row can carry context lines in the same style as the status block, indented to the text column.
 
 | Row            | Icon                                   | Shows                                                                 |
 |----------------|----------------------------------------|-----------------------------------------------------------------------|
 | **List**       | `<ha-state-icon>` from calendar entity | Calendar entity friendly name, always first                           |
-| **Schedule**   | `mdi:calendar-clock`                   | Human-readable schedule description, followed inline by the assignee avatars (the same `<chore-assignees>` element the row uses) |
-| **Trigger**    | `mdi:nfc-tap`                          | Resolved trigger entity name                                          |
-| **Last done**  | `mdi:check-circle-outline`             | Completion time, followed inline by the completer's avatar if present; omitted while `completed` |
+| **Schedule**   | `mdi:calendar-clock`                   | Human-readable schedule description, followed inline by the assignee avatars (the same `<chore-assignees>` element the row uses). Context line "Tag: {name}" when a trigger tag is configured |
 | **Description**| none                                   | The chore's free-text description, primary color                      |
 
 Completion times read "Today 8:15 AM", "Yesterday 7:14 PM", a weekday within the last week, or a short date ("Mar 28").

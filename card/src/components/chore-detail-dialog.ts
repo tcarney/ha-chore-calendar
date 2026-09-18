@@ -75,11 +75,23 @@ export class ChoreDetailDialog extends LitElement {
       gap: 12px;
     }
 
-    .status .context {
+    /* Context lines: secondary detail beneath a primary row, in the status
+       block and the metadata alike. */
+    .context {
+      display: flex;
+      align-items: center;
+      gap: 8px;
       margin-top: 4px;
       font-size: 13px;
       font-weight: 400;
       color: var(--secondary-text-color);
+    }
+
+    .context > span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .status.overdue {
@@ -112,6 +124,11 @@ export class ChoreDetailDialog extends LitElement {
       color: var(--secondary-text-color);
       --mdc-icon-size: 20px;
       --ha-icon-display: inline-flex;
+    }
+
+    /* Metadata context lines indent to the text column (20px icon + 12px gap). */
+    .meta .context {
+      margin: -2px 0 6px 32px;
     }
 
     .meta .info {
@@ -244,7 +261,6 @@ export class ChoreDetailDialog extends LitElement {
     if (!item) return nothing;
     const locale = this.hass?.language ?? "en";
     const now = new Date();
-    const isCompleted = item.status === "completed";
 
     return html`
       ${this._renderStatus(item, now, locale)}
@@ -269,19 +285,8 @@ export class ChoreDetailDialog extends LitElement {
 
         ${item.trigger_entity
           ? html`
-              <div class="trigger" part="trigger">
-                <ha-icon icon="mdi:nfc-tap"></ha-icon>
-                <div class="info">${this._resolveEntityName(item.trigger_entity)}</div>
-              </div>
-            `
-          : nothing}
-
-        ${item.last_completed && !isCompleted
-          ? html`
-              <div class="last-completed" part="last-completed">
-                <ha-icon icon="mdi:check-circle-outline"></ha-icon>
-                <div class="info">${formatCompletedTime(item.last_completed, now, locale)}</div>
-                ${this._renderCompletedBy(item)}
+              <div class="context" part="trigger">
+                <span>Tag: ${this._resolveEntityName(item.trigger_entity)}</span>
               </div>
             `
           : nothing}
@@ -295,8 +300,10 @@ export class ChoreDetailDialog extends LitElement {
 
   /** The status line carries the row's time text ("Overdue by 2 days", "Due"),
    *  with a pending countdown spelled out as "Due in 3 days"; a completed chore
-   *  shows its completion instead, so the metadata does not repeat it. Overdue chores add the missed run and the
-   *  upcoming occurrence as context lines. */
+   *  shows its completion instead. The context lines beneath run
+   *  chronologically: the last completion (for chores not currently
+   *  completed), then for overdue chores the missed run and the upcoming
+   *  occurrence. */
   private _renderStatus(item: EnrichedChoreItem, now: Date, locale: string) {
     const isCompleted = item.status === "completed" && !!item.last_completed;
     const timeText = getTimeText(item, now);
@@ -313,13 +320,25 @@ export class ChoreDetailDialog extends LitElement {
             <span>${headline}</span>
             ${isCompleted ? this._renderCompletedBy(item) : nothing}
           </div>
-          ${item.missed_count > 0
-            ? html`<div class="context" part="missed">${this._formatMissed(item, now, locale)}</div>`
+          ${item.last_completed && !isCompleted
+            ? html`
+                <div class="context" part="last-completed">
+                  <span>Last done: ${formatCompletedTime(item.last_completed, now, locale)}</span>
+                  ${this._renderCompletedBy(item)}
+                </div>
+              `
+            : nothing}
+          ${item.missed_count > 1
+            ? html`
+                <div class="context" part="missed">
+                  <span>${this._formatMissed(item, now, locale)}</span>
+                </div>
+              `
             : nothing}
           ${item.missed_count > 0 && item.upcoming_due
             ? html`
                 <div class="context" part="upcoming">
-                  ${upcomingLabel(item, now)}: ${formatDueDate(item.upcoming_due, now, locale)}
+                  <span>${upcomingLabel(item, now)}: ${formatDueDate(item.upcoming_due, now, locale)}</span>
                 </div>
               `
             : nothing}
@@ -329,7 +348,10 @@ export class ChoreDetailDialog extends LitElement {
   }
 
   /** "N missed: d1, d2, …" — the server sends the ten most recent, so a
-   *  larger count gets a leading ellipsis to show the list is truncated. */
+   *  larger count gets a leading ellipsis to show the list is truncated.
+   *  Shown only from two missed: a single missed period is the pinned
+   *  next_due the "Overdue by" headline already measures, with more
+   *  precision than a bare date. */
   private _formatMissed(item: EnrichedChoreItem, now: Date, locale: string): string {
     const dates = item.missed_occurrences.map((iso) => formatDueDate(iso, now, locale));
     const truncated = item.missed_count > dates.length ? "…, " : "";

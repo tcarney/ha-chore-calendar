@@ -523,11 +523,9 @@ hold_action:
 
 Tapping a chore row (default behavior) opens a detail dialog showing:
 
-- The current status ("Overdue by 2 days", "Due", "Due in 3 days", or "Done Today 8:15 AM" with the completer's avatar). Overdue chores add the missed occurrences (count and most recent dates) and the upcoming occurrence, labeled by its own state ("Upcoming", "Pending", or "Due").
+- The current status ("Overdue by 2 days", "Due", "Due in 3 days", or "Done Today 8:15 AM" with the completer's avatar). Beneath it: the last completion with the completer's avatar (when the chore is not currently completed), and for overdue chores the missed occurrences (count and most recent dates, from two missed onward) and the upcoming occurrence, labeled by its own state ("Upcoming", "Pending", or "Due").
 - List name (with entity icon)
-- Schedule description (e.g. "Last Friday at 9:00 AM"), followed by the assignee avatars
-- Trigger tag (if configured)
-- Last completed time, with the completer's avatar (if set, and the chore is not currently completed)
+- Schedule description (e.g. "Last Friday at 9:00 AM"), followed by the assignee avatars, with the trigger tag beneath it (if configured)
 - The chore's free-text description (if set)
 
 An "Edit" button in the dialog footer opens the create/edit dialog for the chore (hidden when `hide_edit_button` is set). Non-completed chores also get "Skip" and "Complete" buttons, which call [`skip_item`](#skip-a-chore) and [`complete_item`](#complete-a-chore) with no options. Completed chores get an "Uncomplete" button when `allow_uncomplete` is enabled.
