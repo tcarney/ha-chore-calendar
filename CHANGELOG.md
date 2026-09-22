@@ -2,6 +2,13 @@
 
 # Changelog
 
+## [0.13.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.12.2...v0.13.0) (2026-09-22)
+
+
+### Features
+
+* missed occurrences, completion-time skip resolution, dialog status block ([#44](https://github.com/tcarney/ha-chore-calendar/issues/44)) ([e1c438f](https://github.com/tcarney/ha-chore-calendar/commit/e1c438fb6223a4e98c5ef345c60a4c018497a267))
+
 ## [0.12.2](https://github.com/tcarney/ha-chore-calendar/compare/v0.12.1...v0.12.2) (2026-09-13)
 
 
