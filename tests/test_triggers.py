@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from custom_components.chore_calendar.const import ChoreType
+from custom_components.chore_calendar.const import ChoreStatus, ChoreType
 from custom_components.chore_calendar.coordinator import ChoreCalendarCoordinator
 from custom_components.chore_calendar.models import IntervalChore, ScheduledChore
 from custom_components.chore_calendar.services import async_uncomplete_chore
@@ -178,8 +178,12 @@ async def test_tag_scan_skips_completed_chore(hass):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_tag_scan_skips_interval_in_completed_phase(hass):
-    """A previously-completed interval chore well before pending_at is not auto-completed."""
+async def test_tag_scan_completes_interval_before_pending_window(hass):
+    """An interval chore is completed by a scan even before its pending window opens.
+
+    The interval clock derives from the last completion, so an early scan is
+    a real completion that resets it.
+    """
     store, coordinator = await _setup(hass)
 
     chore = IntervalChore(
@@ -204,9 +208,191 @@ async def test_tag_scan_skips_interval_in_completed_phase(hass):
         hass.bus.async_fire(EVENT_TAG_SCANNED, {"tag_id": TAG_UUID})
         await hass.async_block_till_done()
 
-    # last_completed should be unchanged — the cycle hasn't entered its pending window.
     updated = store.get_chore("water_filter")
-    assert updated.last_completed == datetime(2026, 3, 1, 12, 0, tzinfo=TZ)
+    assert updated.last_completed == frozen
+    assert updated.compute_next_due(frozen) == frozen + timedelta(days=30)
+
+    unsub()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_tag_scan_interval_keeps_later_skip(hass):
+    """An early scan on a skipped interval chore records the completion but the skip holds."""
+    store, coordinator = await _setup(hass)
+
+    skipped = datetime(2026, 4, 10, 12, 0, tzinfo=TZ)
+    chore = IntervalChore(
+        uid="water_filter",
+        chore_name="Water Filter",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=3,
+        trigger_tag_id=TAG_UUID,
+        last_completed=datetime(2026, 3, 27, 12, 0, tzinfo=TZ),
+        skipped_until=skipped,
+    )
+    await store.async_create_chore(chore)
+    await coordinator.async_refresh()
+
+    unsub = async_setup_tag_listener(hass, store, coordinator)
+
+    frozen = datetime(2026, 4, 3, 12, 0, tzinfo=TZ)  # Reset clock lands Apr 6, before the skip.
+    with patch("homeassistant.util.dt.now", return_value=frozen):
+        hass.bus.async_fire(EVENT_TAG_SCANNED, {"tag_id": TAG_UUID})
+        await hass.async_block_till_done()
+
+    updated = store.get_chore("water_filter")
+    assert updated.last_completed == frozen
+    assert updated.skipped_until == skipped
+
+    unsub()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_tag_scan_ignores_terminal_interval(hass):
+    """A count-exhausted interval chore has nothing left to complete."""
+    store, coordinator = await _setup(hass)
+
+    completed = datetime(2026, 3, 1, 12, 0, tzinfo=TZ)
+    chore = IntervalChore(
+        uid="water_filter",
+        chore_name="Water Filter",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=3,
+        count=1,
+        completion_count=1,
+        terminal=True,
+        trigger_tag_id=TAG_UUID,
+        last_completed=completed,
+    )
+    await store.async_create_chore(chore)
+    await coordinator.async_refresh()
+
+    unsub = async_setup_tag_listener(hass, store, coordinator)
+
+    frozen = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
+    with patch("homeassistant.util.dt.now", return_value=frozen):
+        hass.bus.async_fire(EVENT_TAG_SCANNED, {"tag_id": TAG_UUID})
+        await hass.async_block_till_done()
+
+    updated = store.get_chore("water_filter")
+    assert updated.last_completed == completed
+    assert updated.completion_count == 1
+
+    unsub()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_tag_scan_debounces_repeat_read(hass):
+    """A second scan within a minute of the last completion is a repeat read and is dropped."""
+    store, coordinator = await _setup(hass)
+
+    chore = IntervalChore(
+        uid="water_filter",
+        chore_name="Water Filter",
+        chore_type=ChoreType.INTERVAL,
+        freq="daily",
+        interval=3,
+        trigger_tag_id=TAG_UUID,
+        last_completed=datetime(2026, 3, 1, 12, 0, tzinfo=TZ),
+    )
+    await store.async_create_chore(chore)
+    await coordinator.async_refresh()
+
+    unsub = async_setup_tag_listener(hass, store, coordinator)
+
+    first = datetime(2026, 3, 30, 12, 0, tzinfo=TZ)
+    with patch("homeassistant.util.dt.now", return_value=first):
+        hass.bus.async_fire(EVENT_TAG_SCANNED, {"tag_id": TAG_UUID})
+        await hass.async_block_till_done()
+    with patch("homeassistant.util.dt.now", return_value=first + timedelta(seconds=20)):
+        hass.bus.async_fire(EVENT_TAG_SCANNED, {"tag_id": TAG_UUID})
+        await hass.async_block_till_done()
+
+    updated = store.get_chore("water_filter")
+    assert updated.last_completed == first
+    assert updated.completion_count == 1
+    # The undo slot still points at the pre-scan completion.
+    assert updated.previous_last_completed == datetime(2026, 3, 1, 12, 0, tzinfo=TZ)
+
+    # Past the debounce window the next scan counts again.
+    with patch("homeassistant.util.dt.now", return_value=first + timedelta(minutes=1)):
+        hass.bus.async_fire(EVENT_TAG_SCANNED, {"tag_id": TAG_UUID})
+        await hass.async_block_till_done()
+
+    assert store.get_chore("water_filter").completion_count == 2
+
+    unsub()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_tag_scan_ignores_scheduled_before_pending_window(hass):
+    """A scheduled chore with a prior completion is dormant before its window and ignores scans."""
+    store, coordinator = await _setup(hass)
+
+    completed_time = datetime(2026, 3, 29, 8, 30, tzinfo=TZ)
+    chore = ScheduledChore(
+        uid="med",
+        chore_name="Medicine",
+        chore_type=ChoreType.SCHEDULED,
+        time=time(8, 0),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        trigger_tag_id=TAG_UUID,
+        last_completed=completed_time,
+    )
+    await store.async_create_chore(chore)
+    await coordinator.async_refresh()
+
+    unsub = async_setup_tag_listener(hass, store, coordinator)
+
+    # Mar 29 20:00 — before the Mar 30 05:00 pending window.
+    frozen = datetime(2026, 3, 29, 20, 0, tzinfo=TZ)
+    with patch("homeassistant.util.dt.now", return_value=frozen):
+        hass.bus.async_fire(EVENT_TAG_SCANNED, {"tag_id": TAG_UUID})
+        await hass.async_block_till_done()
+
+    assert store.get_chore("med").last_completed == completed_time
+
+    unsub()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_tag_scan_never_completed_scheduled_records_but_first_occurrence_stands(hass):
+    """A never-completed scheduled chore reads pending, so an early scan records a completion.
+
+    The completion lands before the first occurrence's window, so it does not
+    satisfy that occurrence: the chore still comes due on schedule.
+    """
+    store, coordinator = await _setup(hass)
+
+    chore = ScheduledChore(
+        uid="trash",
+        chore_name="Trash",
+        chore_type=ChoreType.SCHEDULED,
+        time=time(8, 0),
+        active_days=["mon"],
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        trigger_tag_id=TAG_UUID,
+        created_at=datetime(2026, 3, 25, 12, 0, tzinfo=TZ),  # Wednesday; first period Mon Mar 30.
+    )
+    await store.async_create_chore(chore)
+    await coordinator.async_refresh()
+
+    unsub = async_setup_tag_listener(hass, store, coordinator)
+
+    scan = datetime(2026, 3, 26, 12, 0, tzinfo=TZ)
+    with patch("homeassistant.util.dt.now", return_value=scan):
+        hass.bus.async_fire(EVENT_TAG_SCANNED, {"tag_id": TAG_UUID})
+        await hass.async_block_till_done()
+
+    updated = store.get_chore("trash")
+    assert updated.last_completed == scan
+    assert updated.compute_status(scan) == ChoreStatus.COMPLETED
+    assert updated.compute_status(datetime(2026, 3, 30, 6, 0, tzinfo=TZ)) == ChoreStatus.PENDING
+    assert updated.compute_next_due(scan) == datetime(2026, 3, 30, 8, 0, tzinfo=TZ)
 
     unsub()
 

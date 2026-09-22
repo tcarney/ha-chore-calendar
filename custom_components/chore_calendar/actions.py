@@ -66,7 +66,6 @@ async def async_complete_chore(
     *,
     completed_at: datetime | None = None,
     completed_by: str | None = None,
-    keep_skip: bool = False,
     source: ChoreEventSource = ChoreEventSource.COMPLETE,
 ) -> None:
     """Record a completion for *uid* and refresh the coordinator.
@@ -74,8 +73,10 @@ async def async_complete_chore(
     Shared by the ``complete_item`` service handler, the todo entity's
     ``needs_action`` → ``completed`` transition, and the tag-scan listener.
     The tag-scan path passes ``source=TAG`` so the resulting status_changed
-    event distinguishes auto-completion from explicit user action. Raises
-    ServiceValidationError if the chore is missing.
+    event distinguishes auto-completion from explicit user action. Whether an
+    active skip survives is decided by ``apply_completion`` from the
+    completion time alone. Raises ServiceValidationError if the chore is
+    missing.
     """
     existing = store.get_chore(uid)
     if existing is None:
@@ -89,7 +90,7 @@ async def async_complete_chore(
     # naive anchor derived from it against a tz-aware `now` and raise.
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
-    existing.apply_completion(timestamp, completed_by, clear_skip=not keep_skip)
+    existing.apply_completion(timestamp, completed_by)
     coordinator.mark_source(uid, source)
     await store.async_update_chore(existing)
     await coordinator.async_refresh()

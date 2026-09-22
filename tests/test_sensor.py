@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.chore_calendar.const import CONF_LIST_NAME, DOMAIN, ChoreType
-from custom_components.chore_calendar.models import IntervalChore
+from custom_components.chore_calendar.models import IntervalChore, ScheduledChore
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import entity_registry as er
 
@@ -134,3 +134,43 @@ async def test_sensor_attributes(hass, config_entry):
     assert state.attributes["chore_type"] == "interval"
     assert state.attributes["trigger_entity"] == "tag.dishes"
     assert state.attributes["assigned_to"] == ["person.alice"]
+    assert state.attributes["missed_count"] == 0
+    assert state.attributes["missed_occurrences"] == []
+    assert state.attributes["upcoming_due"] is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_sensor_missed_occurrence_attributes(hass, config_entry):
+    """An overdue scheduled chore exposes its missed run, capped list, and upcoming due."""
+    await _setup_entry(hass, config_entry)
+    runtime_data = config_entry.runtime_data
+
+    chore = ScheduledChore(
+        uid="fee",
+        chore_name="School Fee",
+        chore_type=ChoreType.SCHEDULED,
+        time=time(8, 0),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        # Thirteen daily periods lapsed (Mar 18 through Mar 30) by FROZEN_NOW (Mar 30 12:00).
+        last_completed=datetime(2026, 3, 17, 8, 30, tzinfo=TZ),
+    )
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await runtime_data.store.async_create_chore(chore)
+        await runtime_data.coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id("sensor", DOMAIN, f"{config_entry.entry_id}_fee")
+    assert entity_id is not None
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert state.state == "overdue"
+    assert state.attributes["next_due"] == "2026-03-18T08:00:00-05:00"
+    assert state.attributes["missed_count"] == 13
+    # The list keeps the ten most recent, oldest first.
+    listed = state.attributes["missed_occurrences"]
+    assert len(listed) == 10
+    assert listed[0] == "2026-03-21T08:00:00-05:00"
+    assert listed[-1] == "2026-03-30T08:00:00-05:00"
+    assert state.attributes["upcoming_due"] == "2026-03-31T08:00:00-05:00"

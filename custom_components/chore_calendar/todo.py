@@ -229,10 +229,12 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
 
         Ordering: rename/description mutate the chore in place first (they
         are persisted by whichever save runs below). A status transition
-        routes through the shared complete/uncomplete helpers; a due edit
-        submitted together with a completion is applied first and survives
-        it (``keep_skip``), while one submitted with an uncomplete is applied
-        after the revert so it wins over the restored pre-completion state.
+        routes through the shared complete/uncomplete helpers. A due edit
+        submitted together with a completion or an uncomplete is applied
+        after it, so the explicit due wins over whatever skip state the
+        completion resolved or the revert restored. The one exception is a
+        oneshot completed with a due: its due is written first, because the
+        completion is terminal and a due edit afterwards would reopen it.
         """
         if item.uid is None:
             msg = "Cannot update todo item without a uid"
@@ -272,9 +274,13 @@ class ChoreCalendarTodoEntity(CoordinatorEntity[ChoreCalendarCoordinator], TodoL
         uncompleting = item.status == TodoItemStatus.NEEDS_ACTION and current_status == ChoreStatus.COMPLETED
 
         if completing:
-            if due_changed:
+            if due_changed and isinstance(chore, OneshotChore):
                 _apply_due_edit(chore, new_due)
-            await async_complete_chore(store, self.coordinator, item.uid, keep_skip=due_changed)
+            await async_complete_chore(store, self.coordinator, item.uid)
+            if due_changed and not isinstance(chore, OneshotChore):
+                _apply_due_edit(chore, new_due)
+                await store.async_update_chore(chore)
+                await self.coordinator.async_refresh()
             return
 
         if uncompleting:
