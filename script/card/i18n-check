@@ -1,0 +1,115 @@
+#!/bin/bash
+
+# script/card/i18n-check: Check card translation dictionaries for parity.
+#
+# Treats card/src/localize/languages/en.json as the source of truth and verifies
+# every other language file has exactly the same key set, the same {placeholder}
+# tokens per key, and an _other partner for every _one plural key. Also checks
+# that every dictionary is imported and registered in card/src/localize/localize.ts
+# (a file that is never registered would pass parity but never load). Exits
+# non-zero on any drift.
+#
+# Usage:
+#   ./script/card/i18n-check
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/../.."
+
+# shellcheck source=script/.lib/output.sh
+source "$SCRIPT_DIR/../.lib/output.sh"
+
+log_header "Checking card translation parity"
+
+node - "card/src/localize/languages" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const dir = process.argv[2];
+const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+
+/** Flatten a nested dict to { "a.b.c": "value" }. */
+function flatten(obj, prefix = "", out = {}) {
+  for (const [key, value] of Object.entries(obj)) {
+    const full = prefix ? `${prefix}.${key}` : key;
+    if (value && typeof value === "object") flatten(value, full, out);
+    else out[full] = value;
+  }
+  return out;
+}
+
+/** The set of {placeholder} tokens in a string. */
+function tokens(str) {
+  return new Set((String(str).match(/\{(\w+)\}/g) || []).sort());
+}
+
+const base = flatten(JSON.parse(fs.readFileSync(path.join(dir, "en.json"), "utf8")));
+const baseKeys = new Set(Object.keys(base));
+
+const problems = [];
+
+// Every _one plural key needs an _other partner (in en, the reference).
+for (const key of baseKeys) {
+  if (key.endsWith("_one") && !baseKeys.has(key.replace(/_one$/, "_other"))) {
+    problems.push(`en.json: ${key} has no _other partner`);
+  }
+}
+
+for (const file of files) {
+  if (file === "en.json") continue;
+  const lang = flatten(JSON.parse(fs.readFileSync(path.join(dir, file), "utf8")));
+  const langKeys = new Set(Object.keys(lang));
+
+  for (const key of baseKeys) {
+    if (!langKeys.has(key)) problems.push(`${file}: missing key ${key}`);
+    else {
+      const a = tokens(base[key]);
+      const b = tokens(lang[key]);
+      if (a.size !== b.size || [...a].some((t) => !b.has(t))) {
+        problems.push(`${file}: ${key} placeholders ${[...b].join(",") || "∅"} != en ${[...a].join(",") || "∅"}`);
+      }
+    }
+  }
+  for (const key of langKeys) {
+    if (!baseKeys.has(key)) problems.push(`${file}: extra key ${key} (not in en.json)`);
+  }
+}
+
+// Every dictionary file must be imported and registered in localize.ts (and
+// nothing registered without a file), or it would pass parity yet never load.
+const registryFile = path.join(dir, "..", "localize.ts");
+const registrySrc = fs.readFileSync(registryFile, "utf8");
+const imports = {}; // identifier → language code (from the file name)
+for (const m of registrySrc.matchAll(/import\s+(\w+)\s+from\s+["']\.\/languages\/([\w-]+)\.json["']/g)) {
+  imports[m[1]] = m[2];
+}
+const block = /const\s+LANGUAGES[^=]*=\s*\{([^}]*)\}/.exec(registrySrc);
+const registered = new Map(); // language code key → identifier
+if (!block) {
+  problems.push(`${registryFile}: LANGUAGES registry not found`);
+} else {
+  for (const raw of block[1].split(",").map((s) => s.trim()).filter(Boolean)) {
+    const pair = /^["']?([\w-]+)["']?\s*:\s*(\w+)$/.exec(raw);
+    if (pair) registered.set(pair[1], pair[2]);
+    else registered.set(raw, raw); // shorthand `{ en }`
+  }
+}
+const codes = files.map((f) => f.replace(/\.json$/, ""));
+for (const code of codes) {
+  const ident = registered.get(code);
+  if (!ident) problems.push(`${code}.json: not registered in LANGUAGES (${registryFile})`);
+  else if (imports[ident] !== code) problems.push(`${code}.json: LANGUAGES["${code}"] does not map to an import of ./languages/${code}.json`);
+}
+for (const code of registered.keys()) {
+  if (!codes.includes(code)) problems.push(`LANGUAGES registers "${code}" but languages/${code}.json does not exist`);
+}
+
+if (problems.length) {
+  console.error(problems.join("\n"));
+  process.exit(1);
+}
+console.log(`OK — ${files.length} language file(s), ${baseKeys.size} keys each, all registered.`);
+NODE
+
+log_success "Card translations are in sync"

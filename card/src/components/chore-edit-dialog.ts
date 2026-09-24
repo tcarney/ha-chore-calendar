@@ -1,7 +1,8 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { safeDefine } from "../define";
-import { DAY_FULL, formatHaDateTime, ordinalNumber, parseByday, positionWord } from "../utils";
+import { formatHaDateTime, monthName, ordinalNumber, parseByday, positionWord, weekdayName } from "../utils";
+import { localize } from "../localize/localize";
 import {
   DATETIME_ROW_STYLES,
   PICKER_LOADER_SCHEMA,
@@ -25,67 +26,50 @@ type FormSchema = { name: string; required?: boolean; [key: string]: unknown };
 /** Flat form state, distinct from the service payload built on submit. */
 type FormData = Record<string, unknown>;
 
-const SCHEDULED_FREQS = [
-  { value: "daily", label: "Daily" },
-  { value: "weekly", label: "Weekly" },
-  { value: "monthly", label: "Monthly" },
-  { value: "yearly", label: "Yearly" },
-];
+/** Scheduled frequencies (the interval-only minutely/hourly are excluded). */
+const SCHEDULED_FREQ_VALUES = new Set(["daily", "weekly", "monthly", "yearly"]);
 
-const SCHEDULED_FREQ_VALUES = new Set(SCHEDULED_FREQS.map((f) => f.value));
-
-const INTERVAL_FREQS = [
-  { value: "minutely", label: "Minutely" },
-  { value: "hourly", label: "Hourly" },
-  { value: "daily", label: "Daily" },
-  { value: "weekly", label: "Weekly" },
-  { value: "monthly", label: "Monthly" },
-  { value: "yearly", label: "Yearly" },
-];
+/** Frequency values in dropdown order, per chore type. */
+const SCHEDULED_FREQ_ORDER = ["daily", "weekly", "monthly", "yearly"];
+const INTERVAL_FREQ_ORDER = ["minutely", "hourly", "daily", "weekly", "monthly", "yearly"];
 
 /** Weekday code indexed by JS Date.getDay() (0 = Sunday). */
 const DAY_CODE = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
-const WEEKDAY_OPTIONS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((code) => ({
-  value: code,
-  label: DAY_FULL[code],
-}));
+/** Weekday codes in display order (Mon–Sun) for the weekly toggle. */
+const WEEKDAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
-const MONTH_OPTIONS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-].map((label, i) => ({ value: String(i + 1), label }));
+/** Map an ha-form field name to its ``card.edit.field.*`` translation subkey. */
+const FIELD_KEYS: Record<string, string> = {
+  target_entity: "list",
+  chore_name: "name",
+  description: "description",
+  chore_type: "type",
+  dtstart: "start",
+  byday: "repeat_on",
+  monthly_mode: "repeat_monthly",
+  bymonth: "only_in_months",
+  due_datetime: "due",
+  until: "until",
+  count: "count",
+  persist: "keep",
+  pending_period: "pending_period",
+  grace_period: "grace_period",
+  trigger_entity: "trigger",
+  assigned_to: "assigned_to",
+};
 
-/** Dynamic "Repeat every" units for scheduled chores, mirroring HA's calendar editor. */
-const SCHEDULED_UNITS: Record<string, string> = { daily: "days", weekly: "weeks", monthly: "months" };
+/** Scheduled "Repeat every" unit subkey by frequency (calendar-editor style). */
+const SCHEDULED_UNIT_KEY: Record<string, string> = { daily: "days", weekly: "weeks", monthly: "months" };
 
-/** Dynamic "Repeat after" units for interval chores (all frequencies apply). */
-const INTERVAL_UNITS: Record<string, string> = {
+/** Interval "Repeat after" unit subkey by frequency (all frequencies apply). */
+const INTERVAL_UNIT_KEY: Record<string, string> = {
   minutely: "minutes",
   hourly: "hours",
   daily: "days",
   weekly: "weeks",
   monthly: "months",
   yearly: "years",
-};
-
-const LABELS: Record<string, string> = {
-  target_entity: "List",
-  chore_name: "Name",
-  description: "Description",
-  chore_type: "Type",
-  dtstart: "Start",
-  byday: "Repeat on",
-  monthly_mode: "Repeat monthly",
-  bymonth: "Only in months",
-  due_datetime: "Due",
-  until: "Until (end date)",
-  count: "Or after N times",
-  persist: "Keep when finished",
-  pending_period: "Pending period",
-  grace_period: "Grace period",
-  trigger_entity: "Trigger tag",
-  assigned_to: "Assigned to",
 };
 
 export class ChoreEditDialog extends LitElement {
@@ -213,8 +197,17 @@ export class ChoreEditDialog extends LitElement {
     const dom = date.getDate();
     const setpos = this._monthlySetpos(date);
     return [
-      { value: "monthday", label: `Monthly on the ${ordinalNumber(dom)}` },
-      { value: "weekday", label: `Monthly on the ${positionWord(setpos)} ${DAY_FULL[DAY_CODE[date.getDay()]]}` },
+      {
+        value: "monthday",
+        label: localize(this.hass, "card.edit.monthly_on_day", { ordinal: ordinalNumber(dom, this.hass) }),
+      },
+      {
+        value: "weekday",
+        label: localize(this.hass, "card.edit.monthly_on_weekday", {
+          position: positionWord(setpos, this.hass),
+          weekday: weekdayName(this.hass, DAY_CODE[date.getDay()]),
+        }),
+      },
     ];
   }
 
@@ -277,6 +270,32 @@ export class ChoreEditDialog extends LitElement {
     return { days: Math.floor(n / 1440), hours: Math.floor((n % 1440) / 60), minutes: n % 60, seconds: 0 };
   }
 
+  // -- Localized option builders (rebuilt per render so they track language) --
+
+  private get _scheduledFreqs(): { value: string; label: string }[] {
+    return SCHEDULED_FREQ_ORDER.map((value) => ({ value, label: localize(this.hass, `card.edit.freq.${value}`) }));
+  }
+
+  private get _intervalFreqs(): { value: string; label: string }[] {
+    return INTERVAL_FREQ_ORDER.map((value) => ({ value, label: localize(this.hass, `card.edit.freq.${value}`) }));
+  }
+
+  private get _weekdayOptions(): { value: string; label: string }[] {
+    return WEEKDAY_CODES.map((code) => ({ value: code, label: weekdayName(this.hass, code) }));
+  }
+
+  private get _monthOptions(): { value: string; label: string }[] {
+    return Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: monthName(this.hass, i + 1, "long") }));
+  }
+
+  private _scheduledUnit(freq: string): string {
+    return localize(this.hass, `card.edit.unit.${SCHEDULED_UNIT_KEY[freq] ?? "days"}`);
+  }
+
+  private _intervalUnit(freq: string): string {
+    return localize(this.hass, `card.edit.unit.${INTERVAL_UNIT_KEY[freq] ?? "days"}`);
+  }
+
   /** Fields above the Start row (Start is rendered as a custom row between). */
   private _topSchema(): FormSchema[] {
     const schema: FormSchema[] = [];
@@ -294,9 +313,9 @@ export class ChoreEditDialog extends LitElement {
         select: {
           mode: "dropdown",
           options: [
-            { value: "scheduled", label: "Scheduled" },
-            { value: "interval", label: "Interval" },
-            { value: "oneshot", label: "One-time" },
+            { value: "scheduled", label: localize(this.hass, "card.edit.type.scheduled") },
+            { value: "interval", label: localize(this.hass, "card.edit.type.interval") },
+            { value: "oneshot", label: localize(this.hass, "card.edit.type.oneshot") },
           ],
         },
       },
@@ -329,18 +348,18 @@ export class ChoreEditDialog extends LitElement {
   private _scheduledSchema(): FormSchema[] {
     const freq = String(this._data.frequency ?? "daily");
     const schema: FormSchema[] = [
-      { name: "frequency", required: true, selector: { select: { mode: "dropdown", options: SCHEDULED_FREQS } } },
+      { name: "frequency", required: true, selector: { select: { mode: "dropdown", options: this._scheduledFreqs } } },
     ];
     // Yearly has no options (it recurs on the start date); daily/weekly/monthly
     // carry an interval with a dynamic unit, as the calendar editor does.
     if (freq !== "yearly") {
       schema.push({
         name: "interval",
-        selector: { number: { min: 1, mode: "box", unit_of_measurement: SCHEDULED_UNITS[freq] ?? "days" } },
+        selector: { number: { min: 1, mode: "box", unit_of_measurement: this._scheduledUnit(freq) } },
       });
     }
     if (freq === "weekly") {
-      schema.push({ name: "byday", selector: { select: { multiple: true, mode: "list", options: WEEKDAY_OPTIONS } } });
+      schema.push({ name: "byday", selector: { select: { multiple: true, mode: "list", options: this._weekdayOptions } } });
     }
     if (freq === "monthly") {
       schema.push({ name: "monthly_mode", selector: { select: { mode: "dropdown", options: this._monthlyOptions() } } });
@@ -351,12 +370,12 @@ export class ChoreEditDialog extends LitElement {
   private _intervalSchema(): FormSchema[] {
     const freq = String(this._data.frequency ?? "daily");
     return [
-      { name: "frequency", required: true, selector: { select: { mode: "dropdown", options: INTERVAL_FREQS } } },
+      { name: "frequency", required: true, selector: { select: { mode: "dropdown", options: this._intervalFreqs } } },
       {
         name: "interval",
-        selector: { number: { min: 1, mode: "box", unit_of_measurement: INTERVAL_UNITS[freq] ?? "days" } },
+        selector: { number: { min: 1, mode: "box", unit_of_measurement: this._intervalUnit(freq) } },
       },
-      { name: "bymonth", selector: { select: { multiple: true, mode: "dropdown", options: MONTH_OPTIONS } } },
+      { name: "bymonth", selector: { select: { multiple: true, mode: "dropdown", options: this._monthOptions } } },
     ];
   }
 
@@ -368,7 +387,7 @@ export class ChoreEditDialog extends LitElement {
         <ha-icon-button slot="headerNavigationIcon" data-dialog="close" class="header_button">
           <ha-icon icon="mdi:close"></ha-icon>
         </ha-icon-button>
-        <span slot="headerTitle">${isEdit ? "Edit chore" : "New chore"}</span>
+        <span slot="headerTitle">${isEdit ? localize(this.hass, "card.edit.title_edit") : localize(this.hass, "card.edit.title_new")}</span>
         <div class="content">
           ${this._error ? html`<ha-alert alert-type="error">${this._error}</ha-alert>` : nothing}
           <ha-form
@@ -379,9 +398,9 @@ export class ChoreEditDialog extends LitElement {
             @value-changed=${this._onValueChanged}
           ></ha-form>
           ${this._data.chore_type === "scheduled"
-            ? this._renderDateTimeRow("dtstart", "Start:")
+            ? this._renderDateTimeRow("dtstart", localize(this.hass, "card.edit.start_row"))
             : this._data.chore_type === "oneshot"
-              ? this._renderDateTimeRow("due_datetime", "Due:")
+              ? this._renderDateTimeRow("due_datetime", localize(this.hass, "card.edit.due_row"))
               : nothing}
           <ha-form
             .hass=${this.hass}
@@ -404,12 +423,12 @@ export class ChoreEditDialog extends LitElement {
           <span>
             ${isEdit
               ? this._confirmDelete
-                ? html`<ha-button class="delete" ?disabled=${this._loading} @click=${this._onDelete}>Confirm delete</ha-button>`
-                : html`<ha-button class="delete" appearance="plain" @click=${() => (this._confirmDelete = true)}>Delete</ha-button>`
+                ? html`<ha-button class="delete" ?disabled=${this._loading} @click=${this._onDelete}>${localize(this.hass, "card.edit.confirm_delete")}</ha-button>`
+                : html`<ha-button class="delete" appearance="plain" @click=${() => (this._confirmDelete = true)}>${localize(this.hass, "card.edit.delete")}</ha-button>`
               : nothing}
           </span>
           <ha-button ?disabled=${this._loading} @click=${this._onSubmit}>
-            ${this._loading ? "Saving..." : isEdit ? "Save" : "Create"}
+            ${this._loading ? localize(this.hass, "card.edit.saving") : isEdit ? localize(this.hass, "card.edit.save") : localize(this.hass, "card.edit.create")}
           </ha-button>
         </div>
       </ha-dialog>
@@ -444,14 +463,14 @@ export class ChoreEditDialog extends LitElement {
         <ha-date-input
           class="until-date"
           .locale=${this.hass.locale}
-          .label=${LABELS.until}
+          .label=${localize(this.hass, "card.edit.field.until")}
           .value=${until}
           .canClear=${true}
           @value-changed=${this._onUntilChanged}
         ></ha-date-input>
         ${until
           ? html`
-              <ha-icon-button class="until-clear" title="Clear end date" @click=${this._onUntilClear}>
+              <ha-icon-button class="until-clear" title=${localize(this.hass, "card.edit.clear_end_date")} @click=${this._onUntilClear}>
                 <ha-icon icon="mdi:close"></ha-icon>
               </ha-icon-button>
             `
@@ -487,9 +506,14 @@ export class ChoreEditDialog extends LitElement {
   }
 
   private _computeLabel = (schema: FormSchema): string => {
-    if (schema.name === "frequency") return this._data.chore_type === "scheduled" ? "Repeat" : "Frequency";
-    if (schema.name === "interval") return this._data.chore_type === "scheduled" ? "Repeat every" : "Repeat after";
-    return LABELS[schema.name] ?? schema.name;
+    if (schema.name === "frequency") {
+      return localize(this.hass, this._data.chore_type === "scheduled" ? "card.edit.repeat" : "card.edit.frequency");
+    }
+    if (schema.name === "interval") {
+      return localize(this.hass, this._data.chore_type === "scheduled" ? "card.edit.repeat_every" : "card.edit.repeat_after");
+    }
+    const key = FIELD_KEYS[schema.name];
+    return key ? localize(this.hass, `card.edit.field.${key}`) : schema.name;
   };
 
   private _onValueChanged(e: CustomEvent<{ value: FormData }>) {
@@ -631,10 +655,10 @@ export class ChoreEditDialog extends LitElement {
   /** Client-side validation mirroring recurrence.py; returns an error or null. */
   private _validate(): string | null {
     const d = this._data;
-    if (!String(d.chore_name ?? "").trim()) return "Name is required.";
+    if (!String(d.chore_name ?? "").trim()) return localize(this.hass, "card.edit.err.name_required");
     const type = String(d.chore_type ?? "scheduled");
-    if (type !== "oneshot" && d.until && d.count) return "Set either an end date or a count, not both.";
-    if (!this.item && this.targets.length > 1 && !d.target_entity) return "Choose a list.";
+    if (type !== "oneshot" && d.until && d.count) return localize(this.hass, "card.edit.err.until_and_count");
+    if (!this.item && this.targets.length > 1 && !d.target_entity) return localize(this.hass, "card.edit.err.choose_list");
     return null;
   }
 
@@ -651,7 +675,7 @@ export class ChoreEditDialog extends LitElement {
     }
     const entityId = this._target();
     if (!entityId) {
-      this._error = "No target list available.";
+      this._error = localize(this.hass, "card.edit.err.no_target");
       return;
     }
 

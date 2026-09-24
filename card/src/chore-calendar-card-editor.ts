@@ -10,6 +10,7 @@ import type {
   HomeAssistant,
 } from "./types";
 import { themeColorToCss } from "./utils";
+import { localize, statusLabel } from "./localize/localize";
 
 interface HaFormSchema {
   name: string;
@@ -21,16 +22,15 @@ interface HaFormSchema {
 /** Just the title; the boolean toggles render as a compact custom grid below. */
 const OPTIONS_SCHEMA_TOP: HaFormSchema[] = [{ name: "title", selector: { text: {} } }];
 
-/** Boolean card options, rendered as a tight toggle grid (ha-form's per-row
- *  gap is too tall for a column of switches and lives in its shadow DOM). */
-const TOGGLE_OPTIONS: { key: keyof ChoreCalendarCardConfig; label: string }[] = [
-  { key: "hide_completed", label: "Hide completed section" },
-  { key: "hide_section_headers", label: "Hide section headings" },
-  { key: "hide_card_background", label: "Hide card background" },
-  { key: "allow_uncomplete", label: "Allow uncomplete" },
-  { key: "hide_add_button", label: "Hide add button" },
-  { key: "hide_edit_button", label: "Hide edit button" },
-  { key: "hide_show_all", label: "Hide show-all toggle" },
+/** Boolean card options in display order; labels come from editor.option.*. */
+const TOGGLE_KEYS: (keyof ChoreCalendarCardConfig)[] = [
+  "hide_completed",
+  "hide_section_headers",
+  "hide_card_background",
+  "allow_uncomplete",
+  "hide_add_button",
+  "hide_edit_button",
+  "hide_show_all",
 ];
 
 /** Options below the period rows. */
@@ -42,72 +42,42 @@ const OPTIONS_SCHEMA_BOTTOM: HaFormSchema[] = [
   },
 ];
 
-/** Period filter rows rendered as custom HTML (label + days + hours). */
-const PERIOD_ROWS: { key: "due_date_period" | "completed_period"; label: string }[] = [
-  { key: "due_date_period", label: "Due-date period" },
-  { key: "completed_period", label: "Completed period" },
-];
+/** Period filter rows in display order; labels come from editor.field.*. */
+const PERIOD_KEYS: ("due_date_period" | "completed_period")[] = ["due_date_period", "completed_period"];
 
-const ACTION_OPTIONS = [
-  { value: "details", label: "Chore Details" },
-  { value: "edit", label: "Edit Chore" },
-  { value: "complete", label: "Complete Chore" },
-  { value: "more-info", label: "More Info" },
-  { value: "navigate", label: "Navigate" },
-  { value: "url", label: "URL" },
-  { value: "call-service", label: "Call Service" },
-  { value: "none", label: "None" },
-];
+/** Tap/hold/double-tap action values in dropdown order. */
+const ACTION_VALUES = ["details", "edit", "complete", "more-info", "navigate", "url", "call-service", "none"];
 
-const ACTIONS_SCHEMA: HaFormSchema[] = [
-  {
-    name: "tap_action",
-    selector: { select: { options: ACTION_OPTIONS, mode: "dropdown" } },
-    default: "details",
-  },
-  {
-    name: "hold_action",
-    selector: { select: { options: ACTION_OPTIONS, mode: "dropdown" } },
-    default: "none",
-  },
-  {
-    name: "double_tap_action",
-    selector: { select: { options: ACTION_OPTIONS, mode: "dropdown" } },
-    default: "none",
-  },
-];
+/** Map an action value to its editor.action.* subkey (hyphens → underscores). */
+const ACTION_KEY: Record<string, string> = {
+  "details": "details",
+  "edit": "edit",
+  "complete": "complete",
+  "more-info": "more_info",
+  "navigate": "navigate",
+  "url": "url",
+  "call-service": "call_service",
+  "none": "none",
+};
 
-const EXCLUDE_SCHEMA: HaFormSchema[] = [
-  {
-    name: "exclude",
-    selector: {
-      select: {
-        multiple: true,
-        options: [
-          { value: "overdue", label: "Overdue" },
-          { value: "due", label: "Due" },
-          { value: "pending", label: "Pending" },
-          { value: "completed", label: "Completed" },
-        ],
-      },
-    },
-  },
-];
+/** Statuses offered by the per-entity exclude control. */
+const EXCLUDE_STATUSES: ChoreStatus[] = ["overdue", "due", "pending", "completed"];
 
-const LABELS: Record<string, string> = {
-  title: "Title",
-  hide_completed: "Hide completed section",
-  hide_section_headers: "Hide section headings",
-  hide_card_background: "Hide card background",
-  allow_uncomplete: "Allow uncomplete",
-  hide_add_button: "Hide add button",
-  hide_edit_button: "Hide edit button",
-  hide_show_all: "Hide show-all toggle",
-  update_interval: "Update interval (seconds)",
-  tap_action: "Tap action",
-  hold_action: "Hold action",
-  double_tap_action: "Double-tap action",
-  exclude: "Exclude statuses",
+/** Map an ha-form field name to its editor translation key. */
+const EDITOR_LABEL_KEYS: Record<string, string> = {
+  title: "editor.field.title",
+  update_interval: "editor.field.update_interval",
+  tap_action: "editor.field.tap_action",
+  hold_action: "editor.field.hold_action",
+  double_tap_action: "editor.field.double_tap_action",
+  exclude: "editor.field.exclude",
+  hide_completed: "editor.option.hide_completed",
+  hide_section_headers: "editor.option.hide_section_headers",
+  hide_card_background: "editor.option.hide_card_background",
+  allow_uncomplete: "editor.option.allow_uncomplete",
+  hide_add_button: "editor.option.hide_add_button",
+  hide_edit_button: "editor.option.hide_edit_button",
+  hide_show_all: "editor.option.hide_show_all",
 };
 
 /** Normalize a config entity entry to EntityConfig. */
@@ -115,9 +85,10 @@ function normalizeEntity(entry: string | EntityConfig): EntityConfig {
   return typeof entry === "string" ? { entity: entry } : { ...entry };
 }
 
-/** Derive a friendly name from an entity ID (e.g. "calendar.daily_chores" → "Daily Chores"). */
+/** Derive a friendly name from an entity ID (e.g. "calendar.daily_chores" → "Daily Chores").
+ *  Returns "" for an unset entity so the caller can supply a localized fallback. */
 function entityDisplayName(entityId: string): string {
-  if (!entityId) return "New entity";
+  if (!entityId) return "";
   const name = entityId.split(".").pop() ?? entityId;
   return name
     .replace(/_/g, " ")
@@ -131,6 +102,34 @@ export class ChoreCalendarCardEditor extends LitElement {
 
   setConfig(config: ChoreCalendarCardConfig) {
     this._config = { ...config };
+  }
+
+  /** Tap/hold/double-tap action selectors, options localized per render. */
+  private get _actionsSchema(): HaFormSchema[] {
+    const options = ACTION_VALUES.map((value) => ({
+      value,
+      label: localize(this.hass, `editor.action.${ACTION_KEY[value]}`),
+    }));
+    return [
+      { name: "tap_action", selector: { select: { options, mode: "dropdown" } }, default: "details" },
+      { name: "hold_action", selector: { select: { options, mode: "dropdown" } }, default: "none" },
+      { name: "double_tap_action", selector: { select: { options, mode: "dropdown" } }, default: "none" },
+    ];
+  }
+
+  /** Per-entity status-exclude selector; status labels reuse the integration's. */
+  private get _excludeSchema(): HaFormSchema[] {
+    return [
+      {
+        name: "exclude",
+        selector: {
+          select: {
+            multiple: true,
+            options: EXCLUDE_STATUSES.map((value) => ({ value, label: statusLabel(this.hass, value) })),
+          },
+        },
+      },
+    ];
   }
 
   static styles = css`
@@ -275,10 +274,10 @@ export class ChoreCalendarCardEditor extends LitElement {
 
     return html`
       <div class="entities-header">
-        <span>Entities</span>
+        <span>${localize(this.hass, "editor.section.entities")}</span>
       </div>
       ${entities.map((cfg, idx) => {
-        const name = entityDisplayName(cfg.entity);
+        const name = entityDisplayName(cfg.entity) || localize(this.hass, "editor.entity.new_name");
         const color = cfg.color ?? "";
         const expanded = this._expandedEntities.has(idx);
 
@@ -324,25 +323,25 @@ export class ChoreCalendarCardEditor extends LitElement {
                     selector: { ui_color: {} },
                   },
                 ]}
-                .computeLabel=${() => "List color"}
+                .computeLabel=${() => localize(this.hass, "editor.field.color")}
                 @value-changed=${(ev: CustomEvent) =>
                   this._colorChanged(ev, idx)}
               ></ha-form>
               <ha-form
                 .hass=${this.hass}
                 .data=${{ exclude: cfg.exclude ?? [] }}
-                .schema=${EXCLUDE_SCHEMA}
+                .schema=${this._excludeSchema}
                 .computeLabel=${this._computeLabel}
                 @value-changed=${(ev: CustomEvent) =>
                   this._excludeChanged(ev, idx)}
               ></ha-form>
               <button
                 class="remove-btn"
-                title="Remove entity"
+                title=${localize(this.hass, "editor.button.remove_entity_title")}
                 @click=${() => this._removeEntity(idx)}
                 style="align-self: flex-end"
               >
-                ✕ Remove
+                ✕ ${localize(this.hass, "editor.button.remove_entity")}
               </button>
             </div>
           </ha-expansion-panel>
@@ -350,10 +349,10 @@ export class ChoreCalendarCardEditor extends LitElement {
       })}
       ${entities.length === 0
         ? html`<button class="add-btn" @click=${this._addEntity}>
-            + Add entity
+            + ${localize(this.hass, "editor.button.add_entity")}
           </button>`
         : html`<button class="add-btn" @click=${this._addEntity}>
-            + Add another entity
+            + ${localize(this.hass, "editor.button.add_another_entity")}
           </button>`}
 
       <div class="divider"></div>
@@ -367,12 +366,12 @@ export class ChoreCalendarCardEditor extends LitElement {
       ></ha-form>
 
       <div class="toggles">
-        ${TOGGLE_OPTIONS.map(
-          (opt) => html`
-            <ha-formfield alignEnd spaceBetween .label=${opt.label}>
+        ${TOGGLE_KEYS.map(
+          (key) => html`
+            <ha-formfield alignEnd spaceBetween .label=${localize(this.hass, EDITOR_LABEL_KEYS[key])}>
               <ha-switch
-                .checked=${!!this._config[opt.key]}
-                @change=${(ev: Event) => this._toggleChanged(opt.key, ev)}
+                .checked=${!!this._config[key]}
+                @change=${(ev: Event) => this._toggleChanged(key, ev)}
               ></ha-switch>
             </ha-formfield>
           `,
@@ -380,7 +379,7 @@ export class ChoreCalendarCardEditor extends LitElement {
       </div>
 
       <div class="period-group">
-        ${PERIOD_ROWS.map((row) => this._renderPeriodRow(row.key, row.label))}
+        ${PERIOD_KEYS.map((key) => this._renderPeriodRow(key, localize(this.hass, `editor.field.${key}`)))}
       </div>
 
       <ha-form
@@ -396,7 +395,7 @@ export class ChoreCalendarCardEditor extends LitElement {
       <ha-form
         .hass=${this.hass}
         .data=${this._actionsFormData()}
-        .schema=${ACTIONS_SCHEMA}
+        .schema=${this._actionsSchema}
         .computeLabel=${this._computeLabel}
         @value-changed=${this._actionsChanged}
       ></ha-form>
@@ -404,7 +403,8 @@ export class ChoreCalendarCardEditor extends LitElement {
   }
 
   private _computeLabel = (schema: HaFormSchema): string => {
-    return LABELS[schema.name] ?? schema.name;
+    const key = EDITOR_LABEL_KEYS[schema.name];
+    return key ? localize(this.hass, key) : schema.name;
   };
 
   private _dispatch() {
@@ -530,7 +530,7 @@ export class ChoreCalendarCardEditor extends LitElement {
             type="number"
             min="0"
             max="365"
-            placeholder="days"
+            placeholder=${localize(this.hass, "editor.placeholder.days")}
             .value=${daysValue}
             @change=${(ev: Event) =>
               this._setPeriod(key, "days", (ev.target as HTMLInputElement).value)}
@@ -540,7 +540,7 @@ export class ChoreCalendarCardEditor extends LitElement {
             type="number"
             min="0"
             max="23"
-            placeholder="hours"
+            placeholder=${localize(this.hass, "editor.placeholder.hours")}
             .value=${hoursValue}
             @change=${(ev: Event) =>
               this._setPeriod(key, "hours", (ev.target as HTMLInputElement).value)}

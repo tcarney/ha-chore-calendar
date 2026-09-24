@@ -80,7 +80,7 @@ export class ChoreRow extends LitElement {
 
   protected render() {
     const now = new Date();
-    const timeText = getTimeText(this.item, now);
+    const timeText = getTimeText(this.item, now, this.hass);
 
     return html`
       <div

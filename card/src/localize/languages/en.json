@@ -1,0 +1,236 @@
+{
+  "card": {
+    "error": {
+      "no_entity": "Please define at least one entity"
+    },
+    "button": {
+      "add_chore": "Add chore",
+      "edit": "Edit",
+      "skip": "Skip",
+      "skipping": "Skipping...",
+      "complete": "Complete",
+      "completing": "Completing...",
+      "uncomplete": "Uncomplete",
+      "uncompleting": "Uncompleting...",
+      "cancel": "Cancel"
+    },
+    "state": {
+      "loading": "Loading...",
+      "no_chores": "No chores"
+    },
+    "show_all": {
+      "fewer": "Show fewer",
+      "more_one": "Show all ({count} more)",
+      "more_other": "Show all ({count} more)"
+    },
+    "section": {
+      "overdue": "Overdue",
+      "due": "Due",
+      "pending": "Upcoming",
+      "completed": "Completed"
+    },
+    "status": {
+      "overdue": "Overdue",
+      "due": "Due",
+      "pending": "Pending",
+      "completed": "Completed"
+    },
+    "upcoming": {
+      "upcoming": "Upcoming",
+      "pending": "Pending",
+      "due": "Due"
+    },
+    "time": {
+      "overdue_by": "Overdue by {duration}",
+      "in": "in {duration}",
+      "today": "Today {time}",
+      "yesterday": "Yesterday {time}"
+    },
+    "detail": {
+      "done": "Done {time}",
+      "last_done": "Last done: {time}",
+      "missed": "{count} missed: {dates}",
+      "missed_ellipsis": "…, ",
+      "upcoming": "{label}: {date}",
+      "tag": "Tag: {name}",
+      "skip_tooltip": "Tap to skip to the next occurrence, hold to pick a date",
+      "complete_tooltip": "Tap to complete now, hold to set time and person",
+      "due_prefix": "Due {time}"
+    },
+    "complete": {
+      "title": "Complete {name}",
+      "completed_at": "Completed at:",
+      "completed_by": "Completed by:"
+    },
+    "skip": {
+      "title": "Skip {name}",
+      "until": "Skip until:"
+    },
+    "freq": {
+      "daily": "Daily",
+      "every_n_days": "Every {n} days",
+      "weekly": "Weekly",
+      "every_n_weeks": "Every {n} weeks",
+      "every_n_weeks_on": "Every {n} weeks on {days}",
+      "monthly": "Monthly",
+      "every_n_months": "Every {n} months",
+      "annually": "Annually",
+      "every_n_years": "Every {n} years"
+    },
+    "interval": {
+      "every_minutely": "Every minute",
+      "every_n_minutely": "Every {n} minutes",
+      "every_hourly": "Every hour",
+      "every_n_hourly": "Every {n} hours",
+      "every_daily": "Every day",
+      "every_n_daily": "Every {n} days",
+      "every_weekly": "Every week",
+      "every_n_weekly": "Every {n} weeks",
+      "every_monthly": "Every month",
+      "every_n_monthly": "Every {n} months",
+      "every_yearly": "Every year",
+      "every_n_yearly": "Every {n} years"
+    },
+    "schedule": {
+      "at": "At {time}",
+      "at_time": "{base} at {time}{suffix}",
+      "on_the": "{lead} on the {phrase}",
+      "year_on_the": " on the {phrase}",
+      "in_months": " in {months}",
+      "last_day": "last day",
+      "season": ", {window}",
+      "until": ", until {date}",
+      "times_one": ", {count} time",
+      "times_other": ", {count} times",
+      "unscheduled": "Unscheduled"
+    },
+    "position": {
+      "1": "first",
+      "2": "second",
+      "3": "third",
+      "4": "fourth",
+      "5": "fifth",
+      "-1": "last",
+      "-2": "second-to-last",
+      "-3": "third-to-last",
+      "nth_to_last": "{ordinal}-to-last"
+    },
+    "ordinal": {
+      "one": "{n}st",
+      "two": "{n}nd",
+      "few": "{n}rd",
+      "other": "{n}th"
+    },
+    "edit": {
+      "title_new": "New chore",
+      "title_edit": "Edit chore",
+      "delete": "Delete",
+      "confirm_delete": "Confirm delete",
+      "save": "Save",
+      "create": "Create",
+      "saving": "Saving...",
+      "clear_end_date": "Clear end date",
+      "start_row": "Start:",
+      "due_row": "Due:",
+      "repeat": "Repeat",
+      "frequency": "Frequency",
+      "repeat_every": "Repeat every",
+      "repeat_after": "Repeat after",
+      "monthly_on_day": "Monthly on the {ordinal}",
+      "monthly_on_weekday": "Monthly on the {position} {weekday}",
+      "field": {
+        "list": "List",
+        "name": "Name",
+        "description": "Description",
+        "type": "Type",
+        "start": "Start",
+        "repeat_on": "Repeat on",
+        "repeat_monthly": "Repeat monthly",
+        "only_in_months": "Only in months",
+        "due": "Due",
+        "until": "Until (end date)",
+        "count": "Or after N times",
+        "keep": "Keep when finished",
+        "pending_period": "Pending period",
+        "grace_period": "Grace period",
+        "trigger": "Trigger tag",
+        "assigned_to": "Assigned to"
+      },
+      "type": {
+        "scheduled": "Scheduled",
+        "interval": "Interval",
+        "oneshot": "One-time"
+      },
+      "freq": {
+        "minutely": "Minutely",
+        "hourly": "Hourly",
+        "daily": "Daily",
+        "weekly": "Weekly",
+        "monthly": "Monthly",
+        "yearly": "Yearly"
+      },
+      "unit": {
+        "minutes": "minutes",
+        "hours": "hours",
+        "days": "days",
+        "weeks": "weeks",
+        "months": "months",
+        "years": "years"
+      },
+      "err": {
+        "name_required": "Name is required.",
+        "until_and_count": "Set either an end date or a count, not both.",
+        "choose_list": "Choose a list.",
+        "no_target": "No target list available."
+      }
+    }
+  },
+  "editor": {
+    "section": {
+      "entities": "Entities"
+    },
+    "entity": {
+      "new_name": "New entity"
+    },
+    "button": {
+      "remove_entity": "Remove",
+      "remove_entity_title": "Remove entity",
+      "add_entity": "Add entity",
+      "add_another_entity": "Add another entity"
+    },
+    "field": {
+      "title": "Title",
+      "color": "List color",
+      "update_interval": "Update interval (seconds)",
+      "tap_action": "Tap action",
+      "hold_action": "Hold action",
+      "double_tap_action": "Double-tap action",
+      "exclude": "Exclude statuses",
+      "due_date_period": "Due-date period",
+      "completed_period": "Completed period"
+    },
+    "option": {
+      "hide_completed": "Hide completed section",
+      "hide_section_headers": "Hide section headings",
+      "hide_card_background": "Hide card background",
+      "allow_uncomplete": "Allow uncomplete",
+      "hide_add_button": "Hide add button",
+      "hide_edit_button": "Hide edit button",
+      "hide_show_all": "Hide show-all toggle"
+    },
+    "action": {
+      "details": "Chore Details",
+      "edit": "Edit Chore",
+      "complete": "Complete Chore",
+      "more_info": "More Info",
+      "navigate": "Navigate",
+      "url": "URL",
+      "call_service": "Call Service",
+      "none": "None"
+    },
+    "placeholder": {
+      "days": "days",
+      "hours": "hours"
+    }
+  }
+}

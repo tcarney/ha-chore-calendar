@@ -2,6 +2,7 @@ import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { safeDefine } from "../define";
 import { formatHaDateTime, haDateTimeToIso } from "../utils";
+import { localize } from "../localize/localize";
 import type { EnrichedChoreItem, HomeAssistant } from "../types";
 import {
   DATETIME_ROW_STYLES,
@@ -84,11 +85,11 @@ export class ChoreSkipDialog extends LitElement {
         <ha-icon-button slot="headerNavigationIcon" data-dialog="close" class="header_button">
           <ha-icon icon="mdi:close"></ha-icon>
         </ha-icon-button>
-        <span slot="headerTitle">Skip ${this.item.chore_name}</span>
+        <span slot="headerTitle">${localize(this.hass, "card.skip.title", { name: this.item.chore_name })}</span>
         <div class="content">
           ${this._error ? html`<ha-alert alert-type="error">${this._error}</ha-alert>` : nothing}
           ${renderDateTimeRow({
-            label: "Skip until:",
+            label: localize(this.hass, "card.skip.until"),
             value: this._until,
             locale: this.hass.locale,
             onDate: this._onDatePart,
@@ -98,10 +99,10 @@ export class ChoreSkipDialog extends LitElement {
         </div>
         <div slot="footer" class="footer">
           <ha-button variant="neutral" appearance="plain" ?disabled=${this._loading} @click=${this._onCancel}>
-            Cancel
+            ${localize(this.hass, "card.button.cancel")}
           </ha-button>
           <ha-button ?disabled=${this._loading} @click=${this._onSubmit}>
-            ${this._loading ? "Skipping..." : "Skip"}
+            ${this._loading ? localize(this.hass, "card.button.skipping") : localize(this.hass, "card.button.skip")}
           </ha-button>
         </div>
       </ha-dialog>

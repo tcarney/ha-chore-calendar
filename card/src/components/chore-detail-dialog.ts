@@ -10,9 +10,11 @@ import {
   formatCompletedTime,
   formatDueDate,
   getTimeText,
+  isPendingFuture,
   themeColorToCss,
   upcomingLabel,
 } from "../utils";
+import { localize } from "../localize/localize";
 
 const STATUS_ICON: Record<ChoreStatus, string> = {
   overdue: "\u2717", // ✗
@@ -204,7 +206,7 @@ export class ChoreDetailDialog extends LitElement {
                 ${this.allowEdit
                   ? html`
                       <ha-button variant="neutral" appearance="plain" @click=${this._onEdit}>
-                        Edit
+                        ${localize(this.hass, "card.button.edit")}
                       </ha-button>
                     `
                   : html`<span></span>`}
@@ -215,25 +217,25 @@ export class ChoreDetailDialog extends LitElement {
                           variant="neutral"
                           appearance="plain"
                           ?disabled=${this._loading}
-                          title="Tap to skip to the next occurrence, hold to pick a date"
+                          title=${localize(this.hass, "card.detail.skip_tooltip")}
                           ${holdAction({
                             tap: () => this._onSkip(),
                             hold: () => this._openSkipDialog(),
                             disabled: this._loading,
                           })}
                         >
-                          ${this._loading ? "Skipping..." : "Skip"}
+                          ${this._loading ? localize(this.hass, "card.button.skipping") : localize(this.hass, "card.button.skip")}
                         </ha-button>
                         <ha-button
                           ?disabled=${this._loading}
-                          title="Tap to complete now, hold to set time and person"
+                          title=${localize(this.hass, "card.detail.complete_tooltip")}
                           ${holdAction({
                             tap: () => this._onComplete(),
                             hold: () => this._openCompleteDialog(),
                             disabled: this._loading,
                           })}
                         >
-                          ${this._loading ? "Completing..." : "Complete"}
+                          ${this._loading ? localize(this.hass, "card.button.completing") : localize(this.hass, "card.button.complete")}
                         </ha-button>
                       `
                     : hasStatusActions
@@ -244,7 +246,7 @@ export class ChoreDetailDialog extends LitElement {
                             ?disabled=${this._loading}
                             @click=${this._onUncomplete}
                           >
-                            ${this._loading ? "Uncompleting..." : "Uncomplete"}
+                            ${this._loading ? localize(this.hass, "card.button.uncompleting") : localize(this.hass, "card.button.uncomplete")}
                           </ha-button>
                         `
                       : nothing}
@@ -259,18 +261,17 @@ export class ChoreDetailDialog extends LitElement {
   private _renderDetails() {
     const { item } = this;
     if (!item) return nothing;
-    const locale = this.hass?.language ?? "en";
     const now = new Date();
 
     return html`
-      ${this._renderStatus(item, now, locale)}
+      ${this._renderStatus(item, now)}
 
       <div class="meta" part="meta">
         ${this._renderListRow()}
 
         <div class="schedule" part="schedule">
           <ha-icon icon="mdi:calendar-clock"></ha-icon>
-          <div class="info">${formatSchedule(item.schedule, item.selector)}</div>
+          <div class="info">${formatSchedule(item.schedule, item.selector, this.hass)}</div>
           ${item.assigned_to.length > 0
             ? html`
                 <chore-assignees
@@ -286,7 +287,7 @@ export class ChoreDetailDialog extends LitElement {
         ${item.trigger_entity
           ? html`
               <div class="context" part="trigger">
-                <span>Tag: ${this._resolveEntityName(item.trigger_entity)}</span>
+                <span>${localize(this.hass, "card.detail.tag", { name: this._resolveEntityName(item.trigger_entity) })}</span>
               </div>
             `
           : nothing}
@@ -304,13 +305,16 @@ export class ChoreDetailDialog extends LitElement {
    *  chronologically: the last completion (for chores not currently
    *  completed), then for overdue chores the missed run and the upcoming
    *  occurrence. */
-  private _renderStatus(item: EnrichedChoreItem, now: Date, locale: string) {
+  private _renderStatus(item: EnrichedChoreItem, now: Date) {
     const isCompleted = item.status === "completed" && !!item.last_completed;
-    const timeText = getTimeText(item, now);
+    const timeText = getTimeText(item, now, this.hass);
+    // A pending chore still in the future reads as "Due in X"; every other
+    // status shows its time text verbatim. (Do not string-match timeText —
+    // it is localized.)
     const headline = isCompleted
-      ? `Done ${formatCompletedTime(item.last_completed!, now, locale)}`
-      : timeText.startsWith("in ")
-        ? `Due ${timeText}`
+      ? localize(this.hass, "card.detail.done", { time: formatCompletedTime(item.last_completed!, now, this.hass) })
+      : isPendingFuture(item, now)
+        ? localize(this.hass, "card.detail.due_prefix", { time: timeText })
         : timeText;
     return html`
       <div class="status ${item.status}" part="status status-${item.status}">
@@ -323,7 +327,7 @@ export class ChoreDetailDialog extends LitElement {
           ${item.last_completed && !isCompleted
             ? html`
                 <div class="context" part="last-completed">
-                  <span>Last done: ${formatCompletedTime(item.last_completed, now, locale)}</span>
+                  <span>${localize(this.hass, "card.detail.last_done", { time: formatCompletedTime(item.last_completed, now, this.hass) })}</span>
                   ${this._renderCompletedBy(item)}
                 </div>
               `
@@ -331,14 +335,14 @@ export class ChoreDetailDialog extends LitElement {
           ${item.missed_count > 1
             ? html`
                 <div class="context" part="missed">
-                  <span>${this._formatMissed(item, now, locale)}</span>
+                  <span>${this._formatMissed(item, now)}</span>
                 </div>
               `
             : nothing}
           ${item.missed_count > 0 && item.upcoming_due
             ? html`
                 <div class="context" part="upcoming">
-                  <span>${upcomingLabel(item, now)}: ${formatDueDate(item.upcoming_due, now, locale)}</span>
+                  <span>${localize(this.hass, "card.detail.upcoming", { label: upcomingLabel(item, now, this.hass), date: formatDueDate(item.upcoming_due, now, this.hass) })}</span>
                 </div>
               `
             : nothing}
@@ -352,10 +356,13 @@ export class ChoreDetailDialog extends LitElement {
    *  Shown only from two missed: a single missed period is the pinned
    *  next_due the "Overdue by" headline already measures, with more
    *  precision than a bare date. */
-  private _formatMissed(item: EnrichedChoreItem, now: Date, locale: string): string {
-    const dates = item.missed_occurrences.map((iso) => formatDueDate(iso, now, locale));
-    const truncated = item.missed_count > dates.length ? "…, " : "";
-    return `${item.missed_count} missed: ${truncated}${dates.join(", ")}`;
+  private _formatMissed(item: EnrichedChoreItem, now: Date): string {
+    const dates = item.missed_occurrences.map((iso) => formatDueDate(iso, now, this.hass));
+    const ellipsis = item.missed_count > dates.length ? localize(this.hass, "card.detail.missed_ellipsis") : "";
+    return localize(this.hass, "card.detail.missed", {
+      count: item.missed_count,
+      dates: `${ellipsis}${dates.join(", ")}`,
+    });
   }
 
   /** Who completed it, as the same avatar badge the assignees use. */

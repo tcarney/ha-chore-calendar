@@ -136,8 +136,17 @@ export interface HomeAssistant {
   connection: HassConnection;
   states: Record<string, HassEntity>;
   language: string;
-  /** Frontend locale data (date/time formatting) — passed to HA date/time inputs. */
-  locale?: unknown;
+  /** Frontend locale data — the selected language plus date/number formatting;
+   *  the object is also passed to HA date/time inputs. */
+  locale?: {
+    language: string;
+    number_format?: string;
+    time_format?: string; // "language" | "system" | "12" | "24"
+    date_format?: string;
+    first_weekday?: string;
+  };
+  /** HA frontend translator; returns "" for a missing/not-yet-loaded key. */
+  localize(key: string, ...args: unknown[]): string;
 }
 
 export interface HassConnection {

@@ -16,8 +16,9 @@ import {
   groupByStatus,
   resolveEntityConfig,
   sortChores,
-  SECTION_LABELS,
+  sectionLabel,
 } from "./utils";
+import { localize, localizePlural } from "./localize/localize";
 
 // Import sub-components so they register.
 import "./components/chore-row";
@@ -77,7 +78,8 @@ export class ChoreCalendarCard extends LitElement {
 
   setConfig(config: ChoreCalendarCardConfig) {
     if (!config.entities || config.entities.length === 0) {
-      this._configError = "Please define at least one entity";
+      // Store the translation key; hass may not be set yet, so resolve in render().
+      this._configError = "card.error.no_entity";
       this._config = config;
       return;
     }
@@ -380,7 +382,7 @@ export class ChoreCalendarCard extends LitElement {
     if (this._configError) {
       return html`
         <ha-card>
-          <div class="empty">${this._configError}</div>
+          <div class="empty">${localize(this.hass, this._configError)}</div>
         </ha-card>
       `;
     }
@@ -399,7 +401,7 @@ export class ChoreCalendarCard extends LitElement {
                 ${title ? html`<span class="title" part="title">${title}</span>` : html`<span></span>`}
                 ${showAdd
                   ? html`
-                      <ha-icon-button class="add" part="add-button" title="Add chore" @click=${this._onAddChore}>
+                      <ha-icon-button class="add" part="add-button" title=${localize(this.hass, "card.button.add_chore")} @click=${this._onAddChore}>
                         <ha-icon icon="mdi:plus"></ha-icon>
                       </ha-icon-button>
                     `
@@ -408,7 +410,7 @@ export class ChoreCalendarCard extends LitElement {
             `
           : nothing}
         ${this._loading
-          ? html`<div class="loading">Loading...</div>`
+          ? html`<div class="loading">${localize(this.hass, "card.state.loading")}</div>`
           : html`${this._renderSections()}${this._renderShowAllToggle()}`}
       </ha-card>
       <chore-detail-dialog
@@ -467,7 +469,7 @@ export class ChoreCalendarCard extends LitElement {
       return html`
         <div class="placeholder">
           <div class="placeholder-card">
-            <div class="placeholder-row">No chores</div>
+            <div class="placeholder-row">${localize(this.hass, "card.state.no_chores")}</div>
           </div>
         </div>
       `;
@@ -479,7 +481,7 @@ export class ChoreCalendarCard extends LitElement {
         return html`
           ${!hideSections
             ? html`<div class="section-header ${status}" part="section-header section-header-${status}">
-                ${SECTION_LABELS[status]}
+                ${sectionLabel(status, this.hass)}
               </div>`
             : nothing}
           ${items.map(
@@ -505,7 +507,9 @@ export class ChoreCalendarCard extends LitElement {
     return html`
       <button class="show-all" part="show-all" @click=${this._toggleShowAll}>
         <ha-icon icon=${this._showAll ? "mdi:chevron-up" : "mdi:chevron-down"}></ha-icon>
-        ${this._showAll ? "Show fewer" : `Show all (${this._hiddenCount} more)`}
+        ${this._showAll
+          ? localize(this.hass, "card.show_all.fewer")
+          : localizePlural(this.hass, "card.show_all.more", this._hiddenCount)}
       </button>
     `;
   }

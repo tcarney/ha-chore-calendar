@@ -2,6 +2,7 @@ import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { safeDefine } from "../define";
 import { formatHaDateTime, haDateTimeToIso } from "../utils";
+import { localize } from "../localize/localize";
 import type { EnrichedChoreItem, HomeAssistant } from "../types";
 import {
   DATETIME_ROW_STYLES,
@@ -24,10 +25,6 @@ type FormData = Record<string, unknown>;
 const SCHEMA: FormSchema[] = [
   { name: "completed_by", selector: { entity: { filter: { domain: "person" } } } },
 ];
-
-const LABELS: Record<string, string> = {
-  completed_by: "Completed by:",
-};
 
 /**
  * Completion details for a single chore: when it was done and by whom.
@@ -102,11 +99,11 @@ export class ChoreCompleteDialog extends LitElement {
         <ha-icon-button slot="headerNavigationIcon" data-dialog="close" class="header_button">
           <ha-icon icon="mdi:close"></ha-icon>
         </ha-icon-button>
-        <span slot="headerTitle">Complete ${this.item.chore_name}</span>
+        <span slot="headerTitle">${localize(this.hass, "card.complete.title", { name: this.item.chore_name })}</span>
         <div class="content">
           ${this._error ? html`<ha-alert alert-type="error">${this._error}</ha-alert>` : nothing}
           ${renderDateTimeRow({
-            label: "Completed at:",
+            label: localize(this.hass, "card.complete.completed_at"),
             value: String(this._data.completed_at ?? ""),
             locale: this.hass.locale,
             onDate: this._onDatePart,
@@ -123,17 +120,18 @@ export class ChoreCompleteDialog extends LitElement {
         </div>
         <div slot="footer" class="footer">
           <ha-button variant="neutral" appearance="plain" ?disabled=${this._loading} @click=${this._onCancel}>
-            Cancel
+            ${localize(this.hass, "card.button.cancel")}
           </ha-button>
           <ha-button ?disabled=${this._loading} @click=${this._onSubmit}>
-            ${this._loading ? "Completing..." : "Complete"}
+            ${this._loading ? localize(this.hass, "card.button.completing") : localize(this.hass, "card.button.complete")}
           </ha-button>
         </div>
       </ha-dialog>
     `;
   }
 
-  private _computeLabel = (schema: FormSchema): string => LABELS[schema.name] ?? schema.name;
+  private _computeLabel = (schema: FormSchema): string =>
+    schema.name === "completed_by" ? localize(this.hass, "card.complete.completed_by") : schema.name;
 
   private _onValueChanged(e: CustomEvent<{ value: FormData }>) {
     // The date/time row lives outside this form, so preserve its value.
