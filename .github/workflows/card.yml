@@ -18,10 +18,17 @@ jobs:
       - name: Checkout the repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # On pull requests, check out the head branch (not the detached merge
-          # ref) so a rebuilt bundle can be committed back to it. Empty on push
-          # events, where checkout falls back to the pushed ref.
-          ref: ${{ github.head_ref }}
+          # On pull requests, check out the PR head commit (not the merge ref)
+          # by SHA. A SHA resolves for fork PRs too, whose branch name does not
+          # exist in this repo. The commit step later switches to the head
+          # branch to push a rebuilt bundle; on fork PRs that push is not
+          # permitted, so the contributor must commit an up-to-date bundle.
+          # On push events, this is the pushed commit.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Full history, so the bundle-input author lookup (git log on the
+          # card sources) finds the last commit that touched them, not only
+          # the tip.
+          fetch-depth: 0
 
       # On pull requests, rebuild and commit the bundle if it drifted from
       # source (no more "forgot to rebuild" CI failures). On main, verify only.

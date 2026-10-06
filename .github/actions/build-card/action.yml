@@ -6,10 +6,11 @@ description: >-
 inputs:
   commit:
     description: >-
-      "true" commits the rebuilt bundle back to the current branch if it
-      changed; "false" fails the job when the committed bundle is stale
-      (verify-only). The caller must have checked out a writable branch when
-      committing.
+      "true" commits the rebuilt bundle back to the branch if it changed;
+      "false" fails the job when the committed bundle is stale (verify-only).
+      When committing, the caller must check out either a writable branch or,
+      on pull requests, the head commit (the commit step switches to the head
+      branch before pushing).
     default: "true"
 
 runs:
