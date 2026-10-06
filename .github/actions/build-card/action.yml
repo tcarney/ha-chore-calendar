@@ -51,4 +51,8 @@ runs:
     - name: Verify committed bundle matches build
       if: ${{ inputs.commit != 'true' }}
       shell: bash
-      run: git diff --exit-code -- custom_components/chore_calendar/www/
+      run: |
+        if ! git diff --exit-code -- custom_components/chore_calendar/www/; then
+          echo "::error::The committed card bundle is out of date. Run script/card/build and commit custom_components/chore_calendar/www/."
+          exit 1
+        fi
