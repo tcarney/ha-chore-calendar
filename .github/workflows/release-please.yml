@@ -25,8 +25,8 @@ jobs:
       # bundle bakes in the manifest version at build time. Rebuild and commit
       # it on the release PR branch so the merged release ships a bundle whose
       # banner matches the released version. The GITHUB_TOKEN push does not
-      # re-trigger PR checks (by design), which is fine — the bundle is correct
-      # by merge time.
+      # re-trigger PR checks (by design). That is fine, because the bundle is
+      # correct by merge time.
       - name: Check out release PR branch
         if: ${{ steps.release.outputs.prs_created == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Workflow and composite action pins. Grouped into one weekly PR.
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

@@ -10,6 +10,12 @@ on:
 
 permissions: {}
 
+# Cancel a superseded run when a pull request gets a new push. Runs on main
+# always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint-check:
     runs-on: "ubuntu-latest"
@@ -58,3 +64,15 @@ jobs:
 
       - name: Run tests
         run: script/test
+
+  card-test:
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up card environment
+        uses: ./.github/actions/setup-card
+
+      - name: Run card tests
+        run: script/card/test
