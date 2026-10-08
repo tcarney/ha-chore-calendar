@@ -1,8 +1,9 @@
 import type { HomeAssistant } from "../types";
 import en from "./languages/en.json";
+import it from "./languages/it.json";
 
 /** Registered translation dictionaries, keyed by language code. */
-const LANGUAGES: Record<string, unknown> = { en };
+const LANGUAGES: Record<string, unknown> = { en, it };
 
 /**
  * Resolved language for both translation lookup and Intl formatters.
@@ -52,6 +53,38 @@ export function localize(
   return interpolate(template, placeholders);
 }
 
+type PluralType = "cardinal" | "ordinal";
+
+function lookupResolvedLocale(hass: HomeAssistant | undefined, key: string): string | undefined {
+  const raw = resolveLang(hass);
+  for (const code of new Set([raw, raw.split("-")[0]])) {
+    const template = lookup(LANGUAGES[code], key);
+    if (template != null) return template;
+  }
+  return undefined;
+}
+
+/** Localize a plural category, preferring its locale's other form before normal fallback. */
+function localizeCategory(
+  hass: HomeAssistant | undefined,
+  baseKey: string,
+  value: number,
+  type: PluralType,
+  placeholders?: Record<string, string | number>,
+): string {
+  const merged = { count: value, ...(placeholders ?? {}) };
+  const category = new Intl.PluralRules(resolveLang(hass), { type }).select(value);
+  const categoryKey = type === "ordinal" ? `${baseKey}.${category}` : `${baseKey}_${category}`;
+  const otherKey = type === "ordinal" ? `${baseKey}.other` : `${baseKey}_other`;
+  const template =
+    lookupResolvedLocale(hass, categoryKey) ??
+    lookupResolvedLocale(hass, otherKey) ??
+    lookup(LANGUAGES.en, categoryKey) ??
+    lookup(LANGUAGES.en, otherKey) ??
+    categoryKey;
+  return interpolate(template, merged);
+}
+
 /**
  * Plural-aware translation: appends the CLDR plural category to the base key
  * (``base_one`` / ``base_other`` / ...). ``count`` is added to the placeholders.
@@ -62,14 +95,17 @@ export function localizePlural(
   count: number,
   placeholders?: Record<string, string | number>,
 ): string {
-  const category = new Intl.PluralRules(resolveLang(hass)).select(count);
-  const merged = { count, ...(placeholders ?? {}) };
-  const categoryKey = `${baseKey}_${category}`;
-  // Fall back to _other when the language lacks the selected category.
-  if (localize(hass, categoryKey, merged) !== categoryKey) {
-    return localize(hass, categoryKey, merged);
-  }
-  return localize(hass, `${baseKey}_other`, merged);
+  return localizeCategory(hass, baseKey, count, "cardinal", placeholders);
+}
+
+/** Ordinal-aware translation with the same locale-first fallback as cardinal plurals. */
+export function localizeOrdinal(
+  hass: HomeAssistant | undefined,
+  baseKey: string,
+  value: number,
+  placeholders?: Record<string, string | number>,
+): string {
+  return localizeCategory(hass, baseKey, value, "ordinal", placeholders);
 }
 
 /**

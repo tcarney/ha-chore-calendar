@@ -10,6 +10,7 @@ import {
   formatCompletedTime,
   formatDueDate,
   getTimeText,
+  dueInText,
   isPendingFuture,
   themeColorToCss,
   upcomingLabel,
@@ -314,7 +315,7 @@ export class ChoreDetailDialog extends LitElement {
     const headline = isCompleted
       ? localize(this.hass, "card.detail.done", { time: formatCompletedTime(item.last_completed!, now, this.hass) })
       : isPendingFuture(item, now)
-        ? localize(this.hass, "card.detail.due_prefix", { time: timeText })
+        ? dueInText(item, now, this.hass)
         : timeText;
     return html`
       <div class="status ${item.status}" part="status status-${item.status}">

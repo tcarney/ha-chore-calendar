@@ -1,5 +1,5 @@
 import { fireEvent } from "./fire-event";
-import { localize, localizePlural, resolveLang, statusLabel } from "./localize/localize";
+import { localize, localizeOrdinal, localizePlural, resolveLang, statusLabel } from "./localize/localize";
 import type {
   ActionConfig,
   ChoreSelector,
@@ -342,6 +342,12 @@ export function isPendingFuture(item: EnrichedChoreItem, now: Date): boolean {
   return item.status === "pending" && !!item.next_due && new Date(item.next_due).getTime() > now.getTime();
 }
 
+/** "Due in X" for a pending chore whose next_due is still in the future. */
+export function dueInText(item: EnrichedChoreItem, now: Date, hass: HomeAssistant | undefined): string {
+  const diffMs = new Date(item.next_due as string).getTime() - now.getTime();
+  return localize(hass, "card.detail.due_in", { duration: formatDuration(diffMs, hass) });
+}
+
 /** Format an ``HH:MM:SS`` time-of-day string using the resolved locale. */
 function formatLocalTime(timeStr: string, hass: HomeAssistant | undefined): string {
   const parts = timeStr.split(":").map(Number);
@@ -384,12 +390,19 @@ function formatDate(date: Date, hass: HomeAssistant | undefined, utc = false): s
   }).format(date);
 }
 
-/** Append the shared lifecycle suffix (", until Jun 30, 2027" / ", 3 times"). */
-function lifecycleSuffix(until: string, count: unknown, hass: HomeAssistant | undefined): string {
-  let suffix = until ? localize(hass, "card.schedule.until", { date: until }) : "";
+/** Wrap schedule text with its season window, until date and repeat count, each as a whole localized phrase. */
+function withLifecycle(
+  text: string,
+  window: string,
+  until: string,
+  count: unknown,
+  hass: HomeAssistant | undefined,
+): string {
+  if (window) text = localize(hass, "card.schedule.with_season", { text, window });
+  if (until) text = localize(hass, "card.schedule.with_until", { text, date: until });
   const n = Number(count ?? 0);
-  if (n > 0) suffix += localizePlural(hass, "card.schedule.times", n);
-  return suffix;
+  if (n > 0) return localizePlural(hass, "card.schedule.with_times", n, { text });
+  return text;
 }
 
 /** Capitalize the first character of a string. */
@@ -425,8 +438,7 @@ export function positionWord(n: number, hass: HomeAssistant | undefined): string
 
 /** Localized ordinal for a day-of-month: 1 → "1st", 15 → "15th" (en); "1°"/"15°" (it). */
 export function ordinalNumber(n: number, hass: HomeAssistant | undefined): string {
-  const category = new Intl.PluralRules(resolveLang(hass), { type: "ordinal" }).select(n);
-  return localize(hass, `card.ordinal.${category}`, { n });
+  return localizeOrdinal(hass, "card.ordinal", n, { n });
 }
 
 /** Phrase the monthly/yearly weekday spec: "last Friday", "second Monday". */
@@ -488,53 +500,52 @@ function formatScheduledSelector(
     const lead = interval === 1 ? localize(hass, "card.freq.monthly") : localize(hass, "card.freq.every_n_months", { n: interval });
     if (byday.length) {
       const phrase = bydayPhrase(byday, bysetpos, hass);
-      base = interval === 1 ? capitalize(phrase) : localize(hass, "card.schedule.on_the", { lead, phrase });
+      base =
+        interval === 1
+          ? capitalize(phrase)
+          : localize(hass, "card.schedule.on_the", { lead, phrase });
     } else if (bymonthday.length) {
-      base = localize(hass, "card.schedule.on_the", { lead, phrase: monthdayList(bymonthday) });
+      const phrase = monthdayList(bymonthday);
+      base = localize(hass, "card.schedule.on_the", { lead, phrase });
     } else {
       base = lead;
     }
   } else if (freq === "yearly") {
     let text = interval === 1 ? localize(hass, "card.freq.annually") : localize(hass, "card.freq.every_n_years", { n: interval });
     if (bymonth.length) {
-      text += localize(hass, "card.schedule.in_months", { months: bymonth.map((m) => monthName(hass, m, "short")).join(", ") });
+      const months = bymonth.map((m) => monthName(hass, m, "short")).join(", ");
+      text = localize(hass, "card.schedule.yearly_in_months", { base: text, months });
     }
     if (byday.length) {
-      text += localize(hass, "card.schedule.year_on_the", { phrase: bydayPhrase(byday, bysetpos, hass) });
+      text = localize(hass, "card.schedule.yearly_on", { base: text, phrase: bydayPhrase(byday, bysetpos, hass) });
     } else if (bymonthday.length) {
-      text += localize(hass, "card.schedule.year_on_the", { phrase: monthdayList(bymonthday) });
+      text = localize(hass, "card.schedule.yearly_on", { base: text, phrase: monthdayList(bymonthday) });
     }
     base = text;
   } else {
     base = freq;
   }
 
-  let suffix = "";
   // On a non-yearly frequency, bymonth is a season window ("Oct–Mar").
-  if (freq !== "yearly") {
-    const window = formatMonthWindow(bymonth, hass);
-    if (window) suffix += localize(hass, "card.schedule.season", { window });
-  }
+  const window = freq !== "yearly" ? formatMonthWindow(bymonth, hass) : "";
   // until is naive local ISO — Date() parses it in the local zone.
   const until = selector.until ? formatDate(new Date(String(selector.until)), hass) : "";
-  suffix += lifecycleSuffix(until, selector.count, hass);
 
-  return localize(hass, "card.schedule.at_time", { base, time, suffix });
+  return withLifecycle(localize(hass, "card.schedule.at_time", { base, time }), window, until, selector.count, hass);
 }
 
 /** Render an interval chore from freq/interval with season and lifecycle suffixes. */
 function formatIntervalSchedule(schedule: Record<string, unknown>, hass: HomeAssistant | undefined): string {
   const freq = String(schedule.freq);
   const n = Number(schedule.interval ?? 1);
-  let text =
+  const text =
     n === 1
       ? localize(hass, `card.interval.every_${freq}`)
       : localize(hass, `card.interval.every_n_${freq}`, { n });
   const window = formatMonthWindow(schedule.bymonth, hass);
-  if (window) text += localize(hass, "card.schedule.season", { window });
   // until is naive local ISO — Date() parses it in the local zone.
   const until = schedule.until ? formatDate(new Date(String(schedule.until)), hass) : "";
-  return text + lifecycleSuffix(until, schedule.count, hass);
+  return withLifecycle(text, window, until, schedule.count, hass);
 }
 
 /** Format a schedule object (dict) into a human-readable string. */

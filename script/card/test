@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# script/card/test: Run card unit tests and translation checks.
+#
+# Usage:
+#   ./script/card/test
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CARD_DIR="$SCRIPT_DIR/../../card"
+
+cd "$CARD_DIR"
+
+if [ ! -d "node_modules" ]; then
+    echo "==> Dependencies missing, running bootstrap"
+    "$SCRIPT_DIR/bootstrap"
+fi
+
+echo "==> Running card tests"
+npm test
+"$SCRIPT_DIR/i18n-check"

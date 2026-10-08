@@ -1,0 +1,341 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Crea lista faccende",
+        "description": "Inserisci un nome per questa lista di faccende.",
+        "data": {
+          "list_name": "Nome lista"
+        },
+        "data_description": {
+          "list_name": "Nome per questa lista di faccende (es. \"Faccende quotidiane\")"
+        }
+      },
+      "reconfigure": {
+        "title": "Rinomina lista faccende",
+        "description": "Aggiorna il nome di questa lista di faccende.",
+        "data": {
+          "list_name": "Nome lista"
+        },
+        "data_description": {
+          "list_name": "Nuovo nome per questa lista di faccende"
+        }
+      }
+    },
+    "error": {
+      "invalid_name": "Il nome della lista non può essere vuoto."
+    },
+    "abort": {
+      "already_configured": "Esiste già una lista di faccende con questo nome.",
+      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "chore_status": {
+        "state": {
+          "completed": "Completata",
+          "due": "Da fare",
+          "overdue": "In ritardo",
+          "pending": "In attesa"
+        }
+      }
+    }
+  },
+  "selector": {
+    "scheduled": {
+      "fields": {
+        "frequency": {
+          "name": "Ripeti",
+          "description": "L'unità di ricorrenza — giornaliera, settimanale, mensile o annuale."
+        },
+        "interval": {
+          "name": "Intervallo di ripetizione",
+          "description": "Ricorre ogni N unità (es. settimanale + 2 = ogni 2 settimane)."
+        },
+        "byday": {
+          "name": "Giorni della settimana",
+          "description": "Giorni della settimana. Combina con 'Posizione del giorno' per regole tipo 'ultimo venerdì' (in YAML è accettato anche '-1fri')."
+        },
+        "bymonthday": {
+          "name": "Giorni del mese",
+          "description": "Es. 15, oppure -1 per l'ultimo giorno. Solo mensile/annuale."
+        },
+        "bysetpos": {
+          "name": "Posizione del giorno",
+          "description": "N-esima corrispondenza dei giorni della settimana nel mese (-1 = ultima). Richiede i giorni della settimana; solo mensile/annuale."
+        },
+        "bymonth": {
+          "name": "Mesi",
+          "description": "Finestra stagionale — la faccenda ricorre solo in questi mesi."
+        },
+        "dtstart": {
+          "name": "Inizio",
+          "description": "Ora del giorno per ogni ricorrenza. In YAML, una data e ora completa imposta l'inizio della serie quando l'intervallo di ripetizione è maggiore di 1."
+        },
+        "until": {
+          "name": "Termina il",
+          "description": "Ultimo giorno o data e ora della serie. Mutuamente esclusivo con 'Termina dopo'."
+        },
+        "count": {
+          "name": "Termina dopo",
+          "description": "Numero di ricorrenze programmate prima che la serie termini. Mutuamente esclusivo con 'Termina il'."
+        },
+        "persist": {
+          "name": "Mantieni al termine",
+          "description": "Mantieni la faccenda dopo la fine della serie; altrimenti hide_completed_items la elimina."
+        }
+      }
+    },
+    "interval": {
+      "fields": {
+        "frequency": {
+          "name": "Ripeti",
+          "description": "L'unità di ricorrenza — al minuto, oraria, giornaliera, settimanale, mensile o annuale."
+        },
+        "interval": {
+          "name": "Intervallo di ripetizione",
+          "description": "Ricorre dopo N unità, contate dall'ultimo completamento (es. giornaliera + 5 = dopo 5 giorni)."
+        },
+        "bymonth": {
+          "name": "Mesi",
+          "description": "Finestra stagionale — solo il tempo in questi mesi conta per l'attesa; il tempo fuori stagione non conta."
+        },
+        "until": {
+          "name": "Termina il",
+          "description": "La serie termina quando la prossima scadenza supera questa data. Mutuamente esclusivo con 'Termina dopo'."
+        },
+        "count": {
+          "name": "Termina dopo",
+          "description": "Numero di completamenti prima che la serie termini. Mutuamente esclusivo con 'Termina il'."
+        },
+        "persist": {
+          "name": "Mantieni al termine",
+          "description": "Mantieni la faccenda dopo la fine della serie; altrimenti hide_completed_items la elimina."
+        }
+      }
+    },
+    "oneshot": {
+      "fields": {
+        "due_datetime": {
+          "name": "Data e ora di scadenza",
+          "description": "Quando questa faccenda è in scadenza. Ometti per lasciarla non programmata."
+        },
+        "persist": {
+          "name": "Mantieni al termine",
+          "description": "Mantieni la faccenda dopo il completamento; altrimenti hide_completed_items la elimina."
+        }
+      }
+    },
+    "status": {
+      "options": {
+        "completed": "Completata",
+        "due": "Da fare",
+        "overdue": "In ritardo",
+        "pending": "In attesa"
+      }
+    }
+  },
+  "services": {
+    "create_item": {
+      "name": "Crea elemento",
+      "description": "Aggiungi una nuova faccenda a una lista. Fornisci una configurazione tra 'Programmata', 'A intervallo' o 'Singola'.",
+      "fields": {
+        "entity_id": {
+          "name": "Entità",
+          "description": "L'entità calendario della lista di faccende di destinazione."
+        },
+        "chore_name": {
+          "name": "Nome faccenda",
+          "description": "Nome visualizzato della faccenda."
+        },
+        "description": {
+          "name": "Descrizione",
+          "description": "Testo di dettaglio opzionale, mostrato negli eventi del calendario della faccenda."
+        },
+        "trigger_entity": {
+          "name": "Entità di attivazione",
+          "description": "Entità che attiva il completamento (es. un tag NFC)."
+        },
+        "assigned_to": {
+          "name": "Assegnata a",
+          "description": "Entità persona assegnate a questa faccenda."
+        },
+        "scheduled": {
+          "name": "Programmata",
+          "description": "Una faccenda ancorata al calendario — ricorre ogni N unità in date fisse."
+        },
+        "interval": {
+          "name": "A intervallo",
+          "description": "Una faccenda ancorata all'ultimo completamento — scade un periodo prestabilito dopo ciascuno."
+        },
+        "oneshot": {
+          "name": "Singola",
+          "description": "Una faccenda non ricorrente con una data e ora di scadenza opzionale."
+        },
+        "pending_period": {
+          "name": "Periodo di attesa",
+          "description": "Quanto tempo prima della scadenza la faccenda risulta in attesa (completabile in anticipo). Predefinito: 3 ore."
+        },
+        "grace_period": {
+          "name": "Periodo di tolleranza",
+          "description": "Quanto tempo dopo la scadenza prima che la faccenda sia considerata in ritardo. Predefinito: 1 ora."
+        }
+      }
+    },
+    "update_item": {
+      "name": "Aggiorna elemento",
+      "description": "Aggiorna una faccenda esistente in una lista.",
+      "fields": {
+        "entity_id": {
+          "name": "Entità",
+          "description": "Un'entità sensore faccenda o l'entità calendario della lista di destinazione."
+        },
+        "item": {
+          "name": "Nome elemento o UID",
+          "description": "Obbligatorio quando si prende di mira l'entità calendario; dedotto quando si prende di mira un sensore faccenda."
+        },
+        "chore_name": {
+          "name": "Nome faccenda",
+          "description": "Nuovo nome visualizzato della faccenda."
+        },
+        "description": {
+          "name": "Descrizione",
+          "description": "Nuovo testo di dettaglio. Fornisci un valore vuoto per cancellarlo."
+        },
+        "trigger_entity": {
+          "name": "Entità di attivazione",
+          "description": "Entità che attiva il completamento."
+        },
+        "assigned_to": {
+          "name": "Assegnata a",
+          "description": "Entità persona assegnate a questa faccenda."
+        },
+        "scheduled": {
+          "name": "Programmata",
+          "description": "Sostituisci la ricorrenza ('Ripeti' obbligatorio), oppure passa solo i campi di inizio/mantenimento per lasciarla invariata."
+        },
+        "interval": {
+          "name": "A intervallo",
+          "description": "Sostituisci la ricorrenza ('Ripeti' obbligatorio), oppure passa solo 'Mantieni al termine' per lasciarla invariata."
+        },
+        "oneshot": {
+          "name": "Singola",
+          "description": "Nuova data e ora di scadenza; null la cancella (non programmata)."
+        },
+        "pending_period": {
+          "name": "Periodo di attesa",
+          "description": "Quanto tempo prima della scadenza la faccenda risulta in attesa."
+        },
+        "grace_period": {
+          "name": "Periodo di tolleranza",
+          "description": "Quanto tempo dopo la scadenza prima che la faccenda sia considerata in ritardo."
+        }
+      }
+    },
+    "delete_item": {
+      "name": "Elimina elemento",
+      "description": "Rimuovi una faccenda da una lista.",
+      "fields": {
+        "entity_id": {
+          "name": "Entità",
+          "description": "Un'entità sensore faccenda o l'entità calendario della lista di destinazione."
+        },
+        "item": {
+          "name": "Nome elemento o UID",
+          "description": "Obbligatorio quando si prende di mira l'entità calendario; dedotto quando si prende di mira un sensore faccenda."
+        }
+      }
+    },
+    "complete_item": {
+      "name": "Completa elemento",
+      "description": "Segna una faccenda come completata.",
+      "fields": {
+        "entity_id": {
+          "name": "Entità",
+          "description": "Un'entità sensore faccenda o l'entità calendario della lista di destinazione."
+        },
+        "item": {
+          "name": "Nome elemento o UID",
+          "description": "Obbligatorio quando si prende di mira l'entità calendario; dedotto quando si prende di mira un sensore faccenda."
+        },
+        "completed_by": {
+          "name": "Completata da",
+          "description": "Entità persona che ha completato la faccenda."
+        },
+        "completed_at": {
+          "name": "Completata alle",
+          "description": "Data e ora del completamento. Predefinito: adesso."
+        },
+        "keep_skip": {
+          "name": "Mantieni salto",
+          "description": "Deprecato, non ha effetto e sarà rimosso nella 1.0.0. Un salto attivo viene mantenuto automaticamente quando cade dopo la prossima scadenza naturale."
+        }
+      }
+    },
+    "skip_item": {
+      "name": "Salta elemento",
+      "description": "Riprogramma la ricorrenza corrente di una faccenda senza registrare un completamento.",
+      "fields": {
+        "entity_id": {
+          "name": "Entità",
+          "description": "Un'entità sensore faccenda o l'entità calendario della lista di destinazione."
+        },
+        "item": {
+          "name": "Nome elemento o UID",
+          "description": "Obbligatorio quando si prende di mira l'entità calendario; dedotto quando si prende di mira un sensore faccenda."
+        },
+        "until": {
+          "name": "Fino a",
+          "description": "Riprogramma a questa data e ora (più tardi rinvia, prima anticipa). Ometti per il valore predefinito del tipo: prossima ricorrenza (programmata), adesso + intervallo (a intervallo), cancella la scadenza (singola)."
+        }
+      }
+    },
+    "uncomplete_item": {
+      "name": "Annulla completamento elemento",
+      "description": "Ripristina l'ultimo completamento di una faccenda.",
+      "fields": {
+        "entity_id": {
+          "name": "Entità",
+          "description": "Un'entità sensore faccenda o l'entità calendario della lista di destinazione."
+        },
+        "item": {
+          "name": "Nome elemento o UID",
+          "description": "Obbligatorio quando si prende di mira l'entità calendario; dedotto quando si prende di mira un sensore faccenda."
+        }
+      }
+    },
+    "hide_completed_items": {
+      "name": "Nascondi elementi completati",
+      "description": "Nascondi dalle entità calendario e todo gli elementi completati prima di una data limite. La cronologia dei completamenti è conservata; le faccende terminate senza 'Mantieni al termine' vengono eliminate.",
+      "fields": {
+        "entity_id": {
+          "name": "Entità",
+          "description": "L'entità calendario della lista di faccende di destinazione."
+        },
+        "before": {
+          "name": "Prima di",
+          "description": "Nascondi gli elementi completati prima di questa data e ora. Mutuamente esclusivo con 'keep_for'. Ometti entrambi per data limite = adesso."
+        },
+        "keep_for": {
+          "name": "Mantieni per",
+          "description": "Mantieni gli elementi completati entro questa durata da adesso (es. 24 ore). Mutuamente esclusivo con 'before'. Ometti entrambi per data limite = adesso."
+        }
+      }
+    },
+    "get_items": {
+      "name": "Ottieni elementi",
+      "description": "Recupera le faccende di una lista con il loro stato attuale.",
+      "fields": {
+        "entity_id": {
+          "name": "Entità",
+          "description": "L'entità calendario della lista di faccende di destinazione."
+        },
+        "status": {
+          "name": "Filtro stato",
+          "description": "Restituisci solo le faccende con questo stato."
+        }
+      }
+    }
+  }
+}

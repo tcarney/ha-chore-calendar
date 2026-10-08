@@ -1,0 +1,236 @@
+{
+  "card": {
+    "error": {
+      "no_entity": "Definisci almeno un'entità"
+    },
+    "button": {
+      "add_chore": "Aggiungi faccenda",
+      "edit": "Modifica",
+      "skip": "Salta",
+      "skipping": "Salto...",
+      "complete": "Completa",
+      "completing": "Completamento...",
+      "uncomplete": "Annulla completamento",
+      "uncompleting": "Annullamento...",
+      "cancel": "Annulla"
+    },
+    "state": {
+      "loading": "Caricamento...",
+      "no_chores": "Nessuna faccenda"
+    },
+    "show_all": {
+      "fewer": "Mostra meno",
+      "more_one": "Mostra tutte (altra {count})",
+      "more_many": "Mostra tutte (altre {count})",
+      "more_other": "Mostra tutte (altre {count})"
+    },
+    "section": {
+      "overdue": "In ritardo",
+      "due": "Da fare",
+      "pending": "In arrivo",
+      "completed": "Completate"
+    },
+    "status": {
+      "overdue": "In ritardo",
+      "due": "Da fare",
+      "pending": "In attesa",
+      "completed": "Completata"
+    },
+    "upcoming": {
+      "upcoming": "In arrivo",
+      "pending": "In attesa",
+      "due": "Da fare"
+    },
+    "time": {
+      "overdue_by": "In ritardo di {duration}",
+      "in": "tra {duration}",
+      "today": "Oggi {time}",
+      "yesterday": "Ieri {time}"
+    },
+    "detail": {
+      "done": "Fatto {time}",
+      "last_done": "Ultima volta: {time}",
+      "missed": "{count} mancate: {dates}",
+      "missed_ellipsis": "…, ",
+      "upcoming": "{label}: {date}",
+      "tag": "Tag: {name}",
+      "skip_tooltip": "Tocca per saltare alla prossima ricorrenza, tieni premuto per scegliere una data",
+      "complete_tooltip": "Tocca per completare ora, tieni premuto per impostare ora e persona",
+      "due_in": "Da fare tra {duration}"
+    },
+    "complete": {
+      "title": "Completa {name}",
+      "completed_at": "Completata alle:",
+      "completed_by": "Completata da:"
+    },
+    "skip": {
+      "title": "Salta {name}",
+      "until": "Salta fino a:"
+    },
+    "freq": {
+      "daily": "Giornaliera",
+      "every_n_days": "Ogni {n} giorni",
+      "weekly": "Settimanale",
+      "every_n_weeks": "Ogni {n} settimane",
+      "every_n_weeks_on": "Ogni {n} settimane il {days}",
+      "monthly": "Mensile",
+      "every_n_months": "Ogni {n} mesi",
+      "annually": "Annuale",
+      "every_n_years": "Ogni {n} anni"
+    },
+    "interval": {
+      "every_minutely": "Ogni minuto",
+      "every_n_minutely": "Ogni {n} minuti",
+      "every_hourly": "Ogni ora",
+      "every_n_hourly": "Ogni {n} ore",
+      "every_daily": "Ogni giorno",
+      "every_n_daily": "Ogni {n} giorni",
+      "every_weekly": "Ogni settimana",
+      "every_n_weekly": "Ogni {n} settimane",
+      "every_monthly": "Ogni mese",
+      "every_n_monthly": "Ogni {n} mesi",
+      "every_yearly": "Ogni anno",
+      "every_n_yearly": "Ogni {n} anni"
+    },
+    "schedule": {
+      "at": "Alle {time}",
+      "at_time": "{base} alle {time}",
+      "on_the": "{lead}: {phrase}",
+      "yearly_in_months": "{base} in {months}",
+      "yearly_on": "{base}: {phrase}",
+      "last_day": "ultimo giorno",
+      "with_season": "{text}, {window}",
+      "with_until": "{text}, fine: {date}",
+      "with_times_one": "{text}, {count} volta",
+      "with_times_many": "{text}, {count} volte",
+      "with_times_other": "{text}, {count} volte",
+      "unscheduled": "Non programmata"
+    },
+    "position": {
+      "1": "primo",
+      "2": "secondo",
+      "3": "terzo",
+      "4": "quarto",
+      "5": "quinto",
+      "-1": "ultimo",
+      "-2": "penultimo",
+      "-3": "terzultimo",
+      "nth_to_last": "{ordinal} dal fondo"
+    },
+    "ordinal": {
+      "many": "{n}°",
+      "other": "{n}°"
+    },
+    "edit": {
+      "title_new": "Nuova faccenda",
+      "title_edit": "Modifica faccenda",
+      "delete": "Elimina",
+      "confirm_delete": "Conferma eliminazione",
+      "save": "Salva",
+      "create": "Crea",
+      "saving": "Salvataggio...",
+      "clear_end_date": "Cancella data di fine",
+      "start_row": "Inizio:",
+      "due_row": "Scadenza:",
+      "repeat": "Ripeti",
+      "frequency": "Frequenza",
+      "repeat_every": "Ripeti ogni",
+      "repeat_after": "Ripeti dopo",
+      "monthly_on_day": "Mensile: {ordinal}",
+      "monthly_on_weekday": "Mensile: {position} {weekday}",
+      "field": {
+        "list": "Lista",
+        "name": "Nome",
+        "description": "Descrizione",
+        "type": "Tipo",
+        "start": "Inizio",
+        "repeat_on": "Ripeti nei giorni",
+        "repeat_monthly": "Ripeti mensilmente",
+        "only_in_months": "Solo nei mesi",
+        "due": "Scadenza",
+        "until": "Fino a (data di fine)",
+        "count": "O dopo N volte",
+        "keep": "Mantieni al termine",
+        "pending_period": "Periodo di attesa",
+        "grace_period": "Periodo di tolleranza",
+        "trigger": "Tag di attivazione",
+        "assigned_to": "Assegnata a"
+      },
+      "type": {
+        "scheduled": "Programmata",
+        "interval": "A intervallo",
+        "oneshot": "Singola"
+      },
+      "freq": {
+        "minutely": "Al minuto",
+        "hourly": "Oraria",
+        "daily": "Giornaliera",
+        "weekly": "Settimanale",
+        "monthly": "Mensile",
+        "yearly": "Annuale"
+      },
+      "unit": {
+        "minutes": "minuti",
+        "hours": "ore",
+        "days": "giorni",
+        "weeks": "settimane",
+        "months": "mesi",
+        "years": "anni"
+      },
+      "err": {
+        "name_required": "Il nome è obbligatorio.",
+        "until_and_count": "Imposta una data di fine oppure un conteggio, non entrambi.",
+        "choose_list": "Scegli una lista.",
+        "no_target": "Nessuna lista di destinazione disponibile."
+      }
+    }
+  },
+  "editor": {
+    "section": {
+      "entities": "Entità"
+    },
+    "entity": {
+      "new_name": "Nuova entità"
+    },
+    "button": {
+      "remove_entity": "Rimuovi",
+      "remove_entity_title": "Rimuovi entità",
+      "add_entity": "Aggiungi entità",
+      "add_another_entity": "Aggiungi un'altra entità"
+    },
+    "field": {
+      "title": "Titolo",
+      "color": "Colore lista",
+      "update_interval": "Intervallo di aggiornamento (secondi)",
+      "tap_action": "Azione tocco",
+      "hold_action": "Azione pressione",
+      "double_tap_action": "Azione doppio tocco",
+      "exclude": "Escludi stati",
+      "due_date_period": "Periodo di scadenza",
+      "completed_period": "Periodo completati"
+    },
+    "option": {
+      "hide_completed": "Nascondi sezione completate",
+      "hide_section_headers": "Nascondi intestazioni di sezione",
+      "hide_card_background": "Nascondi sfondo scheda",
+      "allow_uncomplete": "Permetti annullamento",
+      "hide_add_button": "Nascondi pulsante aggiungi",
+      "hide_edit_button": "Nascondi pulsante modifica",
+      "hide_show_all": "Nascondi pulsante mostra tutte"
+    },
+    "action": {
+      "details": "Dettagli faccenda",
+      "edit": "Modifica faccenda",
+      "complete": "Completa faccenda",
+      "more_info": "Maggiori info",
+      "navigate": "Naviga",
+      "url": "URL",
+      "call_service": "Chiama servizio",
+      "none": "Nessuna"
+    },
+    "placeholder": {
+      "days": "giorni",
+      "hours": "ore"
+    }
+  }
+}

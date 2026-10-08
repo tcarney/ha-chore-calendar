@@ -55,7 +55,7 @@
       "tag": "Tag: {name}",
       "skip_tooltip": "Tap to skip to the next occurrence, hold to pick a date",
       "complete_tooltip": "Tap to complete now, hold to set time and person",
-      "due_prefix": "Due {time}"
+      "due_in": "Due in {duration}"
     },
     "complete": {
       "title": "Complete {name}",
@@ -93,15 +93,15 @@
     },
     "schedule": {
       "at": "At {time}",
-      "at_time": "{base} at {time}{suffix}",
+      "at_time": "{base} at {time}",
       "on_the": "{lead} on the {phrase}",
-      "year_on_the": " on the {phrase}",
-      "in_months": " in {months}",
+      "yearly_in_months": "{base} in {months}",
+      "yearly_on": "{base} on the {phrase}",
       "last_day": "last day",
-      "season": ", {window}",
-      "until": ", until {date}",
-      "times_one": ", {count} time",
-      "times_other": ", {count} times",
+      "with_season": "{text}, {window}",
+      "with_until": "{text}, until {date}",
+      "with_times_one": "{text}, {count} time",
+      "with_times_other": "{text}, {count} times",
       "unscheduled": "Unscheduled"
     },
     "position": {

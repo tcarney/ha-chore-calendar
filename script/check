@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# script/check: Run linting and type checking tools together
+# script/check: Run repository validation checks
 #
-# Runs type-check (Pyright), lint-check (Ruff), and spell-check (codespell) in sequence.
+# Runs type-check (Pyright), lint-check (Ruff), spell-check (codespell), and card tests.
 # Recommended before committing changes.
 #
 # Usage:
@@ -37,7 +37,7 @@ fi
 log_success "Translations sync check passed"
 
 echo ""
-"$SCRIPT_DIR/card/i18n-check"
+"$SCRIPT_DIR/card/test"
 
 # Run hassfest validation if it has been set up (only in local environment, not CI)
 if [ -z "${CI:-}" ] && [ -z "${GITHUB_ACTIONS:-}" ] && [ -d "$SCRIPT_DIR/../.local/ha-core" ]; then
