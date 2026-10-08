@@ -13,6 +13,12 @@ on:
 
 permissions: {}
 
+# Cancel a superseded run when a pull request gets a new push. Runs on main
+# always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   hassfest: # https://developers.home-assistant.io/blog/2020/04/16/hassfest
     runs-on: "ubuntu-latest"

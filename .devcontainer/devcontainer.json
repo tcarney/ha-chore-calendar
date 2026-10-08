@@ -20,7 +20,8 @@
   },
   "features": {
     "ghcr.io/devcontainers/features/node:1": {
-      "version": "lts"
+      // Keep in sync with card/.nvmrc (the CI Node version).
+      "version": "24"
     },
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/devcontainers-extra/features/apt-packages:1": {
