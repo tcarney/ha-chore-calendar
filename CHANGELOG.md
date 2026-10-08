@@ -2,6 +2,20 @@
 
 # Changelog
 
+## [0.13.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.12.2...v0.13.0) (2026-10-08)
+
+
+### Features
+
+* add Italian translation for the integration and the card ([#49](https://github.com/tcarney/ha-chore-calendar/issues/49)) ([5a50f56](https://github.com/tcarney/ha-chore-calendar/commit/5a50f560ccc618fde1556b93e01354ced053c08f))
+* localize the card ([#46](https://github.com/tcarney/ha-chore-calendar/issues/46)) ([4846d9d](https://github.com/tcarney/ha-chore-calendar/commit/4846d9d0d3a2709a7b1c727debb7b6ae971a0cb5))
+* missed occurrences, completion-time skip resolution, dialog status block ([#44](https://github.com/tcarney/ha-chore-calendar/issues/44)) ([e1c438f](https://github.com/tcarney/ha-chore-calendar/commit/e1c438fb6223a4e98c5ef345c60a4c018497a267))
+
+
+### Bug Fixes
+
+* leave due empty for one-shot chores and allow clearing it ([#47](https://github.com/tcarney/ha-chore-calendar/issues/47)) ([caadd9f](https://github.com/tcarney/ha-chore-calendar/commit/caadd9fb625919355a583c6b75747c233694f3b7))
+
 ## [0.12.2](https://github.com/tcarney/ha-chore-calendar/compare/v0.12.1...v0.12.2) (2026-09-13)
 
 
