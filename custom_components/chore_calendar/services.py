@@ -415,6 +415,10 @@ async def _async_handle_update(call: ServiceCall) -> None:
         msg = f"Chore '{uid}' not found"
         raise ServiceValidationError(msg)
 
+    # An update can move the anchor (a schedule change, a released skip); store
+    # an overdue chore's streak reset first so the rebuilt chore carries it.
+    existing.settle_streak(dt_util.now())
+
     # Build updated dict from existing chore, overlaying provided fields.
     updated = existing.to_dict()
     if ATTR_CHORE_NAME in call.data:
@@ -581,6 +585,10 @@ async def _async_handle_skip(call: ServiceCall) -> None:
     ):
         msg = f"Cannot skip completed chore '{existing.chore_name}'"
         raise ServiceValidationError(msg)
+
+    # A skip moves the anchor and can take an overdue chore out of overdue;
+    # store the streak reset first so the skip cannot hide it.
+    existing.settle_streak(dt_util.now())
 
     explicit_until: datetime | None = call.data.get(ATTR_UNTIL)
     if explicit_until is not None:
