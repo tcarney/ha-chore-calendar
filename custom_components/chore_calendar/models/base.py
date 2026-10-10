@@ -64,6 +64,13 @@ class BaseChore(abc.ABC):
     # zero. Drives the interval-chore `count` lifecycle (an interval occurrence
     # exists only once completed, so completions are its occurrences).
     completion_count: int = 0
+    # Consecutive on-time completions. Only ``ScheduledChore`` changes it (see
+    # ``_streak_after_completion``); surfaces read ``current_streak``, which
+    # reports 0 while the chore is overdue.
+    streak: int = 0
+    # Undo slot for ``streak``, saved by ``apply_completion`` and restored by
+    # ``revert_completion``.
+    previous_streak: int = 0
     # Window before the operative due time during which a chore reads as
     # PENDING (upcoming, completable early). Shared by all chore types.
     pending_period: timedelta = field(default_factory=lambda: timedelta(minutes=DEFAULT_PENDING_PERIOD_MINS))
@@ -368,6 +375,8 @@ class BaseChore(abc.ABC):
             "grace_period_mins": int(self.grace_period.total_seconds() // 60),
             "terminal": self.terminal,
             "completion_count": self.completion_count,
+            "streak": self.streak,
+            "previous_streak": self.previous_streak,
             "trigger_tag_id": self.trigger_tag_id,
             "assigned_to": list(self.assigned_to),
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -453,6 +462,8 @@ def _extract_base_kwargs(data: dict[str, Any], chore_type: ChoreType) -> dict[st
         "previous_skipped_until": _parse_local(data.get("previous_skipped_until")),
         "terminal": bool(data.get("terminal", False)),
         "completion_count": int(data.get("completion_count", 0)),
+        "streak": int(data.get("streak", 0)),
+        "previous_streak": int(data.get("previous_streak", 0)),
         "pending_period": timedelta(minutes=data.get("pending_period_mins", DEFAULT_PENDING_PERIOD_MINS)),
         "grace_period": timedelta(minutes=data.get("grace_period_mins", DEFAULT_GRACE_PERIOD_MINS)),
     }

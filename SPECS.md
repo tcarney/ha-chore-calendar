@@ -194,6 +194,8 @@ File: `.storage/chore_calendar.{entry_id}` (one per list). Current version is 5.
         "grace_period_mins": 60,
         "terminal": false,
         "completion_count": 12,
+        "streak": 7,
+        "previous_streak": 6,
         "trigger_tag_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
         "assigned_to": ["person.alice"],
         "created_at": "2026-03-01T10:00:00+00:00",
@@ -249,6 +251,8 @@ File: `.storage/chore_calendar.{entry_id}` (one per list). Current version is 5.
 ```
 
 Each item also carries the undo-slot fields (`previous_last_completed`, `previous_last_completed_by`, `previous_skipped_until`), omitted above for brevity. The interval `schedule` keys `bymonth`, `until`, and `count` are serialized only when set. `persist` is a cross-type `BaseChore` field serialized inside each type's `schedule` sub-dict and always present on all three types.
+
+`streak` and `previous_streak` are top-level item fields (default 0). Only scheduled chores change them; see [Streak](#streak). Stores written before the fields existed load with both at 0, with no version bump.
 
 `completed_cleared_at` is a per-list field alongside `items`, holding the cutoff set by `hide_completed_items`. New keys default to `null` for backward compatibility, so older stores that omit them load cleanly without a version bump.
 
