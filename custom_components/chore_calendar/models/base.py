@@ -275,6 +275,10 @@ class BaseChore(abc.ABC):
         cadence resumes. Either way the pre-completion value is saved to the
         undo slot, so ``revert_completion`` restores the same skip state.
         """
+        # Judge the streak first: it reads the status before this completion lands.
+        new_streak = self._streak_after_completion(timestamp)
+        self.previous_streak = self.streak
+        self.streak = new_streak
         self.previous_last_completed = self.last_completed
         self.previous_last_completed_by = self.last_completed_by
         self.last_completed = timestamp
@@ -321,6 +325,29 @@ class BaseChore(abc.ABC):
         del timestamp
         return False
 
+    def _streak_after_completion(self, timestamp: datetime) -> int:
+        """Return the streak a completion at *timestamp* produces.
+
+        Default: unchanged. Only ``ScheduledChore`` keeps a streak. Called by
+        ``apply_completion`` before it records the completion, so the status
+        it reads is the pre-completion status.
+        """
+        del timestamp
+        return self.streak
+
+    def settle_streak(self, now: datetime) -> None:
+        """Store the read-time streak reset before an anchor move can hide it.
+
+        Default: no-op. ``ScheduledChore`` stores 0 when the chore is overdue
+        at *now*. Called by the skip, todo due-edit, and update paths.
+        """
+        del now
+
+    def current_streak(self, now: datetime) -> int | None:
+        """Return the streak to display at *now*, or None for types without one."""
+        del now
+        return None
+
     def revert_completion(self) -> None:
         """Restore the previous completion state from the undo slot.
 
@@ -340,6 +367,9 @@ class BaseChore(abc.ABC):
         self.previous_last_completed_by = None
         self.previous_skipped_until = None
         self.terminal = False
+        # ``previous_streak`` keeps its value, so a second revert leaves the
+        # streak unchanged instead of reaching two completions back.
+        self.streak = self.previous_streak
         # Floor at zero: chores stored before the counter existed load with
         # completion_count=0 even when last_completed is set, so a revert of
         # such a completion must not go negative.
