@@ -2152,3 +2152,42 @@ async def test_skip_of_completed_chore_is_silent(hass, config_entry):
     chore = config_entry.runtime_data.store.get_chore(TEST_UID)
     assert chore.skipped_until == datetime(2099, 1, 15, 8, 0, tzinfo=TZ)
     assert [e for e in events if e.data["uid"] == TEST_UID] == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_items_returns_streak(hass, config_entry):
+    """get_items carries `streak` for scheduled chores and null for the other types."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    store = config_entry.runtime_data.store
+    await store.async_create_chore(
+        ScheduledChore(
+            uid="teeth",
+            chore_name="Brush Teeth",
+            chore_type=ChoreType.SCHEDULED,
+            time=dtime(8, 0),
+            pending_period=timedelta(hours=3),
+            grace_period=timedelta(hours=1),
+            last_completed=datetime(2026, 3, 30, 8, 30, tzinfo=TZ),
+            streak=4,
+        )
+    )
+    await store.async_create_chore(
+        OneshotChore(
+            uid="taxes",
+            chore_name="File Taxes",
+            chore_type=ChoreType.ONESHOT,
+            due_datetime=datetime(2026, 4, 15, 12, 0, tzinfo=TZ),
+        )
+    )
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        response = await hass.services.async_call(
+            DOMAIN,
+            "get_items",
+            {"entity_id": entity_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    streaks = {item["uid"]: item["streak"] for item in response["items"]}
+    assert streaks == {"teeth": 4, TEST_UID: None, "taxes": None}

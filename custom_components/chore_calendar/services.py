@@ -685,6 +685,7 @@ async def _async_handle_get_items(call: ServiceCall) -> ServiceResponse:
                 "upcoming_due": upcoming_due.isoformat() if upcoming_due else None,
                 "missed_count": len(missed),
                 "missed_occurrences": [due.isoformat() for due in missed[-MISSED_OCCURRENCES_LIMIT:]],
+                "streak": chore.current_streak(now),
                 "last_completed": chore.last_completed.isoformat() if chore.last_completed else None,
                 "last_completed_by": chore.last_completed_by,
                 "assigned_to": list(chore.assigned_to),
