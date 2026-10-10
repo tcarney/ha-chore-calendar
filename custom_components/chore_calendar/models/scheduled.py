@@ -8,7 +8,7 @@ from typing import Any, Self
 
 from dateutil import rrule as du_rrule
 
-from custom_components.chore_calendar.const import PERIOD_WALK_LIMIT
+from custom_components.chore_calendar.const import PERIOD_WALK_LIMIT, ChoreStatus
 
 from .base import BaseChore
 
@@ -250,6 +250,37 @@ class ScheduledChore(BaseChore):
             return False
         period = self._find_current_period(timestamp)
         return self._find_next_active_day(period) is None
+
+    def _streak_after_completion(self, timestamp: datetime) -> int:
+        """Add one for an on-time completion and reset to 0 for an overdue one.
+
+        On time means ``pending`` or ``due`` with *timestamp* inside the
+        current period's window. The window check excludes a never-completed
+        chore completed before its first window. That chore reads ``pending``
+        through the never-completed fallthrough, but the completion does not
+        satisfy the period. A completion in an already-satisfied period
+        leaves the streak unchanged.
+        """
+        status = self.compute_status(timestamp)
+        if status is ChoreStatus.OVERDUE:
+            return 0
+        if status in (ChoreStatus.PENDING, ChoreStatus.DUE):
+            due_at = self._operative_due_at(timestamp)
+            # Never None for a scheduled chore; the base signature is Optional.
+            if due_at is not None and timestamp >= due_at - self.pending_period:
+                return self.streak + 1
+        return self.streak
+
+    def settle_streak(self, now: datetime) -> None:
+        """Store 0 when the chore is overdue at *now*."""
+        if self.compute_status(now) is ChoreStatus.OVERDUE:
+            self.streak = 0
+
+    def current_streak(self, now: datetime) -> int | None:
+        """Return 0 while the chore is overdue, otherwise the stored streak."""
+        if self.compute_status(now) is ChoreStatus.OVERDUE:
+            return 0
+        return self.streak
 
     def _is_finite(self) -> bool:
         """Return True when the rrule carries UNTIL or COUNT."""
