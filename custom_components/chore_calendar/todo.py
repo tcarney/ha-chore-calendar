@@ -350,6 +350,9 @@ def _apply_due_edit(chore: BaseChore, new_due: datetime | None) -> None:
     if chore.terminal:
         msg = f"The series for '{chore.chore_name}' has ended; reschedule it via chore_calendar.update_item"
         raise ServiceValidationError(msg)
+    # A due edit moves the anchor and can take an overdue chore out of
+    # overdue; store the streak reset first so the edit cannot hide it.
+    chore.settle_streak(dt_util.now())
     if new_due is None:
         if chore.skipped_until is None:
             msg = (

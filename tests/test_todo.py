@@ -1114,3 +1114,40 @@ async def test_recurring_chore_reappears_as_needs_action(hass, config_entry):
         items = entity.todo_items
     assert items is not None
     assert items[0].status == TodoItemStatus.NEEDS_ACTION
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_due_on_overdue_recurring_settles_streak(hass, config_entry):
+    """A due-date edit on an overdue recurring chore stores the streak reset."""
+    entity_id = await _setup_entry(hass, config_entry)
+    runtime = config_entry.runtime_data
+
+    chore = ScheduledChore(
+        uid="teeth",
+        chore_name="Brush Teeth",
+        chore_type=ChoreType.SCHEDULED,
+        time=time(8, 0),
+        active_days=[],
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        # Mar 30 08:00 lapsed at 09:00, so the chore is overdue at FROZEN_NOW.
+        last_completed=datetime(2026, 3, 29, 8, 30, tzinfo=TZ),
+        streak=5,
+    )
+    await runtime.store.async_create_chore(chore)
+    await _refresh_at(hass, config_entry, FROZEN_NOW)
+
+    new_due = FROZEN_NOW + timedelta(days=1)
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": entity_id, "item": "teeth", "due_datetime": new_due.isoformat()},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    updated = runtime.store.get_chore("teeth")
+    assert updated is not None
+    assert updated.skipped_until == new_due
+    assert updated.streak == 0

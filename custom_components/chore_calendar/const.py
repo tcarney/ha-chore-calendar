@@ -70,6 +70,7 @@ ATTR_MISSED_OCCURRENCES = "missed_occurrences"
 ATTR_NEXT_DUE = "next_due"
 ATTR_UPCOMING_DUE = "upcoming_due"
 ATTR_SCHEDULE = "schedule"
+ATTR_STREAK = "streak"
 ATTR_TRIGGER_ENTITY = "trigger_entity"
 
 # Service field key for item lookup by name or UID.

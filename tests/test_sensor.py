@@ -9,7 +9,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.chore_calendar.const import CONF_LIST_NAME, DOMAIN, ChoreType
-from custom_components.chore_calendar.models import IntervalChore, ScheduledChore
+from custom_components.chore_calendar.models import IntervalChore, OneshotChore, ScheduledChore
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import entity_registry as er
 
@@ -174,3 +174,79 @@ async def test_sensor_missed_occurrence_attributes(hass, config_entry):
     assert listed[0] == "2026-03-21T08:00:00-05:00"
     assert listed[-1] == "2026-03-30T08:00:00-05:00"
     assert state.attributes["upcoming_due"] == "2026-03-31T08:00:00-05:00"
+
+
+def _sensor_attributes(hass, entry: MockConfigEntry, uid: str) -> dict:
+    """Return the state attributes of a chore's sensor."""
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_{uid}")
+    assert entity_id is not None
+    state = hass.states.get(entity_id)
+    assert state is not None
+    return dict(state.attributes)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_sensor_streak_attribute_scheduled_only(hass, config_entry):
+    """A scheduled sensor carries `streak`; interval and oneshot sensors do not."""
+    await _setup_entry(hass, config_entry)
+    runtime_data = config_entry.runtime_data
+
+    chores = [
+        ScheduledChore(
+            uid="teeth",
+            chore_name="Brush Teeth",
+            chore_type=ChoreType.SCHEDULED,
+            time=time(8, 0),
+            pending_period=timedelta(hours=3),
+            grace_period=timedelta(hours=1),
+            last_completed=datetime(2026, 3, 30, 8, 30, tzinfo=TZ),
+            streak=4,
+        ),
+        IntervalChore(uid="dishes", chore_name="Do Dishes", chore_type=ChoreType.INTERVAL, freq="daily", interval=1),
+        OneshotChore(
+            uid="taxes",
+            chore_name="File Taxes",
+            chore_type=ChoreType.ONESHOT,
+            due_datetime=datetime(2026, 4, 15, 12, 0, tzinfo=TZ),
+        ),
+    ]
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        for chore in chores:
+            await runtime_data.store.async_create_chore(chore)
+        await runtime_data.coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+    assert _sensor_attributes(hass, config_entry, "teeth")["streak"] == 4
+    assert "streak" not in _sensor_attributes(hass, config_entry, "dishes")
+    assert "streak" not in _sensor_attributes(hass, config_entry, "taxes")
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_sensor_streak_resets_when_grace_lapses(hass, config_entry):
+    """The attribute flips to 0 at the first refresh after the grace period lapses."""
+    await _setup_entry(hass, config_entry)
+    runtime_data = config_entry.runtime_data
+
+    chore = ScheduledChore(
+        uid="teeth",
+        chore_name="Brush Teeth",
+        chore_type=ChoreType.SCHEDULED,
+        time=time(8, 0),
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        last_completed=datetime(2026, 3, 29, 8, 30, tzinfo=TZ),
+        streak=5,
+    )
+    with patch("homeassistant.util.dt.now", return_value=datetime(2026, 3, 30, 8, 30, tzinfo=TZ)):
+        await runtime_data.store.async_create_chore(chore)
+        await runtime_data.coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert _sensor_attributes(hass, config_entry, "teeth")["streak"] == 5
+
+    with patch("homeassistant.util.dt.now", return_value=datetime(2026, 3, 30, 9, 0, tzinfo=TZ)):
+        await runtime_data.coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert _sensor_attributes(hass, config_entry, "teeth")["streak"] == 0
+    # The read-time reset leaves storage alone until a mutation settles it.
+    assert runtime_data.store.get_chore("teeth").streak == 5
