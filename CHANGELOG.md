@@ -2,6 +2,13 @@
 
 # Changelog
 
+## [0.14.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.13.0...v0.14.0) (2026-11-07)
+
+
+### Features
+
+* add a streak to scheduled chores ([#52](https://github.com/tcarney/ha-chore-calendar/issues/52)) ([7515f89](https://github.com/tcarney/ha-chore-calendar/commit/7515f892c5b29adc03f2d50be5627320ed0e9775))
+
 ## [0.13.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.12.2...v0.13.0) (2026-10-08)
 
 
