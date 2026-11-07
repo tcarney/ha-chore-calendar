@@ -2152,3 +2152,164 @@ async def test_skip_of_completed_chore_is_silent(hass, config_entry):
     chore = config_entry.runtime_data.store.get_chore(TEST_UID)
     assert chore.skipped_until == datetime(2099, 1, 15, 8, 0, tzinfo=TZ)
     assert [e for e in events if e.data["uid"] == TEST_UID] == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_get_items_returns_streak(hass, config_entry):
+    """get_items carries `streak` for scheduled chores and null for the other types."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    store = config_entry.runtime_data.store
+    await store.async_create_chore(
+        ScheduledChore(
+            uid="teeth",
+            chore_name="Brush Teeth",
+            chore_type=ChoreType.SCHEDULED,
+            time=dtime(8, 0),
+            pending_period=timedelta(hours=3),
+            grace_period=timedelta(hours=1),
+            last_completed=datetime(2026, 3, 30, 8, 30, tzinfo=TZ),
+            streak=4,
+        )
+    )
+    await store.async_create_chore(
+        OneshotChore(
+            uid="taxes",
+            chore_name="File Taxes",
+            chore_type=ChoreType.ONESHOT,
+            due_datetime=datetime(2026, 4, 15, 12, 0, tzinfo=TZ),
+        )
+    )
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        response = await hass.services.async_call(
+            DOMAIN,
+            "get_items",
+            {"entity_id": entity_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    streaks = {item["uid"]: item["streak"] for item in response["items"]}
+    assert streaks == {"teeth": 4, TEST_UID: None, "taxes": None}
+
+
+STREAK_UID = "5feaa000-0000-4000-8000-000000000001"
+# At FROZEN_NOW (Mar 30 12:00) a daily 08:00 chore last completed here is overdue.
+OVERDUE_LAST = datetime(2026, 3, 29, 8, 30, tzinfo=TZ)
+# At FROZEN_NOW a chore last completed here has satisfied today's period.
+COMPLETED_LAST = datetime(2026, 3, 30, 8, 30, tzinfo=TZ)
+
+
+async def _add_streak_chore(
+    hass, entry: MockConfigEntry, *, last_completed: datetime, streak: int, previous_streak: int = 0
+) -> str:
+    """Add a daily 08:00 scheduled chore with a stored streak; return its UID."""
+    chore = ScheduledChore(
+        uid=STREAK_UID,
+        chore_name="Brush Teeth",
+        chore_type=ChoreType.SCHEDULED,
+        time=dtime(8, 0),
+        active_days=[],
+        pending_period=timedelta(hours=3),
+        grace_period=timedelta(hours=1),
+        last_completed=last_completed,
+        streak=streak,
+        previous_streak=previous_streak,
+    )
+    await entry.runtime_data.store.async_create_chore(chore)
+    await entry.runtime_data.coordinator.async_refresh()
+    await hass.async_block_till_done()
+    return STREAK_UID
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.parametrize("until", [None, "2026-04-02T08:00:00-05:00"])
+async def test_skip_item_settles_streak_on_overdue_chore(hass, config_entry, until):
+    """Skipping an overdue chore stores the reset, by default skip and by explicit until."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    uid = await _add_streak_chore(hass, config_entry, last_completed=OVERDUE_LAST, streak=5)
+    data = {"entity_id": entity_id, "item": uid}
+    if until is not None:
+        data["until"] = until
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(DOMAIN, "skip_item", data, blocking=True)
+
+    assert config_entry.runtime_data.store.get_chore(uid).streak == 0
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.parametrize(
+    ("last_completed", "now"),
+    [
+        (OVERDUE_LAST, datetime(2026, 3, 30, 6, 0, tzinfo=TZ)),  # Pending.
+        (OVERDUE_LAST, datetime(2026, 3, 30, 8, 30, tzinfo=TZ)),  # Due.
+        (COMPLETED_LAST, FROZEN_NOW),  # Completed (dormant).
+    ],
+)
+async def test_skip_item_keeps_streak_when_not_overdue(hass, config_entry, last_completed, now):
+    """A skip of a chore that is not overdue leaves the streak unchanged."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    uid = await _add_streak_chore(hass, config_entry, last_completed=last_completed, streak=5)
+
+    with patch("homeassistant.util.dt.now", return_value=now):
+        await hass.services.async_call(DOMAIN, "skip_item", {"entity_id": entity_id, "item": uid}, blocking=True)
+
+    assert config_entry.runtime_data.store.get_chore(uid).streak == 5
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_item_settles_streak_on_overdue_chore(hass, config_entry):
+    """update_item on an overdue chore stores the reset into the rebuilt chore."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    uid = await _add_streak_chore(hass, config_entry, last_completed=OVERDUE_LAST, streak=5)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "update_item",
+            {"entity_id": entity_id, "item": uid, "scheduled": {"frequency": "weekly", "byday": ["mon"]}},
+            blocking=True,
+        )
+
+    assert config_entry.runtime_data.store.get_chore(uid).streak == 0
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_item_same_type_keeps_streak(hass, config_entry):
+    """A same-type update of a chore that is not overdue carries the streak through."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    uid = await _add_streak_chore(hass, config_entry, last_completed=COMPLETED_LAST, streak=5, previous_streak=4)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "update_item",
+            {"entity_id": entity_id, "item": uid, "chore_name": "Brush Teeth Twice"},
+            blocking=True,
+        )
+
+    chore = config_entry.runtime_data.store.get_chore(uid)
+    assert chore.chore_name == "Brush Teeth Twice"
+    assert chore.streak == 5
+    assert chore.previous_streak == 4
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_update_item_conversion_resets_streak(hass, config_entry):
+    """A cross-type conversion resets both streak fields with the completion cycle."""
+    entity_id = await _setup_with_chore(hass, config_entry)
+    uid = await _add_streak_chore(hass, config_entry, last_completed=COMPLETED_LAST, streak=5, previous_streak=4)
+
+    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
+        await hass.services.async_call(
+            DOMAIN,
+            "update_item",
+            {"entity_id": entity_id, "item": uid, "interval": {"frequency": "weekly", "interval": 2}},
+            blocking=True,
+        )
+
+    converted = config_entry.runtime_data.store.get_chore(uid)
+    assert isinstance(converted, IntervalChore)
+    assert converted.streak == 0
+    assert converted.previous_streak == 0

@@ -22,6 +22,7 @@ from .const import (
     ATTR_MISSED_OCCURRENCES,
     ATTR_NEXT_DUE,
     ATTR_SCHEDULE,
+    ATTR_STREAK,
     ATTR_TRIGGER_ENTITY,
     ATTR_UID,
     ATTR_UPCOMING_DUE,
@@ -178,7 +179,7 @@ class ChoreSensorEntity(CoordinatorEntity[ChoreCalendarCoordinator], SensorEntit
         next_due = chore.compute_next_due(now)
         upcoming_due = chore.compute_upcoming_due(now)
         missed = chore.compute_missed_occurrences(now)
-        return {
+        attributes: dict[str, Any] = {
             ATTR_UID: chore.uid,
             ATTR_CHORE_TYPE: str(chore.chore_type),
             ATTR_TRIGGER_ENTITY: resolve_tag_entity_id(self.hass, chore.trigger_tag_id),
@@ -191,6 +192,11 @@ class ChoreSensorEntity(CoordinatorEntity[ChoreCalendarCoordinator], SensorEntit
             ATTR_ASSIGNED_TO: list(chore.assigned_to),
             ATTR_SCHEDULE: chore.schedule_description(),
         }
+        # Only scheduled chores keep a streak; the other types omit the key.
+        streak = chore.current_streak(now)
+        if streak is not None:
+            attributes[ATTR_STREAK] = streak
+        return attributes
 
     def _get_chore(self) -> BaseChore | None:
         """Get the chore from coordinator data."""

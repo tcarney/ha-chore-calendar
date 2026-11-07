@@ -388,3 +388,33 @@ async def test_storage_migration_v4_zero_interval_clamped(hass):
     chore = store.get_chore("zero-uid")
     assert isinstance(chore, IntervalChore)
     assert (chore.freq, chore.interval) == ("minutely", 1)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_store_loads_items_without_streak_fields(hass):
+    """Storage written before the streak fields existed loads with both at 0."""
+    entry_id = "streak_defaults_entry"
+    raw_store: Store[dict] = Store(hass, 5, f"{DOMAIN}.{entry_id}")
+    await raw_store.async_save(
+        {
+            "items": [
+                {
+                    "uid": "scheduled-uid",
+                    "chore_name": "Trash Night",
+                    "chore_type": "scheduled",
+                    "schedule": {"rrule": "FREQ=DAILY", "dtstart": "2026-05-04T08:00:00"},
+                    "pending_period_mins": 180,
+                    "grace_period_mins": 60,
+                    "completion_count": 7,
+                },
+            ],
+        }
+    )
+
+    store = ChoreStore(hass, entry_id)
+    await store.async_load()
+
+    chore = store.get_chore("scheduled-uid")
+    assert chore is not None
+    assert chore.streak == 0
+    assert chore.previous_streak == 0

@@ -115,6 +115,7 @@ The chore sensor's state is the chore's current status. Additional attributes ar
 | `upcoming_due` | Scheduled chores only: the first uncompleted occurrence that is not yet missed. This is the occurrence currently pending, due, or still ahead. Equals `next_due` when nothing is missed. `null` for interval and oneshot chores. |
 | `missed_count` | Number of uncompleted occurrences whose grace period has lapsed. Non-zero exactly when the chore is `overdue`. |
 | `missed_occurrences` | The most recent missed occurrences (ISO 8601, oldest first). The earliest is always `next_due`. |
+| `streak` | Scheduled chores only: the count of consecutive on-time completions. A completion while `pending` or `due` adds one. A repeat completion in an already-satisfied period, and a skip, leave it unchanged. It resets to 0 when the chore goes `overdue`, so a chore that may be finished late needs a grace period that covers the lateness. Absent on interval and oneshot sensors. |
 | `last_completed` | When the chore was last completed (ISO 8601), or `null` if never completed. |
 | `last_completed_by` | The `person.*` entity that completed the chore, or `null`. Set via the optional `completed_by` parameter on `chore_calendar.complete_item`. Shown in the card detail dialog and included in status events. |
 | `trigger_entity` | The `tag.*` entity assigned to the chore, or `null`. See [Tag Triggers](#tag-triggers). |
@@ -418,7 +419,7 @@ response_variable: result
 # result.items contains the list of matching chores
 ```
 
-Each item carries the sensor's [common attributes](#common-attributes) plus `chore_name`, `description`, `status`, and `schedule`.
+Each item carries the sensor's [common attributes](#common-attributes) plus `chore_name`, `description`, `status`, and `schedule`. `streak` is always present and is `null` for interval and oneshot chores.
 
 ## Dashboard Card
 

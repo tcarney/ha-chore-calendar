@@ -119,6 +119,25 @@ Each chore carries a one-level undo slot (`previous_last_completed` and `previou
 
 A parallel `previous_skipped_until` slot holds any `skipped_until` value that a completion cleared (see [Skip](#skip)). `uncomplete_item` restores it in the same step.
 
+### Streak
+
+A scheduled chore stores `streak`, its count of consecutive on-time completions, with `previous_streak` as its undo slot. Interval and oneshot chores keep both at 0 and report no streak.
+
+`apply_completion` judges a completion by the status at its timestamp, before recording it, so a backdated `completed_at` is judged at the time the work was done.
+
+| Status at the completion timestamp | New `streak` |
+| --- | --- |
+| `pending` or `due`, at or after the pending window opens | `streak + 1` |
+| `pending`, before the pending window (a never-completed chore) | unchanged |
+| `overdue` | 0 |
+| `completed` | unchanged |
+
+The grace period is the only allowance for late work. A chore that may be finished late without a reset needs a grace period that covers the lateness. An `overdue` completion inside the next period's pending window also satisfies that period, so that period earns nothing.
+
+Undo restores `previous_streak` and leaves the slot as it is, so a second undo leaves the streak unchanged.
+
+Surfaces read `current_streak(now)`, which returns 0 while the chore is `overdue` and the stored value otherwise. A reset that happened while Home Assistant was down therefore shows on the first read. `skip_item`, a todo due-date edit, and `update_item` can move the anchor, so each calls `settle_streak(now)` first, which stores 0 for an `overdue` chore. A cross-type conversion resets both fields.
+
 ### Skip
 
 `skip_item` reschedules a chore's current occurrence without touching `last_completed`. Skipping is distinct from completing, which preserves an accurate record of when the task was really done. The only argument is an optional `until`. With no `until` the service delegates to the type's `apply_default_skip`. With an explicit `until` it sets `skipped_until` to that datetime (a naive value is coerced to local time) in either direction. There is no per-occurrence `range` or `recurrence_id` surface. The integration is a chore tracker, and calendar editing is out of scope.
@@ -194,6 +213,8 @@ File: `.storage/chore_calendar.{entry_id}` (one per list). Current version is 5.
         "grace_period_mins": 60,
         "terminal": false,
         "completion_count": 12,
+        "streak": 7,
+        "previous_streak": 6,
         "trigger_tag_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
         "assigned_to": ["person.alice"],
         "created_at": "2026-03-01T10:00:00+00:00",
@@ -249,6 +270,8 @@ File: `.storage/chore_calendar.{entry_id}` (one per list). Current version is 5.
 ```
 
 Each item also carries the undo-slot fields (`previous_last_completed`, `previous_last_completed_by`, `previous_skipped_until`), omitted above for brevity. The interval `schedule` keys `bymonth`, `until`, and `count` are serialized only when set. `persist` is a cross-type `BaseChore` field serialized inside each type's `schedule` sub-dict and always present on all three types.
+
+`streak` and `previous_streak` are top-level item fields (default 0). Only scheduled chores change them; see [Streak](#streak). Stores written before the fields existed load with both at 0, with no version bump.
 
 `completed_cleared_at` is a per-list field alongside `items`, holding the cutoff set by `hide_completed_items`. New keys default to `null` for backward compatibility, so older stores that omit them load cleanly without a version bump.
 
