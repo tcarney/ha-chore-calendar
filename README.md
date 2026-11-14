@@ -20,12 +20,15 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 
 ### Install
 
-**Prerequisites:** [HACS](https://hacs.xyz/) must be installed.
+**Requires** Home Assistant 2026.11 or later. Chore Calendar installs from the built-in Marketplace.
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tcarney&repository=ha-chore-calendar&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=tcarney&repository=ha-chore-calendar&category=integration)
 
-1. Click "Download" to install
-2. **Restart Home Assistant**
+1. Click the button above, or go to **Settings** > **Marketplace** and search for **"Chore Calendar"**
+2. Click "Download" to install
+3. **Restart Home Assistant**
+
+On Home Assistant 2026.4 to 2026.10, install version 0.14.0 through HACS.
 
 <details>
 <summary>Manual Installation</summary>
@@ -293,7 +296,7 @@ data:
 
 The service records the completion without checking the chore's window. Completing an interval chore early resets its clock from the new `last_completed`. Completing a scheduled chore before its pending window opens records the completion in history but does not satisfy the upcoming occurrence, which still comes due on schedule.
 
-An active [skip](#skip-a-chore) is kept when its date is later than the next due the completion produces, and cleared otherwise. Uncompleting restores the skip. The `keep_skip` field is deprecated, has no effect, and will be removed in 1.0.0.
+An active [skip](#skip-a-chore) is kept when its date is later than the next due the completion produces, and cleared otherwise. Uncompleting restores the skip.
 
 ### Skip a Chore
 

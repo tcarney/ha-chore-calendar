@@ -31,6 +31,8 @@ source "$SCRIPT_DIR/.lib/output.sh"
 # Configuration
 HA_CORE_DIR=".local/ha-core"
 HA_CORE_REPO="https://github.com/home-assistant/core.git"
+# HA 2026.11 moved the hassfest runner to packages/hassfest/.
+HA_CORE_SPARSE_PATHS=(script/ homeassistant/ packages/hassfest/)
 INTEGRATION_PATH="custom_components/chore_calendar"
 
 # Detect Home Assistant version to use
@@ -73,16 +75,14 @@ log_info "Target version: $HA_VERSION_TAG"
 if [ ! -d "$HA_CORE_DIR" ]; then
     log_info "Cloning Home Assistant Core (sparse checkout, ~5 MB)..."
 
-    # Initialize sparse checkout to only get script/ directory
     mkdir -p "$HA_CORE_DIR"
     cd "$HA_CORE_DIR"
     git init >/dev/null 2>&1
     git remote add origin "$HA_CORE_REPO"
     git config core.sparseCheckout true
 
-    # Only checkout script/ and homeassistant/ directories (needed for hassfest)
-    echo "script/" > .git/info/sparse-checkout
-    echo "homeassistant/" >> .git/info/sparse-checkout
+    # Only check out the paths hassfest needs
+    printf '%s\n' "${HA_CORE_SPARSE_PATHS[@]}" > .git/info/sparse-checkout
 
     # Fetch the specific version (shallow clone + blobless for minimal size)
     if [ "$HA_VERSION_TAG" = "dev" ]; then
@@ -133,14 +133,21 @@ fi
 
 # Check if we have required dependencies
 log_info "Checking dependencies..."
-if ! python3 -c "import voluptuous, awesomeversion, homeassistant.helpers.config_validation" >/dev/null 2>&1; then
-    log_error "Missing required dependencies (voluptuous, awesomeversion, homeassistant)"
+if ! python3 -c "import probatio, awesomeversion, homeassistant.helpers.config_validation" >/dev/null 2>&1; then
+    log_error "Missing required dependencies (probatio, awesomeversion, homeassistant)"
     log_info "Run: ./script/bootstrap"
     exit 1
 fi
 
-# Export PYTHONPATH to include HA Core
-export PYTHONPATH="$PWD/$HA_CORE_DIR:${PYTHONPATH:-}"
+# A clone made before a path joined the list lacks it until the working tree is re-read.
+sparse_paths=$(printf '%s\n' "${HA_CORE_SPARSE_PATHS[@]}")
+if [[ "$(cat "$HA_CORE_DIR/.git/info/sparse-checkout")" != "$sparse_paths" ]]; then
+    printf '%s\n' "$sparse_paths" > "$HA_CORE_DIR/.git/info/sparse-checkout"
+    git -C "$HA_CORE_DIR" read-tree -mu HEAD
+fi
+
+# Export PYTHONPATH to include HA Core and its hassfest package
+export PYTHONPATH="$PWD/$HA_CORE_DIR:$PWD/$HA_CORE_DIR/packages/hassfest:${PYTHONPATH:-}"
 
 # Build hassfest command
 HASSFEST_CMD=(

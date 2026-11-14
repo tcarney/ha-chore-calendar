@@ -261,9 +261,14 @@ export class ChoreCalendarCardEditor extends LitElement {
       margin: 4px 0 16px;
     }
 
-    .toggles ha-formfield {
-      width: 100%;
+    /* HA 2026.11 removed ha-formfield, so each toggle row is a plain label. */
+    .toggles label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
       min-height: 40px;
+      cursor: pointer;
     }
   `;
 
@@ -368,12 +373,13 @@ export class ChoreCalendarCardEditor extends LitElement {
       <div class="toggles">
         ${TOGGLE_KEYS.map(
           (key) => html`
-            <ha-formfield alignEnd spaceBetween .label=${localize(this.hass, EDITOR_LABEL_KEYS[key])}>
+            <label @click=${this._labelClicked}>
+              <span>${localize(this.hass, EDITOR_LABEL_KEYS[key])}</span>
               <ha-switch
                 .checked=${!!this._config[key]}
                 @change=${(ev: Event) => this._toggleChanged(key, ev)}
               ></ha-switch>
-            </ha-formfield>
+            </label>
           `,
         )}
       </div>
@@ -565,6 +571,17 @@ export class ChoreCalendarCardEditor extends LitElement {
     const hasValue = Object.keys(next).length > 0;
     this._config = { ...this._config, [key]: hasValue ? next : undefined };
     this._dispatch();
+  }
+
+  // ha-switch extends Web Awesome's form-associated WaSwitch. A <label> click sends a synthetic click event to
+  // the host element, which WaSwitch ignores because only its shadow <input> toggles. So forward clicks outside
+  // the switch to its click() method, which clicks that input and fires change. Clicks on the switch itself
+  // reach this handler with the switch as target and are left alone.
+  private _labelClicked(ev: MouseEvent) {
+    const sw = (ev.currentTarget as HTMLElement).querySelector<HTMLElement>("ha-switch");
+    if (!sw || ev.target === sw) return;
+    ev.preventDefault();
+    sw.click();
   }
 
   private _toggleChanged(key: keyof ChoreCalendarCardConfig, ev: Event) {

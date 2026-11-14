@@ -662,3 +662,23 @@ declare global {
     "hass-action": { config: Record<string, unknown>; action: string };
   }
 }
+
+/**
+ * Card picker suggestion for a picked entity (HA 2026.6+ ``getEntitySuggestion``).
+ * Any chore_calendar entity suggests the card for its list's calendar: the list's
+ * calendar, todo, and sensors share one device, so non-calendar entities resolve
+ * through ``device_id``.
+ */
+export function entitySuggestion(
+  hass: Pick<HomeAssistant, "entities">,
+  entityId: string,
+): { config: { type: string; entities: string[] } } | null {
+  const entry = hass.entities?.[entityId];
+  if (entry?.platform !== "chore_calendar") return null;
+  const calendar = entityId.startsWith("calendar.")
+    ? entityId
+    : Object.values(hass.entities ?? {}).find(
+        (e) => e.platform === "chore_calendar" && e.device_id === entry.device_id && e.entity_id.startsWith("calendar."),
+      )?.entity_id;
+  return calendar ? { config: { type: "custom:chore-calendar-card", entities: [calendar] } } : null;
+}

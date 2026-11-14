@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-import voluptuous as vol
+import probatio
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.helpers.selector import TextSelector
 
 from .const import CONF_LIST_NAME, DOMAIN
 
-_STEP_USER_SCHEMA = vol.Schema(
+_STEP_USER_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_LIST_NAME): TextSelector(),
+        probatio.Required(CONF_LIST_NAME): TextSelector(),
     }
 )
 

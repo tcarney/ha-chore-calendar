@@ -266,10 +266,6 @@
         "completed_at": {
           "name": "Completata alle",
           "description": "Data e ora del completamento. Predefinito: adesso."
-        },
-        "keep_skip": {
-          "name": "Mantieni salto",
-          "description": "Deprecato, non ha effetto e sarà rimosso nella 1.0.0. Un salto attivo viene mantenuto automaticamente quando cade dopo la prossima scadenza naturale."
         }
       }
     },

@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) when working in this repository.
 
 ## Project Overview
 
-**Chore Calendar** (domain `chore_calendar`) is a Home Assistant custom integration for recurring household chores, distributed through HACS. Core integration and card are complete.
+**Chore Calendar** (domain `chore_calendar`) is a Home Assistant custom integration for recurring household chores, distributed through the Home Assistant Marketplace (HACS). Core integration and card are complete.
 
 - `README.md`: user-facing documentation. Features, install, chore model, services, card configuration, events.
 - `SPECS.md`: design specification. Design decisions, state machines, storage schema, card internals.
@@ -48,10 +48,10 @@ Logs appear in the terminal running `./script/develop` and in `config/home-assis
 - YAML: 2 spaces, modern HA syntax (no legacy `platform:` style). JSON: 2 spaces, no trailing commas
 - Ruff for linting (matches HA core config), Pyright basic mode for type checking
 - Google-style docstrings. Comments are complete sentences with capitalization and an ending period
-- Import aliases: `voluptuous` as `vol`, `homeassistant.helpers.config_validation` as `cv`, `homeassistant.util.dt` as `dt_util`
+- Import aliases: `homeassistant.helpers.config_validation` as `cv`, `homeassistant.util.dt` as `dt_util`. Schemas use a plain `import probatio` (HA 2026.11 types schemas as `probatio.Schema`)
 - Import order: `from __future__ import annotations`, then stdlib, third-party, HA core, local
 - Commit messages: Conventional Commits (`feat:`, `fix:`, `chore:`, `refactor:`, `docs:`)
-- Tests: `pytest` with `asyncio_mode = auto`, using `pytest-homeassistant-custom-component` fixtures
+- Tests: `pytest` with `asyncio_mode = auto`, using `pytest-homeassistant` fixtures
 - File size: target 200 to 400 lines, split at about 500
 
 **Never suppress checks with blanket ignores.** Use specific codes with reasons: `# noqa: F401 - reason` or `# type: ignore[attr-defined] - reason`.

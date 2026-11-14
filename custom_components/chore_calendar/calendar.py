@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 from typing import TYPE_CHECKING
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
@@ -30,7 +30,7 @@ async def async_setup_entry(
     async_add_entities([ChoreCalendarListEntity(coordinator, entry)])
 
 
-def _make_due_event(chore: BaseChore, now: datetime.datetime) -> CalendarEvent | None:
+def _make_due_event(chore: BaseChore, now: dt.datetime) -> CalendarEvent | None:
     """Create a zero-duration calendar event at the chore's operative due time.
 
     Events are emitted as point-in-time markers (start == end) rather than
@@ -62,7 +62,7 @@ def _make_due_event(chore: BaseChore, now: datetime.datetime) -> CalendarEvent |
     return _due_marker(chore, next_due)
 
 
-def _due_marker(chore: BaseChore, start: datetime.datetime) -> CalendarEvent:
+def _due_marker(chore: BaseChore, start: dt.datetime) -> CalendarEvent:
     """Build a zero-duration due event, attaching series fields when on-grid."""
     rrule: str | None = None
     recurrence_id: str | None = None
@@ -83,10 +83,10 @@ def _due_marker(chore: BaseChore, start: datetime.datetime) -> CalendarEvent:
 
 def _expand_future_occurrences(
     chore: ScheduledChore,
-    operative_start: datetime.datetime,
-    now: datetime.datetime,
-    start_date: datetime.datetime,
-    end_date: datetime.datetime,
+    operative_start: dt.datetime,
+    now: dt.datetime,
+    start_date: dt.datetime,
+    end_date: dt.datetime,
 ) -> list[CalendarEvent]:
     """Expand grid occurrences beyond the operative marker within the window.
 
@@ -111,7 +111,7 @@ def _expand_future_occurrences(
 
 def _make_completed_event(
     chore: BaseChore,
-    cleared_at: datetime.datetime | None,
+    cleared_at: dt.datetime | None,
 ) -> CalendarEvent | None:
     """Create a zero-duration event at last_completed.
 
@@ -192,8 +192,8 @@ class ChoreCalendarListEntity(CoordinatorEntity[ChoreCalendarCoordinator], Calen
     async def async_get_events(
         self,
         hass: HomeAssistant,
-        start_date: datetime.datetime,
-        end_date: datetime.datetime,
+        start_date: dt.datetime,
+        end_date: dt.datetime,
     ) -> list[CalendarEvent]:
         """Return calendar events within a datetime range.
 
@@ -223,7 +223,7 @@ class ChoreCalendarListEntity(CoordinatorEntity[ChoreCalendarCoordinator], Calen
             # chores only; interval/oneshot chores have no grid to expand.
             # (The isinstance check on start narrows CalendarEvent's
             # date | datetime union; due markers are always datetimes.)
-            if isinstance(chore, ScheduledChore) and isinstance(due_evt.start, datetime.datetime):
+            if isinstance(chore, ScheduledChore) and isinstance(due_evt.start, dt.datetime):
                 events.extend(_expand_future_occurrences(chore, due_evt.start, now, start_date, end_date))
         events.sort(key=lambda e: e.start)
         LOGGER.debug(
@@ -239,8 +239,8 @@ class ChoreCalendarListEntity(CoordinatorEntity[ChoreCalendarCoordinator], Calen
 
 def _overlaps(
     event: CalendarEvent,
-    start: datetime.datetime,
-    end: datetime.datetime,
+    start: dt.datetime,
+    end: dt.datetime,
 ) -> bool:
     """Return True if *event* overlaps the [start, end) query range."""
     return event.end > start and event.start < end
