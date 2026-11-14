@@ -4,9 +4,7 @@ rules:
   appropriate-polling:
     status: exempt
     comment: Integration uses local storage with calculated iot_class; no external polling.
-  brands:
-    status: exempt
-    comment: Custom HACS integration, not in HA brands registry.
+  brands: done
   common-modules: done
   config-flow-test-coverage: done
   config-flow: done

@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import datetime, time as dtime, timedelta, timezone
 from unittest.mock import patch
 
+import probatio
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-import voluptuous as vol
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.chore_calendar.const import (
     CONF_LIST_NAME,
@@ -950,7 +950,7 @@ async def test_complete_item_invalid_datetime_raises(hass, config_entry):
     """complete_item raises on an invalid datetime string (caught by cv.datetime schema)."""
     entity_id = await _setup_with_chore(hass, config_entry)
 
-    with pytest.raises(vol.Invalid, match="Invalid datetime"):
+    with pytest.raises(probatio.Invalid, match="Invalid datetime"):
         await hass.services.async_call(
             DOMAIN,
             "complete_item",
@@ -1778,7 +1778,7 @@ async def test_skip_item_invalid_datetime_raises(hass, config_entry):
     """skip_item raises on an invalid `until` string (caught by cv.datetime schema)."""
     entity_id = await _setup_with_chore(hass, config_entry)
 
-    with pytest.raises(vol.Invalid, match="Invalid datetime"):
+    with pytest.raises(probatio.Invalid, match="Invalid datetime"):
         await hass.services.async_call(
             DOMAIN,
             "skip_item",

@@ -6,7 +6,7 @@ from datetime import datetime, time, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.chore_calendar.const import CONF_LIST_NAME, DOMAIN, ChoreType
 from custom_components.chore_calendar.models import IntervalChore, ScheduledChore
@@ -523,7 +523,7 @@ def _due_events(events):
     return [e for e in events if not e.summary.startswith("✓")]
 
 
-async def _events_for(hass, config_entry, chore, frozen, start, end):
+async def _events_for(hass, config_entry, chore, *, frozen, start, end):
     """Create *chore*, freeze time at *frozen*, and query [start, end)."""
     entity_id = await _setup_entry(hass, config_entry)
     runtime = config_entry.runtime_data

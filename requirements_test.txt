@@ -14,6 +14,6 @@
 #
 # Install with: uv pip install -r requirements_test.txt
 
-# Testing utilities for Home Assistant custom components
+# Official Home Assistant test plugin; pin matches the hacs.json minimum because bootstrap installs that HA version last.
 # Provides additional fixtures and utilities specifically for custom component testing
-pytest-homeassistant-custom-component==0.13.322
+pytest-homeassistant==2026.11.0

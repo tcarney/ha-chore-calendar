@@ -4,6 +4,9 @@
   "after_dependencies": [
     "lovelace"
   ],
+  "categories": [
+    "productivity_information.calendars_todos"
+  ],
   "codeowners": [
     "@tcarney"
   ],

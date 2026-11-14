@@ -5,7 +5,7 @@ from __future__ import annotations
 import warnings
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.chore_calendar.const import CONF_LIST_NAME, DOMAIN
 from homeassistant.core import HomeAssistant

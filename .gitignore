@@ -3,7 +3,7 @@ config/*
 !config/configuration.yaml
 !config/demo_scripts.yaml
 
-# Custom components (HACS-installed dependencies and dev symlinks)
+# Custom components (Marketplace-installed dependencies and dev symlinks)
 custom_components/*
 !custom_components/chore_calendar/
 

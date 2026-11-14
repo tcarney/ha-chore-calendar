@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any, cast
 from uuid import uuid4
 
-import voluptuous as vol
+import probatio
 
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
@@ -70,82 +70,82 @@ ATTR_ONESHOT = "oneshot"
 ATTR_PENDING_PERIOD = "pending_period"
 ATTR_GRACE_PERIOD = "grace_period"
 
-SERVICE_CREATE_SCHEMA = vol.Schema(
+SERVICE_CREATE_SCHEMA = probatio.Schema(
     {
-        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-        vol.Required(ATTR_CHORE_NAME): cv.string,
-        vol.Optional(ATTR_DESCRIPTION): cv.string,
-        vol.Optional(ATTR_TRIGGER_ENTITY): cv.entity_id,
-        vol.Optional(ATTR_ASSIGNED_TO, default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
-        vol.Optional(ATTR_SCHEDULED): dict,
-        vol.Optional(ATTR_INTERVAL): dict,
-        vol.Optional(ATTR_ONESHOT): dict,
-        vol.Optional(ATTR_PENDING_PERIOD): dict,
-        vol.Optional(ATTR_GRACE_PERIOD): dict,
+        probatio.Required(ATTR_ENTITY_ID): cv.entity_id,
+        probatio.Required(ATTR_CHORE_NAME): cv.string,
+        probatio.Optional(ATTR_DESCRIPTION): cv.string,
+        probatio.Optional(ATTR_TRIGGER_ENTITY): cv.entity_id,
+        probatio.Optional(ATTR_ASSIGNED_TO, default=[]): probatio.All(cv.ensure_list, [cv.entity_id]),
+        probatio.Optional(ATTR_SCHEDULED): dict,
+        probatio.Optional(ATTR_INTERVAL): dict,
+        probatio.Optional(ATTR_ONESHOT): dict,
+        probatio.Optional(ATTR_PENDING_PERIOD): dict,
+        probatio.Optional(ATTR_GRACE_PERIOD): dict,
     }
 )
 
-SERVICE_UPDATE_SCHEMA = vol.Schema(
+SERVICE_UPDATE_SCHEMA = probatio.Schema(
     {
-        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-        vol.Optional(ATTR_ITEM): cv.string,
-        vol.Optional(ATTR_CHORE_NAME): cv.string,
-        vol.Optional(ATTR_DESCRIPTION): cv.string,
+        probatio.Required(ATTR_ENTITY_ID): cv.entity_id,
+        probatio.Optional(ATTR_ITEM): cv.string,
+        probatio.Optional(ATTR_CHORE_NAME): cv.string,
+        probatio.Optional(ATTR_DESCRIPTION): cv.string,
         # An empty string clears the trigger tag (cv.entity_id rejects "").
-        vol.Optional(ATTR_TRIGGER_ENTITY): vol.Any(cv.entity_id, ""),
-        vol.Optional(ATTR_ASSIGNED_TO): vol.All(cv.ensure_list, [cv.entity_id]),
-        vol.Optional(ATTR_SCHEDULED): dict,
-        vol.Optional(ATTR_INTERVAL): dict,
-        vol.Optional(ATTR_ONESHOT): dict,
-        vol.Optional(ATTR_PENDING_PERIOD): dict,
-        vol.Optional(ATTR_GRACE_PERIOD): dict,
+        probatio.Optional(ATTR_TRIGGER_ENTITY): probatio.Any(cv.entity_id, ""),
+        probatio.Optional(ATTR_ASSIGNED_TO): probatio.All(cv.ensure_list, [cv.entity_id]),
+        probatio.Optional(ATTR_SCHEDULED): dict,
+        probatio.Optional(ATTR_INTERVAL): dict,
+        probatio.Optional(ATTR_ONESHOT): dict,
+        probatio.Optional(ATTR_PENDING_PERIOD): dict,
+        probatio.Optional(ATTR_GRACE_PERIOD): dict,
     }
 )
 
-SERVICE_DELETE_SCHEMA = vol.Schema(
+SERVICE_DELETE_SCHEMA = probatio.Schema(
     {
-        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-        vol.Optional(ATTR_ITEM): cv.string,
+        probatio.Required(ATTR_ENTITY_ID): cv.entity_id,
+        probatio.Optional(ATTR_ITEM): cv.string,
     }
 )
 
-SERVICE_COMPLETE_SCHEMA = vol.Schema(
+SERVICE_COMPLETE_SCHEMA = probatio.Schema(
     {
-        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-        vol.Optional(ATTR_ITEM): cv.string,
-        vol.Optional(ATTR_COMPLETED_BY): cv.entity_id,
-        vol.Optional(ATTR_COMPLETED_AT): cv.datetime,
-        vol.Optional(ATTR_KEEP_SKIP): cv.boolean,
+        probatio.Required(ATTR_ENTITY_ID): cv.entity_id,
+        probatio.Optional(ATTR_ITEM): cv.string,
+        probatio.Optional(ATTR_COMPLETED_BY): cv.entity_id,
+        probatio.Optional(ATTR_COMPLETED_AT): cv.datetime,
+        probatio.Optional(ATTR_KEEP_SKIP): cv.boolean,
     }
 )
 
-SERVICE_UNCOMPLETE_SCHEMA = vol.Schema(
+SERVICE_UNCOMPLETE_SCHEMA = probatio.Schema(
     {
-        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-        vol.Optional(ATTR_ITEM): cv.string,
+        probatio.Required(ATTR_ENTITY_ID): cv.entity_id,
+        probatio.Optional(ATTR_ITEM): cv.string,
     }
 )
 
-SERVICE_SKIP_SCHEMA = vol.Schema(
+SERVICE_SKIP_SCHEMA = probatio.Schema(
     {
-        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-        vol.Optional(ATTR_ITEM): cv.string,
-        vol.Optional(ATTR_UNTIL): cv.datetime,
+        probatio.Required(ATTR_ENTITY_ID): cv.entity_id,
+        probatio.Optional(ATTR_ITEM): cv.string,
+        probatio.Optional(ATTR_UNTIL): cv.datetime,
     }
 )
 
-SERVICE_GET_ITEMS_SCHEMA = vol.Schema(
+SERVICE_GET_ITEMS_SCHEMA = probatio.Schema(
     {
-        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-        vol.Optional(ATTR_STATUS): vol.In([s.value for s in ChoreStatus]),
+        probatio.Required(ATTR_ENTITY_ID): cv.entity_id,
+        probatio.Optional(ATTR_STATUS): probatio.In([s.value for s in ChoreStatus]),
     }
 )
 
-SERVICE_HIDE_COMPLETED_SCHEMA = vol.Schema(
+SERVICE_HIDE_COMPLETED_SCHEMA = probatio.Schema(
     {
-        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-        vol.Optional(ATTR_BEFORE): cv.datetime,
-        vol.Optional(ATTR_KEEP_FOR): dict,
+        probatio.Required(ATTR_ENTITY_ID): cv.entity_id,
+        probatio.Optional(ATTR_BEFORE): cv.datetime,
+        probatio.Optional(ATTR_KEEP_FOR): dict,
     }
 )
 

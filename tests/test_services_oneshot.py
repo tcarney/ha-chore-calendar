@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.chore_calendar.const import (
     CONF_LIST_NAME,
@@ -105,7 +105,7 @@ async def test_create_oneshot_with_naive_due_datetime_coerces_to_local(hass, con
         {
             "entity_id": entity_id,
             "chore_name": "Naive Due",
-            # No timezone suffix — voluptuous parses this as a naive datetime.
+            # No timezone suffix — probatio parses this as a naive datetime.
             "oneshot": {"due_datetime": "2026-04-26T10:00:00"},
         },
         blocking=True,

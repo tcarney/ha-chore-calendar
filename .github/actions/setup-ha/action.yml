@@ -30,7 +30,6 @@ runs:
         key: ha-venv-${{ runner.os }}-py314-ha${{ steps.ha_version.outputs.HA_VERSION }}-${{ hashFiles('**/requirements*.txt') }}
         restore-keys: |
           ha-venv-${{ runner.os }}-py314-ha${{ steps.ha_version.outputs.HA_VERSION }}-
-          ha-venv-${{ runner.os }}-py314-
 
     - name: Install requirements
       shell: bash

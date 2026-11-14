@@ -20,12 +20,15 @@ A Home Assistant custom integration for managing recurring household chores. Eac
 
 ### Install
 
-**Prerequisites:** [HACS](https://hacs.xyz/) must be installed.
+**Requires** Home Assistant 2026.11 or later. Chore Calendar installs from the built-in Marketplace.
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tcarney&repository=ha-chore-calendar&category=integration)
 
-1. Click "Download" to install
-2. **Restart Home Assistant**
+1. Click the button above, or go to **Settings** > **Marketplace** and search for **"Chore Calendar"**
+2. Click "Download" to install
+3. **Restart Home Assistant**
+
+On Home Assistant 2026.4 to 2026.10, install version 0.14.0 through HACS.
 
 <details>
 <summary>Manual Installation</summary>

@@ -66,14 +66,8 @@ async def _async_register_card_resource(hass: HomeAssistant, resource_url: str) 
     ``add_extra_js_url`` when the Lovelace storage collection is unavailable
     (e.g. YAML-managed dashboards or ``lovelace`` not yet loaded).
     """
-    from homeassistant.components.lovelace.const import (  # noqa: PLC0415 - deferred to avoid hard dep on lovelace
-        CONF_RESOURCE_TYPE_WS,
-        DOMAIN as LL_DOMAIN,
-    )
-    from homeassistant.components.lovelace.resources import (  # noqa: PLC0415 - deferred to avoid hard dep on lovelace
-        ResourceStorageCollection,
-        ResourceYAMLCollection,
-    )
+    from homeassistant.components.lovelace.const import CONF_RESOURCE_TYPE_WS, DOMAIN as LL_DOMAIN  # noqa: PLC0415 - deferred to avoid hard dep on lovelace
+    from homeassistant.components.lovelace.resources import ResourceStorageCollection, ResourceYAMLCollection  # noqa: PLC0415 - deferred to avoid hard dep on lovelace
 
     lovelace_data = hass.data.get(LL_DOMAIN)
     if not lovelace_data or not lovelace_data.resources:
