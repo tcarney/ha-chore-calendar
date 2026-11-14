@@ -261,9 +261,14 @@ export class ChoreCalendarCardEditor extends LitElement {
       margin: 4px 0 16px;
     }
 
-    .toggles ha-formfield {
-      width: 100%;
+    /* HA 2026.11 removed ha-formfield, so each toggle row is a plain label. */
+    .toggles label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
       min-height: 40px;
+      cursor: pointer;
     }
   `;
 
@@ -368,12 +373,13 @@ export class ChoreCalendarCardEditor extends LitElement {
       <div class="toggles">
         ${TOGGLE_KEYS.map(
           (key) => html`
-            <ha-formfield alignEnd spaceBetween .label=${localize(this.hass, EDITOR_LABEL_KEYS[key])}>
+            <label>
+              <span>${localize(this.hass, EDITOR_LABEL_KEYS[key])}</span>
               <ha-switch
                 .checked=${!!this._config[key]}
                 @change=${(ev: Event) => this._toggleChanged(key, ev)}
               ></ha-switch>
-            </ha-formfield>
+            </label>
           `,
         )}
       </div>

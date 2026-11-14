@@ -688,12 +688,13 @@ function e(e,t,i,o){var n,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
 
       <div class="toggles">
         ${Ut.map(e=>F`
-            <ha-formfield alignEnd spaceBetween .label=${ve(this.hass,Lt[e])}>
+            <label>
+              <span>${ve(this.hass,Lt[e])}</span>
               <ha-switch
                 .checked=${!!this._config[e]}
                 @change=${t=>this._toggleChanged(e,t)}
               ></ha-switch>
-            </ha-formfield>
+            </label>
           `)}
       </div>
 
@@ -871,9 +872,14 @@ function e(e,t,i,o){var n,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
       margin: 4px 0 16px;
     }
 
-    .toggles ha-formfield {
-      width: 100%;
+    /* HA 2026.11 removed ha-formfield, so each toggle row is a plain label. */
+    .toggles label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
       min-height: 40px;
+      cursor: pointer;
     }
   `,e([he({attribute:!1})],jt.prototype,"hass",void 0),e([pe()],jt.prototype,"_config",void 0),e([pe()],jt.prototype,"_expandedEntities",void 0),ue("chore-calendar-card-editor",jt);console.info("%c CHORE-CALENDAR-CARD %c v0.14.0 ","color: white; background: #4CAF50; font-weight: 700;","color: #4CAF50; background: white; font-weight: 700;");const Ft=["overdue","due","pending","completed"];class Bt extends re{constructor(){super(...arguments),this._items=[],this._loading=!0,this._dialogOpen=!1,this._editOpen=!1,this._completeOpen=!1,this._skipOpen=!1,this._showAll=!1,this._hiddenCount=0,this._allItems=[],this._entityConfigs=[],this._connected=!1}static getConfigElement(){return document.createElement("chore-calendar-card-editor")}static getStubConfig(){return{entities:[]}}setConfig(e){if(!e.entities||0===e.entities.length)return this._configError="card.error.no_entity",void(this._config=e);this._configError=void 0,this._config=e,this._entityConfigs=e.entities.map((e,t)=>function(e,t){const i="string"==typeof e?{entity:e}:e;return{...i,color:i.color??ke[t%ke.length]}}(e,t)),this._allItems.length&&this._applyFilters(),e.hide_card_background?this.setAttribute("no-card-background",""):this.removeAttribute("no-card-background")}getCardSize(){return Math.max(3,this._items.length+1)}connectedCallback(){super.connectedCallback(),this._connected=!0,this._startPolling(),this._subscribeEvents()}disconnectedCallback(){super.disconnectedCallback(),this._connected=!1,this._stopPolling(),this._unsubscribeEvents()}updated(e){e.has("hass")&&this.hass&&this._loading&&this._refreshData()}async _refreshData(){if(this.hass&&this._config)try{const e=[],t=this._entityConfigs.map(async t=>{const i=await this.hass.callWS({type:"call_service",domain:"chore_calendar",service:"get_items",service_data:{entity_id:t.entity},return_response:!0}),o=i.response?.items??[],n=i.response?.completed_cleared_at?new Date(i.response.completed_cleared_at).getTime():null,s=t.exclude??[];for(const i of o)s.includes(i.status)||null!==n&&"completed"===i.status&&i.last_completed&&new Date(i.last_completed).getTime()<n||e.push({...i,source_entity:t.entity,source_color:t.color})});await Promise.all(t),this._allItems=e,this._applyFilters()}catch(e){console.error("chore-calendar-card: failed to fetch items",e)}finally{this._loading=!1}}get _showAllActive(){return this._showAll&&!this._config.hide_show_all}_applyFilters(){const e=Oe(this._config.due_date_period),t=Oe(this._config.completed_period),i=function(e,t,i,o){if(null===t&&null===i)return e;const n=o.getTime();return e.filter(e=>{if(null!==i&&"completed"===e.status&&e.last_completed&&n-new Date(e.last_completed).getTime()>i)return!1;if(null!==t&&"pending"===e.status){if(!e.next_due)return!1;if(new Date(e.next_due).getTime()-n>t)return!1}return!0})}(this._allItems,e,t,new Date),o=this._config.hide_completed?i.filter(e=>"completed"!==e.status).length:i.length;var n;this._hiddenCount=this._allItems.length-o,this._items=(n=this._showAllActive?this._allItems:i,[...n].sort((e,t)=>{const i=Ae[e.status]-Ae[t.status];if(0!==i)return i;if("completed"===e.status){const i=e.last_completed?new Date(e.last_completed).getTime():0;return(t.last_completed?new Date(t.last_completed).getTime():0)-i}return(e.next_due?new Date(e.next_due).getTime():1/0)-(t.next_due?new Date(t.next_due).getTime():1/0)}))}_toggleShowAll(){this._showAll=!this._showAll,this._applyFilters()}_startPolling(){this._stopPolling();const e=1e3*(this._config?.update_interval??60);this._refreshTimer=setInterval(()=>{this._connected&&this._refreshData()},e)}_stopPolling(){void 0!==this._refreshTimer&&(clearInterval(this._refreshTimer),this._refreshTimer=void 0)}async _subscribeEvents(){if(this.hass?.connection)try{const e=new Set(this._entityConfigs.map(e=>e.entity));this._eventUnsub=await this.hass.connection.subscribeEvents(t=>{t.data?.entity_id&&e.has(t.data.entity_id)&&this._refreshData()},"state_changed")}catch{}}_unsubscribeEvents(){this._eventUnsub?.(),this._eventUnsub=void 0}render(){if(!this._config)return W;if(this._configError)return F`
         <ha-card>
@@ -1078,4 +1084,4 @@ function e(e,t,i,o){var n,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
       --mdc-icon-size: 18px;
     }
 
-`,e([he({attribute:!1})],Bt.prototype,"hass",void 0),e([pe()],Bt.prototype,"_config",void 0),e([pe()],Bt.prototype,"_configError",void 0),e([pe()],Bt.prototype,"_items",void 0),e([pe()],Bt.prototype,"_loading",void 0),e([pe()],Bt.prototype,"_dialogItem",void 0),e([pe()],Bt.prototype,"_dialogOpen",void 0),e([pe()],Bt.prototype,"_editItem",void 0),e([pe()],Bt.prototype,"_editOpen",void 0),e([pe()],Bt.prototype,"_completeItem",void 0),e([pe()],Bt.prototype,"_completeOpen",void 0),e([pe()],Bt.prototype,"_skipItem",void 0),e([pe()],Bt.prototype,"_skipOpen",void 0),e([pe()],Bt.prototype,"_showAll",void 0),e([pe()],Bt.prototype,"_hiddenCount",void 0),ue("chore-calendar-card",Bt),window.customCards=window.customCards||[],window.customCards.push({type:"chore-calendar-card",name:"Chore Calendar",description:"Timeline view of chores from Chore Calendar lists",preview:!0});export{Bt as ChoreCalendarCard};
+`,e([he({attribute:!1})],Bt.prototype,"hass",void 0),e([pe()],Bt.prototype,"_config",void 0),e([pe()],Bt.prototype,"_configError",void 0),e([pe()],Bt.prototype,"_items",void 0),e([pe()],Bt.prototype,"_loading",void 0),e([pe()],Bt.prototype,"_dialogItem",void 0),e([pe()],Bt.prototype,"_dialogOpen",void 0),e([pe()],Bt.prototype,"_editItem",void 0),e([pe()],Bt.prototype,"_editOpen",void 0),e([pe()],Bt.prototype,"_completeItem",void 0),e([pe()],Bt.prototype,"_completeOpen",void 0),e([pe()],Bt.prototype,"_skipItem",void 0),e([pe()],Bt.prototype,"_skipOpen",void 0),e([pe()],Bt.prototype,"_showAll",void 0),e([pe()],Bt.prototype,"_hiddenCount",void 0),ue("chore-calendar-card",Bt),window.customCards=window.customCards||[],window.customCards.push({type:"chore-calendar-card",name:"Chore Calendar",description:"Timeline view of chores from Chore Calendar lists",preview:!0,getEntitySuggestion:function(e,t){const i=e.entities?.[t];if("chore_calendar"!==i?.platform)return null;const o=t.startsWith("calendar.")?t:Object.values(e.entities??{}).find(e=>"chore_calendar"===e.platform&&e.device_id===i.device_id&&e.entity_id.startsWith("calendar."))?.entity_id;return o?{config:{type:"custom:chore-calendar-card",entities:[o]}}:null}});export{Bt as ChoreCalendarCard};

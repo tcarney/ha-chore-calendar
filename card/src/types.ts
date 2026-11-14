@@ -135,6 +135,8 @@ export interface HomeAssistant {
   callWS<T>(msg: Record<string, unknown>): Promise<T>;
   connection: HassConnection;
   states: Record<string, HassEntity>;
+  /** Entity registry display entries, keyed by entity_id. */
+  entities?: Record<string, { entity_id: string; platform: string; device_id?: string }>;
   language: string;
   /** Frontend locale data — the selected language plus date/number formatting;
    *  the object is also passed to HA date/time inputs. */

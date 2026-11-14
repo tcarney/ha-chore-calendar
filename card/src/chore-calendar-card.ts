@@ -13,6 +13,7 @@ import type {
 import {
   applyPeriodFilters,
   durationToMs,
+  entitySuggestion,
   groupByStatus,
   resolveEntityConfig,
   sortChores,
@@ -595,6 +596,7 @@ interface CustomCardEntry {
   name: string;
   description: string;
   preview?: boolean;
+  getEntitySuggestion?: typeof entitySuggestion;
 }
 
 declare global {
@@ -614,4 +616,5 @@ window.customCards.push({
   name: "Chore Calendar",
   description: "Timeline view of chores from Chore Calendar lists",
   preview: true,
+  getEntitySuggestion: entitySuggestion,
 });
