@@ -2,6 +2,25 @@
 
 # Changelog
 
+## [1.0.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.14.0...v1.0.0) (2026-11-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove deprecated keep_skip field from complete_item
+* require Home Assistant 2026.11 and prepare for the Marketplace
+
+### Features
+
+* **card:** suggest the card for chore entities and drop ha-formfield ([5c63f40](https://github.com/tcarney/ha-chore-calendar/commit/5c63f40b874005ef81b4179c2aa5da3eab870415))
+* remove deprecated keep_skip field from complete_item ([5c63f40](https://github.com/tcarney/ha-chore-calendar/commit/5c63f40b874005ef81b4179c2aa5da3eab870415))
+* require Home Assistant 2026.11 and prepare for the Marketplace ([5c63f40](https://github.com/tcarney/ha-chore-calendar/commit/5c63f40b874005ef81b4179c2aa5da3eab870415))
+
+
+### Bug Fixes
+
+* **card:** toggle switches from label text and use the Marketplace my-link ([5c63f40](https://github.com/tcarney/ha-chore-calendar/commit/5c63f40b874005ef81b4179c2aa5da3eab870415))
+
 ## [0.14.0](https://github.com/tcarney/ha-chore-calendar/compare/v0.13.0...v0.14.0) (2026-11-14)
 
 
