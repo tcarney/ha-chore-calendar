@@ -453,9 +453,6 @@ complete_item:
     completed_at:
       selector:
         datetime:
-    keep_skip:
-      selector:
-        boolean:
 
 skip_item:
   fields:

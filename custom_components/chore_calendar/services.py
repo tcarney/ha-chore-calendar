@@ -59,7 +59,6 @@ ATTR_COMPLETED_BY = "completed_by"
 ATTR_DESCRIPTION = "description"
 ATTR_ENTITY_ID = "entity_id"
 ATTR_KEEP_FOR = "keep_for"
-ATTR_KEEP_SKIP = "keep_skip"
 ATTR_STATUS = "status"
 ATTR_UNTIL = "until"
 
@@ -115,7 +114,6 @@ SERVICE_COMPLETE_SCHEMA = probatio.Schema(
         probatio.Optional(ATTR_ITEM): cv.string,
         probatio.Optional(ATTR_COMPLETED_BY): cv.entity_id,
         probatio.Optional(ATTR_COMPLETED_AT): cv.datetime,
-        probatio.Optional(ATTR_KEEP_SKIP): cv.boolean,
     }
 )
 
@@ -523,16 +521,6 @@ async def _async_handle_complete(call: ServiceCall) -> None:
     """Handle complete_item service call."""
     store, coordinator = _resolve_entry_data(call.hass, call.data[ATTR_ENTITY_ID])
     uid = _resolve_item(call.hass, call.data[ATTR_ENTITY_ID], call.data.get(ATTR_ITEM), store)
-
-    if ATTR_KEEP_SKIP in call.data:
-        # Deprecated in 0.13.0: whether a skip survives a completion is now
-        # decided from the completion time (see BaseChore.apply_completion).
-        # The field is accepted and ignored until it is removed in 1.0.0.
-        LOGGER.warning(
-            "chore_calendar.complete_item: 'keep_skip' is deprecated and has no effect; "
-            "an active skip is kept automatically when it falls after the natural next due. "
-            "The field will be removed in 1.0.0"
-        )
 
     await async_complete_chore(
         store,

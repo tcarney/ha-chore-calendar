@@ -296,7 +296,7 @@ data:
 
 The service records the completion without checking the chore's window. Completing an interval chore early resets its clock from the new `last_completed`. Completing a scheduled chore before its pending window opens records the completion in history but does not satisfy the upcoming occurrence, which still comes due on schedule.
 
-An active [skip](#skip-a-chore) is kept when its date is later than the next due the completion produces, and cleared otherwise. Uncompleting restores the skip. The `keep_skip` field is deprecated, has no effect, and will be removed in 1.0.0.
+An active [skip](#skip-a-chore) is kept when its date is later than the next due the completion produces, and cleared otherwise. Uncompleting restores the skip.
 
 ### Skip a Chore
 

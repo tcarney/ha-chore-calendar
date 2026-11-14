@@ -1895,29 +1895,17 @@ async def test_complete_item_keeps_skip_after_next_due(hass, config_entry):
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_complete_item_keep_skip_is_deprecated_noop(hass, config_entry, caplog):
-    """keep_skip is still accepted, logs a deprecation warning, and changes nothing."""
+async def test_complete_item_rejects_keep_skip(hass, config_entry):
+    """keep_skip was removed in 1.0.0 and is rejected by the schema."""
     entity_id = await _setup_with_chore(hass, config_entry)
 
-    with patch("homeassistant.util.dt.now", return_value=FROZEN_NOW):
-        await hass.services.async_call(
-            DOMAIN,
-            "skip_item",
-            {"entity_id": entity_id, "item": TEST_UID, "until": "2026-04-01T08:00:00-05:00"},
-            blocking=True,
-        )
+    with pytest.raises(probatio.Invalid):
         await hass.services.async_call(
             DOMAIN,
             "complete_item",
             {"entity_id": entity_id, "item": TEST_UID, "keep_skip": True},
             blocking=True,
         )
-
-    chore = config_entry.runtime_data.store.get_chore(TEST_UID)
-    # The skip is decided by the completion time, so keep_skip cannot hold it.
-    assert chore.skipped_until is None
-    assert "'keep_skip' is deprecated" in caplog.text
-    assert "1.0.0" in caplog.text
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
