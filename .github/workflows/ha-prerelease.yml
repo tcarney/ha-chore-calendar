@@ -1,0 +1,87 @@
+name: ha-prerelease
+
+# Runs the test suite and type check against the newest Home Assistant
+# release, including betas and release candidates, so breaking changes
+# surface before they reach users. The hacs.json minimum is covered by the
+# test workflow, and hassfest already runs nightly against HA dev in the
+# validate workflow. A failed scheduled run emails the repository owner.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ha-version:
+        description: "HA version to test (blank: newest available, including betas)"
+        required: false
+        default: ""
+  schedule:
+    # HA betas ship on the last Wednesday of the month, with patch betas
+    # through the following week, so daily catches each one within a day.
+    - cron: "30 6 * * *"
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    runs-on: "ubuntu-latest"
+    outputs:
+      ha-version: ${{ steps.resolve.outputs.ha-version }}
+    steps:
+      # Pick the newest version that exists for both homeassistant and
+      # pytest-homeassistant, because the plugin skips some early betas.
+      - name: Resolve Home Assistant version
+        id: resolve
+        env:
+          REQUESTED: ${{ inputs.ha-version }}
+        run: |
+          if [[ -n "${REQUESTED}" ]]; then
+            version="${REQUESTED}"
+          else
+            version=$(python3 - <<'PY'
+          import json
+          import re
+          import urllib.request
+
+          # HA versions are YYYY.M.PATCH with an optional bN suffix. A final
+          # release sorts after its betas.
+          def key(v):
+              m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:b(\d+))?", v)
+              if not m:
+                  return (0,)
+              y, mo, p, b = m.groups()
+              return (int(y), int(mo), int(p), int(b) if b else 10**6)
+
+          def releases(pkg):
+              with urllib.request.urlopen(f"https://pypi.org/pypi/{pkg}/json") as resp:
+                  data = json.load(resp)
+              return {v for v, files in data["releases"].items() if files and not all(f["yanked"] for f in files)}
+
+          common = releases("homeassistant") & releases("pytest-homeassistant")
+          print(max(common, key=key))
+          PY
+            )
+          fi
+          echo "ha-version=${version}" >> "$GITHUB_OUTPUT"
+          echo "### Testing against Home Assistant ${version}" >> "$GITHUB_STEP_SUMMARY"
+
+  tests:
+    needs: resolve
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Home Assistant environment
+        uses: ./.github/actions/setup-ha
+        with:
+          ha-version: ${{ needs.resolve.outputs.ha-version }}
+
+      - name: Run tests
+        run: script/test
+
+      - name: Type check
+        if: ${{ !cancelled() }}
+        run: script/type-check
