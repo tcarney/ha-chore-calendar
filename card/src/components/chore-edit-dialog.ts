@@ -639,7 +639,7 @@ export class ChoreEditDialog extends LitElement {
     }
 
     // Season / month-of-year window carries through: the form has no control
-    // for it, so preserve whatever was stored (see issues/card-crud-ui.md).
+    // for it, so preserve whatever was stored.
     if (snapshot("bymonth").length) sel.bymonth = snapshot("bymonth");
 
     this._applyLifecycle(sel, d);

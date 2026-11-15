@@ -1,6 +1,12 @@
 name: "Set up Home Assistant environment"
 description: "Install Python + uv and bootstrap the Home Assistant venv with caching. The repository must already be checked out."
 
+inputs:
+  ha-version:
+    description: "Home Assistant version to install. Defaults to the hacs.json minimum."
+    required: false
+    default: ""
+
 runs:
   using: "composite"
   steps:
@@ -17,8 +23,11 @@ runs:
     - name: Get Home Assistant version
       id: ha_version
       shell: bash
+      env:
+        INPUT_HA_VERSION: ${{ inputs.ha-version }}
       run: |
-        HA_VERSION=$(grep '"homeassistant"' hacs.json | head -1 | sed 's/.*"homeassistant"\s*:\s*"\([^"]*\)".*/\1/')
+        HA_VERSION="${INPUT_HA_VERSION}"
+        [[ -n "$HA_VERSION" ]] || HA_VERSION=$(grep '"homeassistant"' hacs.json | head -1 | sed 's/.*"homeassistant"\s*:\s*"\([^"]*\)".*/\1/')
         echo "HA_VERSION=${HA_VERSION}" >> $GITHUB_OUTPUT
         echo "Home Assistant version: ${HA_VERSION}"
 
@@ -33,4 +42,6 @@ runs:
 
     - name: Install requirements
       shell: bash
+      env:
+        HA_VERSION: ${{ steps.ha_version.outputs.HA_VERSION }}
       run: script/setup/bootstrap
