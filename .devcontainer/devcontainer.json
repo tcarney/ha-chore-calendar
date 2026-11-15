@@ -17,7 +17,7 @@
     "APT_UPDATE": "0"
   },
   "features": {
-    "ghcr.io/devcontainers/features/node:1": {
+    "ghcr.io/devcontainers/features/node:2": {
       // Keep in sync with card/.nvmrc (the CI Node version).
       "version": "24"
     },
